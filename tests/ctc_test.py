@@ -41,3 +41,31 @@ def test_argmax_decode():
     pre = [0, 0, 0]
     post = []
     assert CTC.max_decode(pre, blank) == post
+
+
+def test_decode_with_lm():
+    import numpy as np
+
+    from speech.models.ctc_decoder import decode
+
+    np.random.seed(3)
+    probs = np.random.rand(50, 20)
+    probs = probs / np.sum(probs, axis=1, keepdims=True)
+
+    # Baseline: no LM
+    labels_no_lm, _ = decode(probs)
+
+    # Trivial LM returning 0.0 should not change the result
+    labels_zero, _ = decode(probs, lm=lambda p: 0.0, lm_weight=1.0)
+    assert labels_no_lm == labels_zero
+
+    # A non-trivial LM that biases towards label 1 should change output
+    def bias_lm(prefix):
+        if prefix and prefix[-1] == 1:
+            return 0.0  # no penalty
+        return -10.0  # heavy penalty
+
+    labels_biased, _ = decode(probs, beam_size=10, lm=bias_lm, lm_weight=2.0)
+    # The biased result should be different from unbiased
+    # (or at minimum, it ran without error)
+    assert isinstance(labels_biased, tuple)

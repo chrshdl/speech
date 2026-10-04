@@ -35,7 +35,7 @@ def logsumexp(*args):
                        for a in args))
     return a_max + lsp
 
-def decode(probs, beam_size=10, blank=0):
+def decode(probs, beam_size=10, blank=0, lm=None, lm_weight=0.0):
     """
     Performs inference for the given output probabilities.
 
@@ -92,7 +92,13 @@ def decode(probs, beam_size=10, blank=0):
                   # algorithm merges characters not separated by a blank.
                   n_p_nb = logsumexp(n_p_nb, p_b + p)
 
-                # *NB* this would be a good place to include an LM score.
+                # *NB* this would be a good place to include a LM term.
+                # *NB* we could hold the LM state in the beam,
+                #      but we choose to simply compute the LM score
+                #      of the prefix so far.
+                if lm is not None:
+                    lm_prob = lm(n_prefix)
+                    n_p_nb = n_p_nb + lm_weight * lm_prob
                 next_beam[n_prefix] = (n_p_b, n_p_nb)
 
                 # If s is repeated at the end we also update the unchanged
