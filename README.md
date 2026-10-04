@@ -62,6 +62,18 @@ To encode audio as it arrives, call `model.encode_stream` with each chunk of
 input frames and the state it returned on the previous call. Pass `final=True`
 with the last chunk. The streamed outputs match `model.encode` on the full input.
 
+To transcribe live from the microphone with a trained CTC model run
+
+```
+uv run stream.py <path_to_model> --mic
+```
+
+The transcript grows as you speak, and a pause starts a new line. Stop with
+Ctrl+C. Use `--mic-device` to pick a microphone from `uv run python -m
+sounddevice`. Given audio files or a dataset json instead of `--mic`,
+`stream.py` feeds the audio chunk by chunk and checks the result against
+decoding the whole file at once.
+
 [Deep Speech 2]: https://arxiv.org/abs/1512.02595
 
 ## Examples

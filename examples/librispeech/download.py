@@ -1,38 +1,37 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import argparse
-import os
 import tarfile
 import urllib.request
 
 EXT = ".tar.gz"
 FILES = ["raw-metadata", "train-clean-100", "dev-clean"]
-BASE_URL = "http://www.openslr.org/resources/12/"
+BASE_URL = "https://www.openslr.org/resources/12/"
+
 
 def download_and_extract(in_file, out_dir):
-    in_file = in_file + EXT
-    file_url = os.path.join(BASE_URL, in_file)
-    out_file = os.path.join(out_dir, in_file)
-
-    # Download and extract zip file.
-    urllib.request.urlretrieve(file_url, filename=out_file)
-    with tarfile.open(out_file) as tf:
-        tf.extractall(path=out_dir)
-
-    # Remove zip file after use
-    os.remove(out_file)
+    # Extract while downloading so the archive is never stored.
+    file_url = BASE_URL + in_file + EXT
+    with (
+        urllib.request.urlopen(file_url) as response,
+        tarfile.open(fileobj=response, mode="r|gz") as tf,
+    ):
+        tf.extractall(path=out_dir, filter="data")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-            description="Download librispeech dataset.")
+    parser = argparse.ArgumentParser(description="Download librispeech dataset.")
 
-    parser.add_argument("output_directory",
-        help="The dataset is saved in <output_directory>/LibriSpeech.")
+    parser.add_argument(
+        "output_directory",
+        help="The dataset is saved in <output_directory>/LibriSpeech.",
+    )
+    parser.add_argument(
+        "--sets",
+        nargs="+",
+        default=FILES,
+        help="The subsets to download, for example dev-clean test-clean.",
+    )
     args = parser.parse_args()
 
-    for f in FILES:
-        print("Downloading {}".format(f))
+    for f in args.sets:
+        print(f"Downloading {f}")
         download_and_extract(f, args.output_directory)

@@ -1,22 +1,14 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import argparse
 import glob
 import json
 import os
-import tqdm
-import wave
 
-from speech.utils import data_helpers
+import tqdm
+
 from speech.utils import wave
 
-SETS = {
-    "train" : ["train-clean-100"],
-    "dev" : ["dev-clean"],
-    "test" : []
-    }
+SETS = ["train-clean-100", "dev-clean"]
+
 
 def load_transcripts(path):
     pattern = os.path.join(path, "*/*/*.trans.txt")
@@ -29,47 +21,45 @@ def load_transcripts(path):
             data.update(lines)
     return data
 
+
 def path_from_key(key, prefix, ext):
     dirs = key.split("-")
     dirs[-1] = key
     path = os.path.join(prefix, *dirs)
     return path + os.path.extsep + ext
 
-def convert_to_wav(path):
-    data_helpers.convert_full_set(path, "*/*/*/*.flac")
 
 def clean_text(text):
     return text.strip().lower()
+
 
 def build_json(path):
     transcripts = load_transcripts(path)
     dirname = os.path.dirname(path)
     basename = os.path.basename(path) + os.path.extsep + "json"
-    with open(os.path.join(dirname, basename), 'w') as fid:
+    with open(os.path.join(dirname, basename), "w") as fid:
         for k, t in tqdm.tqdm(transcripts.items()):
-            wave_file = path_from_key(k, path, ext="wav")
-            dur = wave.wav_duration(wave_file)
+            audio_file = path_from_key(k, path, ext="flac")
+            dur = wave.wav_duration(audio_file)
             t = clean_text(t)
-            datum = {'text' : t,
-                     'duration' : dur,
-                     'audio' : wave_file}
+            datum = {"text": t, "duration": dur, "audio": audio_file}
             json.dump(datum, fid)
             fid.write("\n")
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(
-            description="Preprocess librispeech dataset.")
 
-    parser.add_argument("output_directory",
-        help="The dataset is saved in <output_directory>/LibriSpeech.")
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Preprocess librispeech dataset.")
+
+    parser.add_argument(
+        "output_directory",
+        help="The dataset is saved in <output_directory>/LibriSpeech.",
+    )
+    parser.add_argument(
+        "--sets", nargs="+", default=SETS, help="The subsets to preprocess."
+    )
     args = parser.parse_args()
 
     path = os.path.join(args.output_directory, "LibriSpeech")
-
-    print("Converting files from flac to wave...")
-    convert_to_wav(path)
-    for dataset, dirs in SETS.items():
-        for d in dirs:
-            print("Preprocessing {}".format(d))
-            prefix = os.path.join(path, d)
-            build_json(prefix)
+    for d in args.sets:
+        print(f"Preprocessing {d}")
+        build_json(os.path.join(path, d))

@@ -29,6 +29,12 @@ def run_epoch(model, optimizer, train_ldr, writer, it, avg_loss):
         loss = loss.item()
 
         optimizer.step()
+
+        # The MPS allocator caches freed blocks for every batch shape it
+        # sees, which on a small machine pushes everything else to swap.
+        if model.device.type == "mps":
+            torch.mps.empty_cache()
+
         prev_end_t = end_t
         end_t = time.time()
         model_t += end_t - start_t
@@ -87,8 +93,9 @@ def run(config, device):
     preproc = loader.Preprocessor(
         data_cfg["train_set"], start_and_end=data_cfg["start_and_end"]
     )
-    train_ldr = loader.make_loader(data_cfg["train_set"], preproc, batch_size)
-    dev_ldr = loader.make_loader(data_cfg["dev_set"], preproc, batch_size)
+    workers = data_cfg.get("num_workers", 4)
+    train_ldr = loader.make_loader(data_cfg["train_set"], preproc, batch_size, workers)
+    dev_ldr = loader.make_loader(data_cfg["dev_set"], preproc, batch_size, workers)
 
     # Model
     model_class = getattr(models, model_cfg["class"])
@@ -96,9 +103,14 @@ def run(config, device):
     model.to(device)
 
     # Optimizer
-    optimizer = torch.optim.SGD(
-        model.parameters(), lr=opt_cfg["learning_rate"], momentum=opt_cfg["momentum"]
-    )
+    if opt_cfg.get("type", "sgd") == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=opt_cfg["learning_rate"])
+    else:
+        optimizer = torch.optim.SGD(
+            model.parameters(),
+            lr=opt_cfg["learning_rate"],
+            momentum=opt_cfg["momentum"],
+        )
 
     writer = SummaryWriter(config["save_path"])
     run_state = (0, 0)
@@ -146,7 +158,7 @@ if __name__ == "__main__":
     random.seed(config["seed"])
     torch.manual_seed(config["seed"])
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = speech.best_device()
 
     if device.type == "cuda" and args.deterministic:
         torch.backends.cudnn.enabled = False

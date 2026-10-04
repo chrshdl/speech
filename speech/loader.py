@@ -174,3 +174,32 @@ def log_specgram(audio, sample_rate, window_size=20, step_size=10, eps=1e-10):
 def read_data_json(data_json):
     with open(data_json) as fid:
         return [json.loads(l) for l in fid]
+
+
+class SpecgramStream:
+    def __init__(self, sample_rate, window_size=20, step_size=10):
+        """
+        Computes log_specgram incrementally as audio arrives. The frames
+        returned for consecutive chunks are the frames log_specgram
+        returns for the whole audio.
+        """
+        self.sample_rate = sample_rate
+        self.window_size = window_size
+        self.step_size = step_size
+        self.nperseg = int(window_size * sample_rate / 1e3)
+        self.hop = self.nperseg - int(step_size * sample_rate / 1e3)
+        self.buffer = None
+
+    def push(self, audio):
+        """
+        Adds the next chunk of audio samples and returns the new frames
+        with shape (time, freq).
+        """
+        if self.buffer is not None:
+            audio = np.concatenate([self.buffer, audio])
+        n = max((len(audio) - self.nperseg) // self.hop + 1, 0)
+        self.buffer = audio[n * self.hop :]
+        if n == 0:
+            return np.zeros((0, self.nperseg // 2 + 1), dtype=np.float32)
+        audio = audio[: (n - 1) * self.hop + self.nperseg]
+        return log_specgram(audio, self.sample_rate, self.window_size, self.step_size)

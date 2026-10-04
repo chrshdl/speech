@@ -21,7 +21,7 @@ def eval_loop(model, ldr):
 
 def run(model_path, dataset_json, batch_size=8, tag="best", out_file=None):
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = speech.best_device()
 
     model, preproc = speech.load(model_path, tag=tag)
     ldr = loader.make_loader(dataset_json, preproc, batch_size)

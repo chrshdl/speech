@@ -55,6 +55,16 @@ class CTC(model.Model):
         return [x, y, x_lens, y_lens]
 
     @torch.no_grad()
+    def stream(self, x, state=None, final=False):
+        """
+        Returns the output probabilities for the frames that the next
+        chunk of input frames makes available, and the state for the
+        next call. See Model.encode_stream.
+        """
+        x, state = self.encode_stream(x.to(self.device), state, final)
+        return F.softmax(self.fc(x), dim=2), state
+
+    @torch.no_grad()
     def infer(self, batch):
         x, _, x_lens, _ = self.collate(*batch)
         probs = self.forward_impl(x, x_lens, softmax=True)

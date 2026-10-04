@@ -91,6 +91,31 @@ def test_padding():
         assert model.infer(batch) == [model.infer(b)[0] for b in singles]
 
 
+def test_stream():
+    freq_dim = 40
+    vocab_size = 10
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    config = shared.model_config | {
+        "encoder": shared.model_config["encoder"] | {"lookahead": 2}
+    }
+    model = CTC(freq_dim, vocab_size, config)
+    shared.randomize_lookahead(model)
+    model.set_eval()
+    x = torch.randn(1, 60, freq_dim)
+
+    probs = []
+    state = None
+    for start in range(0, 60, 7):
+        p, state = model.stream(x[:, start : start + 7], state, final=start + 7 >= 60)
+        probs.append(p)
+
+    with torch.no_grad():
+        full = model.forward_impl(x, softmax=True)
+    assert torch.allclose(torch.cat(probs, dim=1), full, atol=1e-5)
+
+
 def test_argmax_decode():
     blank = 0
     pre = [1, 2, 2, 0, 0, 0, 2, 1]
