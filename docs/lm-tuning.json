@@ -1,0 +1,330 @@
+{
+ "beam_size": 16,
+ "results": [
+  {
+   "lm": false,
+   "cer": 0.30972360972360974,
+   "wer": 0.7797885683569252
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3226773226773227,
+   "wer": 0.7226303529833363
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.307992007992008,
+   "wer": 0.7154631786418204
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3014985014985015,
+   "wer": 0.7299767066833901
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.30316350316350316,
+   "wer": 0.7056083139222361
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.305994005994006,
+   "wer": 0.8021859881741623
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.297002997002997,
+   "wer": 0.7634832467299767
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3160506160506161,
+   "wer": 0.9206235441677119
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3074259074259074,
+   "wer": 0.8946425371797169
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3373959373959374,
+   "wer": 1.1162874036910948
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.2,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.328005328005328,
+   "wer": 1.0990861852714566
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.31814851814851813,
+   "wer": 0.7272890163053216
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3536796536796537,
+   "wer": 0.7943020963984949
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3045621045621046,
+   "wer": 0.6993370363734098
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.32317682317682317,
+   "wer": 0.7156423580003584
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3001998001998002,
+   "wer": 0.7272890163053216
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.30366300366300364,
+   "wer": 0.6982619602221825
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3076257076257076,
+   "wer": 0.8168786955742698
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.29856809856809857,
+   "wer": 0.7636624260885146
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.31928071928071927,
+   "wer": 0.9539509048557606
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.31175491175491177,
+   "wer": 0.9265364629994625
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.35407925407925406,
+   "wer": 0.8150869019888909
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.4015984015984016,
+   "wer": 0.9251030281311593
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3296370296370296,
+   "wer": 0.7466403870274144
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.38031968031968033,
+   "wer": 0.8609568177745923
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3103230103230103,
+   "wer": 0.6944991936928866
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3506826506826507,
+   "wer": 0.7778175954130084
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3016983016983017,
+   "wer": 0.6916323239562803
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3241758241758242,
+   "wer": 0.7133130263393657
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.3015984015984016,
+   "wer": 0.747357104461566
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.30606060606060603,
+   "wer": 0.7074001075076152
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.4077589077589078,
+   "wer": 0.9518007525533059
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.41285381285381284,
+   "wer": 0.9648808457265723
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.39823509823509823,
+   "wer": 0.9213402616018634
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.4101898101898102,
+   "wer": 0.9539509048557606
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.374991674991675,
+   "wer": 0.8571940512452966
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.40462870462870465,
+   "wer": 0.9319118437555993
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.348984348984349,
+   "wer": 0.785522307830138
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3966033966033966,
+   "wer": 0.9041390431822254
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.32384282384282387,
+   "wer": 0.7152839992832826
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.3798201798201798,
+   "wer": 0.8534312847160007
+  }
+ ]
+}

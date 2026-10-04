@@ -77,21 +77,122 @@ decoding the whole file at once.
 ### Language model
 
 CTC models can decode with a word bigram language model in the prefix beam
-search, both when streaming and in `eval.py`. Train one from the text of a
-dataset, then pass it with `--lm`:
+search, both when streaming and in `eval.py`:
 
 ```
-uv run python -m speech.models.word_lm examples/librispeech/data/train.json lm.json
-uv run stream.py <path_to_model> --mic --lm lm.json
-uv run eval.py <path_to_model> <path_to_data_json> --lm lm.json
+uv run stream.py <path_to_model> --mic --lm lm.npz
+uv run eval.py <path_to_model> <path_to_data_json> --lm lm.npz
 ```
 
 A word is scored once it is complete, as `lm_weight * log P(word | previous
-word) + word_bonus`. While streaming, the transcript can change as more audio
-arrives, and a pause scores the end of the sentence before starting a new
-line. The defaults for `--lm-weight`, `--word-bonus` and `--beam-size` were
-tuned on the LibriSpeech dev set, where the LM lowered the WER of the
-streaming CTC model from 0.80 to 0.74.
+word) + word_bonus`, plus `unk_penalty` for a word outside the LM's vocabulary.
+While streaming, the transcript can change as more audio arrives, and a pause
+scores the end of the sentence before starting a new line.
+
+#### Training the language model
+
+`speech.models.word_lm` trains a bigram LM with interpolated absolute
+discounting from dataset json files or from text files with one sentence per
+line, which may be gzipped. It counts in passes over the text and keeps only
+the counts in memory, so the corpus can be far larger than memory. `--dev`
+reports the perplexity on a dev set, the lower the better.
+
+The transcripts of the training data make a small LM in about a second:
+
+```
+uv run python -m speech.models.word_lm examples/librispeech/data/train.json \
+    examples/librispeech/models/lm-train.npz --dev examples/librispeech/data/dev.json
+```
+
+For a much larger LM, use the [LibriSpeech LM corpus], 800 million words of
+normalized text from 14,500 public domain books:
+
+```
+curl -L -o examples/librispeech/data/librispeech-lm-norm.txt.gz \
+    https://www.openslr.org/resources/11/librispeech-lm-norm.txt.gz
+uv run python -m speech.models.word_lm \
+    examples/librispeech/data/librispeech-lm-norm.txt.gz \
+    examples/librispeech/models/lm-librispeech.npz \
+    --max-vocab 200000 --min-count 3 --dev examples/librispeech/data/dev.json
+```
+
+On an 8 GB MacBook Air this took 30 minutes and 2 GB of memory, plus 3.5 GB of
+temporary disk space. It keeps the 200,000 most frequent words and the 9.9
+million word pairs seen at least three times, in a 171 MB file.
+
+| LM | Text | Vocabulary | Dev perplexity |
+|---|---|---|---|
+| Training transcripts | 106 thousand words | 11,917 | 584 |
+| LibriSpeech LM corpus | 844 million words | 200,003 | 270 |
+
+Best practices for the corpus:
+
+- **Normalize the text like the transcripts.** Use the same characters as the
+  acoustic model's labels, lowercase letters, the apostrophe and spaces here,
+  with numbers and abbreviations spelled out and no punctuation. The trainer
+  lowercases, but a word with other characters can never be decoded and only
+  takes probability from the others. The LibriSpeech LM corpus is already
+  normalized this way.
+- **One sentence per line.** The LM learns how sentences start and end from
+  the line breaks, and the decoder scores the end of a sentence at each pause.
+- **Keep evaluation text out.** Text from the dev or test sets, even other
+  sentences from the same books, which share names and phrasing, makes the
+  LM look better than it is. The LibriSpeech LM corpus leaves out the books
+  of its dev and test sets.
+- **Match the domain.** Text like what will be said matters more than its
+  amount. Nineteenth century books suit LibriSpeech but not someone talking
+  into a microphone, so add text from your domain when you have it.
+- **Bound the size.** `--max-vocab` keeps the most frequent words and
+  `--min-count` drops rare word pairs, to keep the model small and fast to
+  load. Check the effect on the dev perplexity and WER.
+- **Retune the decoder after any change** to the LM or the acoustic model,
+  as described next. The best weights depend on both.
+
+#### Tuning the weight, bonus and unknown-word penalty
+
+The LM weight α sets how much the LM counts against the acoustic model, the
+word bonus β offsets the LM's preference for fewer, longer words, and the
+unknown-word penalty decides how strongly to push misspelled or unknown words
+towards words the LM knows. `tune_lm.py` grid searches them on a dev set. It
+runs the acoustic model once and then decodes the dev set for each setting in
+parallel, ranking the settings by WER:
+
+```
+uv run tune_lm.py examples/librispeech/models/ctc_streaming \
+    examples/librispeech/data/dev.json \
+    --lm examples/librispeech/models/lm-librispeech.npz \
+    --weights 0.2,0.3,0.5,0.8 --bonuses 1,2,3,4,5 --unk-penalties 0,-3 \
+    --results docs/lm-tuning.json --plot docs/lm-tuning.png
+```
+
+It tunes with a beam of 16 to save time. A wider beam then adds a little on
+top. With `--from-results` it reports and plots saved results again.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/lm-tuning-dark.png">
+  <img alt="The dev WER over the LM weight and word bonus as a 3D surface and as a heatmap, with the best setting at weight 0.5 and bonus 4" src="docs/lm-tuning.png">
+</picture>
+
+The plot shows the dev WER over α and β at the best unknown-word penalty, with
+blue for settings better than decoding without the LM and red for worse ones.
+For the LibriSpeech LM and the streaming CTC model:
+
+- The good settings form a diagonal valley. A stronger LM needs a larger word
+  bonus, or it drops and merges words, and too large a bonus inserts words.
+- A negative unknown-word penalty only made things worse. The LM already
+  gives an unknown word the probability of `<unk>`, the share of all words
+  outside its vocabulary.
+- The best setting, α 0.5, β 4 and no unknown-word penalty, became the
+  default. With a beam of 32 it lowered the dev WER from 0.787 to 0.687 and
+  the CER from 0.315 to 0.298.
+- The small LM from the training transcripts did as well, WER 0.685, despite
+  its higher perplexity. At a CER of 0.3 most words have a wrong letter and
+  the LM can only choose among the spellings in the beam, so the acoustic
+  model limits the result. The larger LM should help more with a better
+  acoustic model and with speech outside LibriSpeech, as its vocabulary is
+  17 times larger.
+
+[LibriSpeech LM corpus]: https://www.openslr.org/11/
 
 [Deep Speech 2]: https://arxiv.org/abs/1512.02595
 

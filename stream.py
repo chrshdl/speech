@@ -13,7 +13,7 @@ from torch import nn
 import speech
 from speech import loader
 from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, BeamSearch, decode
-from speech.models.word_lm import LM_WEIGHT, WORD_BONUS, WordLM
+from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
 from speech.utils import wave
 
 # The window of the training features in milliseconds, see log_specgram.
@@ -258,7 +258,7 @@ def search_factory(args, preproc, blank):
     lm = None
     if args.lm is not None:
         lm = WordLM.load(args.lm).scorer(
-            preproc.char_to_int, args.lm_weight, args.word_bonus
+            preproc.char_to_int, args.lm_weight, args.word_bonus, args.unk_penalty
         )
     beam_size = args.beam_size or (BEAM_SIZE if lm is not None else 1)
     if lm is None and beam_size == 1:
@@ -358,6 +358,12 @@ if __name__ == "__main__":
         type=float,
         default=WORD_BONUS,
         help="Score added per word, which offsets the LM's preference for fewer words.",
+    )
+    decoding.add_argument(
+        "--unk-penalty",
+        type=float,
+        default=UNK_PENALTY,
+        help="Score added per word outside the LM's vocabulary.",
     )
     args = parser.parse_args()
     if args.mic == bool(args.inputs):

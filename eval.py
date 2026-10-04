@@ -7,7 +7,7 @@ import tqdm
 import speech
 from speech import loader
 from speech.models.ctc_decoder import BEAM_SIZE, PRUNE
-from speech.models.word_lm import LM_WEIGHT, WORD_BONUS, WordLM
+from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
 
 
 def eval_loop(model, ldr, decoder_args):
@@ -31,6 +31,7 @@ def run(
     lm_path=None,
     lm_weight=LM_WEIGHT,
     word_bonus=WORD_BONUS,
+    unk_penalty=UNK_PENALTY,
 ):
 
     device = speech.best_device()
@@ -45,7 +46,9 @@ def run(
     decoder_args = dict(decoder_args or {})
     if lm_path is not None:
         lm = WordLM.load(lm_path)
-        decoder_args["lm"] = lm.scorer(preproc.char_to_int, lm_weight, word_bonus)
+        decoder_args["lm"] = lm.scorer(
+            preproc.char_to_int, lm_weight, word_bonus, unk_penalty
+        )
 
     results = eval_loop(model, ldr, decoder_args)
     results = [(preproc.decode(label), preproc.decode(pred)) for label, pred in results]
@@ -98,6 +101,12 @@ if __name__ == "__main__":
         default=WORD_BONUS,
         help="Score added per word, which offsets the LM's preference for fewer words.",
     )
+    decoding.add_argument(
+        "--unk-penalty",
+        type=float,
+        default=UNK_PENALTY,
+        help="Score added per word outside the LM's vocabulary.",
+    )
     args = parser.parse_args()
 
     decoder_args = {}
@@ -113,4 +122,5 @@ if __name__ == "__main__":
         lm_path=args.lm,
         lm_weight=args.lm_weight,
         word_bonus=args.word_bonus,
+        unk_penalty=args.unk_penalty,
     )
