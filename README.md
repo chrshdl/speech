@@ -74,6 +74,25 @@ sounddevice`. Given audio files or a dataset json instead of `--mic`,
 `stream.py` feeds the audio chunk by chunk and checks the result against
 decoding the whole file at once.
 
+### Language model
+
+CTC models can decode with a word bigram language model in the prefix beam
+search, both when streaming and in `eval.py`. Train one from the text of a
+dataset, then pass it with `--lm`:
+
+```
+uv run python -m speech.models.word_lm examples/librispeech/data/train.json lm.json
+uv run stream.py <path_to_model> --mic --lm lm.json
+uv run eval.py <path_to_model> <path_to_data_json> --lm lm.json
+```
+
+A word is scored once it is complete, as `lm_weight * log P(word | previous
+word) + word_bonus`. While streaming, the transcript can change as more audio
+arrives, and a pause scores the end of the sentence before starting a new
+line. The defaults for `--lm-weight`, `--word-bonus` and `--beam-size` were
+tuned on the LibriSpeech dev set, where the LM lowered the WER of the
+streaming CTC model from 0.80 to 0.74.
+
 [Deep Speech 2]: https://arxiv.org/abs/1512.02595
 
 ## Examples

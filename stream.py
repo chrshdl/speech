@@ -12,6 +12,8 @@ from torch import nn
 
 import speech
 from speech import loader
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, BeamSearch, decode
+from speech.models.word_lm import LM_WEIGHT, WORD_BONUS, WordLM
 from speech.utils import wave
 
 # The window of the training features in milliseconds, see log_specgram.
@@ -19,16 +21,18 @@ WINDOW_MS = 20
 
 
 class Transcriber:
-    def __init__(self, model, preproc, sample_rate):
+    def __init__(self, model, preproc, sample_rate, search=None):
         """
-        Transcribes a stream of audio chunk by chunk with greedy CTC
-        decoding.
+        Transcribes a stream of audio chunk by chunk. Decodes greedily,
+        or with the given ctc_decoder.BeamSearch, which can include a
+        language model.
         """
         self.model = model
         self.preproc = preproc
+        self.search = search
         self.specgram = loader.SpecgramStream(sample_rate, window_size=WINDOW_MS)
         self.state = None
-        self.labels = []
+        self.greedy = []
         self.prev = model.blank
         # The number of blank frames since the last label.
         self.blanks = 0
@@ -47,17 +51,33 @@ class Transcriber:
         frames = (frames - self.preproc.mean) / self.preproc.std
         frames = torch.from_numpy(frames).float().unsqueeze(0)
         probs, self.state = self.model.stream(frames, self.state, final)
+        probs = probs[0].cpu().numpy()
 
-        # Greedy CTC decoding: merge repeats, then drop blanks.
-        for p in probs[0].argmax(dim=1).tolist():
+        # Greedy CTC decoding: merge repeats, then drop blanks. It also
+        # tracks pauses for the beam search.
+        for p in probs.argmax(axis=1).tolist():
             if p != self.prev and p != self.model.blank:
-                self.labels.append(p)
+                self.greedy.append(p)
             self.blanks = self.blanks + 1 if p == self.model.blank else 0
             self.prev = p
 
-    @property
-    def text(self):
-        return "".join(self.preproc.decode(self.labels))
+        if self.search is not None:
+            with np.errstate(divide="ignore"):
+                log_probs = np.log(probs)
+            for frame in log_probs.tolist():
+                self.search.step(frame)
+
+    def labels(self, final=False):
+        """
+        The best labels so far. With final, a language model also scores
+        the end of the utterance, such as its last word.
+        """
+        if self.search is None:
+            return self.greedy
+        return list(self.search.best(final)[0])
+
+    def text(self, final=False):
+        return "".join(self.preproc.decode(self.labels(final)))
 
     @property
     def pause_seconds(self):
@@ -66,8 +86,10 @@ class Transcriber:
 
     def clear(self):
         """Starts a new transcript, keeping the stream going."""
-        self.labels = []
+        self.greedy = []
         self.blanks = 0
+        if self.search is not None:
+            self.search.reset()
 
 
 def show(prefix, text, done=False):
@@ -106,11 +128,12 @@ def read_inputs(inputs, num):
     return examples
 
 
-def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime):
+def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime, new_search):
     """
     Feeds each audio file to the model in chunks of chunk_ms
     milliseconds, as a microphone would, and compares the result with
-    decoding the whole file at once.
+    decoding the whole file at once. new_search() returns the beam search
+    for a file, or None to decode greedily.
     """
     sample_rate = model_sample_rate(preproc)
     for audio_file, reference in read_inputs(inputs, num):
@@ -121,7 +144,8 @@ def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime):
                 f"{audio_file} is {file_rate} Hz, the model needs {sample_rate} Hz."
             )
 
-        transcriber = Transcriber(model, preproc, sample_rate)
+        search = new_search()
+        transcriber = Transcriber(model, preproc, sample_rate, search)
         chunk = int(sample_rate * chunk_ms / 1e3)
         compute = 0.0
         for start in range(0, len(audio), chunk):
@@ -131,7 +155,7 @@ def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime):
             compute += time.time() - begin
 
             seconds = min(start + chunk, len(audio)) / sample_rate
-            show(f"{seconds:6.2f}s | ", transcriber.text, done=final)
+            show(f"{seconds:6.2f}s | ", transcriber.text(final), done=final)
             if realtime:
                 time.sleep(max(chunk_ms / 1e3 - (time.time() - begin), 0))
 
@@ -139,23 +163,31 @@ def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime):
         features = preproc.preprocess(audio_file, "")[0]
         features = torch.from_numpy(features).unsqueeze(0)
         with torch.no_grad():
-            probs = model.forward_impl(features, softmax=True)
-        offline = model.max_decode(probs[0].argmax(dim=1).tolist(), model.blank)
+            probs = model.forward_impl(features, softmax=True)[0].numpy()
+        if search is None:
+            offline = model.max_decode(probs.argmax(axis=1).tolist(), model.blank)
+        else:
+            offline = decode(
+                probs, search.beam_size, search.blank, search.lm, search.prune
+            )[0]
 
         print(f"  offline:   {''.join(preproc.decode(offline))}")
         if reference is not None:
-            cer = speech.compute_cer([(list(reference), list(transcriber.text))])
+            result = [(list(reference), list(transcriber.text(final=True)))]
+            cer = speech.compute_cer(result)
+            wer = speech.compute_wer(result)
             print(f"  reference: {reference}")
-            print(f"  CER {cer:.3f}")
+            print(f"  CER {cer:.3f} WER {wer:.3f}")
         rtf = compute / (len(audio) / sample_rate)
         print(f"  compute per second of audio: {rtf:.3f}s")
         print()
 
 
-def listen(model, preproc, chunk_ms, mic_device, pause):
+def listen(model, preproc, chunk_ms, mic_device, pause, new_search):
     """
     Transcribes speech from the microphone as it arrives until Ctrl+C.
-    A pause of the given seconds ends the current line.
+    A pause of the given seconds ends the current line. new_search()
+    returns the beam search, or None to decode greedily.
     """
     sample_rate = model_sample_rate(preproc)
     chunks = queue.Queue()
@@ -165,7 +197,7 @@ def listen(model, preproc, chunk_ms, mic_device, pause):
             print(f"\n{status}", file=sys.stderr)
         chunks.put(indata[:, 0].copy())
 
-    transcriber = Transcriber(model, preproc, sample_rate)
+    transcriber = Transcriber(model, preproc, sample_rate, new_search())
     heard = 0
     silent = True
     stream = sounddevice.InputStream(
@@ -202,9 +234,9 @@ def listen(model, preproc, chunk_ms, mic_device, pause):
                     silent = False
 
                 # Pauses can decode to spaces at the ends of a line.
-                text = transcriber.text.strip()
+                text = transcriber.text().strip()
                 if text and transcriber.pause_seconds >= pause:
-                    show("> ", text, done=True)
+                    show("> ", transcriber.text(final=True).strip(), done=True)
                     transcriber.clear()
                 else:
                     show("> ", text)
@@ -214,20 +246,43 @@ def listen(model, preproc, chunk_ms, mic_device, pause):
     # Flush the frames held back for the lookahead, then finish the line,
     # or clear it if nothing was said.
     transcriber.push(np.zeros(0, dtype=np.int16), final=True)
-    text = transcriber.text.strip()
+    text = transcriber.text(final=True).strip()
     show("> " if text else "", text, done=True)
+
+
+def search_factory(args, preproc, blank):
+    """
+    Returns a function that creates the beam search the arguments ask
+    for, or returns None for greedy decoding.
+    """
+    lm = None
+    if args.lm is not None:
+        lm = WordLM.load(args.lm).scorer(
+            preproc.char_to_int, args.lm_weight, args.word_bonus
+        )
+    beam_size = args.beam_size or (BEAM_SIZE if lm is not None else 1)
+    if lm is None and beam_size == 1:
+        return lambda: None
+    return lambda: BeamSearch(blank, beam_size, lm, args.prune)
 
 
 def run(args):
     model, preproc = speech.load(args.model, tag=None if args.last else "best")
     model.to(args.device)
     model.set_eval()
+    new_search = search_factory(args, preproc, model.blank)
 
     if args.mic:
-        listen(model, preproc, args.chunk_ms, args.mic_device, args.pause)
+        listen(model, preproc, args.chunk_ms, args.mic_device, args.pause, new_search)
     else:
         transcribe_files(
-            model, preproc, args.inputs, args.num, args.chunk_ms, args.realtime
+            model,
+            preproc,
+            args.inputs,
+            args.num,
+            args.chunk_ms,
+            args.realtime,
+            new_search,
         )
 
 
@@ -278,6 +333,31 @@ if __name__ == "__main__":
         "--last",
         action="store_true",
         help="Last saved model instead of best on dev set.",
+    )
+    decoding = parser.add_argument_group("decoding")
+    decoding.add_argument(
+        "--lm", help="A word LM json file from speech.models.word_lm."
+    )
+    decoding.add_argument(
+        "--beam-size",
+        type=int,
+        help=f"Beam size for the prefix beam search, by default {BEAM_SIZE} with "
+        "an LM. Without an LM a beam size of 1 decodes greedily, the default.",
+    )
+    decoding.add_argument(
+        "--prune",
+        type=float,
+        default=PRUNE,
+        help="Skip labels with a lower log probability in a frame.",
+    )
+    decoding.add_argument(
+        "--lm-weight", type=float, default=LM_WEIGHT, help="Scales the LM scores."
+    )
+    decoding.add_argument(
+        "--word-bonus",
+        type=float,
+        default=WORD_BONUS,
+        help="Score added per word, which offsets the LM's preference for fewer words.",
     )
     args = parser.parse_args()
     if args.mic == bool(args.inputs):

@@ -1,4 +1,3 @@
-
 import math
 import os
 import tempfile
@@ -41,29 +40,43 @@ def test_scorer():
         "the dog sat on the log",
     ]
     lm = WordLM(sentences)
-
-    # Simulate a char_to_int mapping
-    chars = sorted(set(c for s in sentences for c in s))
+    chars = sorted({c for s in sentences for c in s})
     char_to_int = {c: i for i, c in enumerate(chars)}
+    scorer = lm.scorer(char_to_int, weight=0.5, word_bonus=2.0)
 
-    scorer = lm.scorer(char_to_int)
+    def run(text):
+        state, total = scorer.initial(), 0.0
+        for c in text:
+            state, score = scorer.extend(state, char_to_int[c])
+            total += score
+        return state, total
 
-    # Build a prefix for "the cat"
-    prefix = tuple(char_to_int[c] for c in "the cat")
-    score = scorer(prefix)
-    assert isinstance(score, float)
-    assert math.isfinite(score)
+    # Nothing is scored until a word is complete.
+    state, total = run("the ca")
+    expected = 0.5 * lm.log_prob("the", WordLM.SOS) + 2.0
+    assert math.isclose(total, expected)
+    assert state == ("the", "ca")
 
-    # Empty prefix should return 0.0
-    assert scorer(tuple()) == 0.0
+    # Extra spaces complete no word.
+    assert run(" the  ") == run("the ")
+
+    # The end scores the last word and the end of the sentence.
+    state, total = run("the cat")
+    end = scorer.finish(state)
+    expected = (
+        0.5 * lm.log_prob("cat", "the") + 2.0 + 0.5 * lm.log_prob(WordLM.EOS, "cat")
+    )
+    assert math.isclose(end, expected)
+
+    # The LM prefers what it has seen.
+    assert lm.log_prob("cat", "the") > lm.log_prob("sat", "the")
 
 
 def test_save_load():
     sentences = ["hello world", "hello there"]
     lm = WordLM(sentences)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json",
-                                     delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
         path = f.name
 
     try:
@@ -74,5 +87,7 @@ def test_save_load():
         assert lm.log_prob("world", "hello") == lm2.log_prob("world", "hello")
         assert lm.log_prob("there", "hello") == lm2.log_prob("there", "hello")
         assert set(lm.vocab) == set(lm2.vocab)
+        assert lm.log_prob("zzz", "hello") == lm2.log_prob("zzz", "hello")
+        assert lm.log_prob("zzz") == lm2.log_prob("zzz")
     finally:
         os.unlink(path)

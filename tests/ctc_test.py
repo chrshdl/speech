@@ -131,29 +131,69 @@ def test_argmax_decode():
     assert CTC.max_decode(pre, blank) == post
 
 
+def brute_force_decode(probs, blank, lm):
+    # Scores every label sequence by summing the probabilities of all
+    # alignments that collapse to it, then adds its LM score.
+    log_probs = np.log(probs)
+    totals = {}
+    for path in itertools.product(range(probs.shape[1]), repeat=probs.shape[0]):
+        labels = tuple(CTC.max_decode(list(path), blank))
+        score = sum(log_probs[t, s] for t, s in enumerate(path))
+        totals[labels] = np.logaddexp(totals.get(labels, -np.inf), score)
+    for labels in totals:
+        state, lm_score = lm.initial(), 0.0
+        for label in labels:
+            state, delta = lm.extend(state, label)
+            lm_score += delta
+        totals[labels] += lm_score + lm.finish(state)
+    best = max(totals, key=totals.get)
+    return best, totals[best]
+
+
 def test_decode_with_lm():
-    import numpy as np
-
     from speech.models.ctc_decoder import decode
+    from speech.models.word_lm import WordLM
 
-    np.random.seed(3)
-    probs = np.random.rand(50, 20)
-    probs = probs / np.sum(probs, axis=1, keepdims=True)
+    lm = WordLM(["a b", "b a a", "a"])
+    char_to_int = {"a": 0, "b": 1, " ": 2}
+    blank = 3
+    scorer = lm.scorer(char_to_int, weight=0.7, word_bonus=0.3)
 
-    # Baseline: no LM
-    labels_no_lm, _ = decode(probs)
+    rng = np.random.RandomState(0)
+    for _ in range(10):
+        probs = rng.rand(6, 4) ** 3
+        probs /= probs.sum(axis=1, keepdims=True)
 
-    # Trivial LM returning 0.0 should not change the result
-    labels_zero, _ = decode(probs, lm=lambda p: 0.0, lm_weight=1.0)
-    assert labels_no_lm == labels_zero
+        # A beam that keeps every prefix finds the exact best sequence.
+        labels, nll = decode(probs, beam_size=10_000, blank=blank, lm=scorer)
+        expected, score = brute_force_decode(probs, blank, scorer)
+        assert labels == expected
+        assert np.isclose(-nll, score)
 
-    # A non-trivial LM that biases towards label 1 should change output
-    def bias_lm(prefix):
-        if prefix and prefix[-1] == 1:
-            return 0.0  # no penalty
-        return -10.0  # heavy penalty
 
-    labels_biased, _ = decode(probs, beam_size=10, lm=bias_lm, lm_weight=2.0)
-    # The biased result should be different from unbiased
-    # (or at minimum, it ran without error)
-    assert isinstance(labels_biased, tuple)
+def test_lm_changes_decoding():
+    from speech.models.ctc_decoder import decode
+    from speech.models.word_lm import WordLM
+
+    chars = " abcehrt"
+    char_to_int = {c: i for i, c in enumerate(chars)}
+    blank = len(chars)
+
+    # The acoustics slightly prefer "the bat" over "the cat".
+    frames = ["t", "h", "e", " ", {"b": 0.55, "c": 0.45}, "a", "t"]
+    probs = np.full((len(frames), len(chars) + 1), 1e-3)
+    for t, frame in enumerate(frames):
+        for c, p in (frame if isinstance(frame, dict) else {frame: 1.0}).items():
+            probs[t, char_to_int[c]] = p
+    probs /= probs.sum(axis=1, keepdims=True)
+
+    def text(labels):
+        return "".join(chars[i] for i in labels)
+
+    labels, _ = decode(probs, beam_size=8, blank=blank)
+    assert text(labels) == "the bat"
+
+    lm = WordLM(["the cat sat", "the cat ran", "a bat"])
+    scorer = lm.scorer(char_to_int, weight=1.0)
+    labels, _ = decode(probs, beam_size=8, blank=blank, lm=scorer)
+    assert text(labels) == "the cat"
