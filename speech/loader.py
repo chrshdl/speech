@@ -122,8 +122,11 @@ class BatchRandomSampler(tud.sampler.Sampler):
         self.data_source = data_source
 
     def __iter__(self):
-        random.shuffle(self.batches)
-        return (i for b in self.batches for i in b)
+        # Shuffle a copy, so each epoch's order depends only on the random
+        # state and a resumed run repeats it.
+        batches = list(self.batches)
+        random.shuffle(batches)
+        return (i for b in batches for i in b)
 
     def __len__(self):
         return len(self.data_source)

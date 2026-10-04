@@ -48,6 +48,43 @@ To see the available options for each script use `-h`:
 uv run {train, eval}.py -h
 ```
 
+### Resuming training
+
+After each epoch, `train.py` writes these files to the config's `save_path`:
+
+| File | Contents |
+|---|---|
+| `model`, `preproc.pyc` | The model after the last epoch, for `eval.py` and `stream.py` |
+| `best_model`, `best_preproc.pyc` | The model with the lowest dev CER so far |
+| `train_state` | Everything needed to resume: the model, the optimizer state, the epoch and step counts, the best dev CER and the random number generator states |
+| `events.out.tfevents.*` | The TensorBoard log |
+
+Each file is written to a temporary file and then renamed, so stopping or
+crashing during a save never leaves a broken checkpoint.
+
+To continue a stopped run, give the same command with `--resume`:
+
+```
+uv run train.py <path_to_config> --resume
+```
+
+- Training continues after the last completed epoch. The progress of an
+  unfinished epoch is lost.
+- The saved preprocessor is reused. A new one would normalize the features
+  with statistics from a different sample of the data.
+- The TensorBoard log continues in the same run, and `best_model` is only
+  replaced by a model with a lower dev CER than any before the stop.
+- On the CPU a resumed run ends with exactly the same weights as a run that
+  never stopped. On a GPU it continues the same way, but the weights can differ
+  slightly, as GPU kernels can round differently.
+- To train for longer than planned, raise `epochs` in the config and resume.
+  Keep the rest of the config as it was, since the saved state belongs to that
+  model and data.
+- A run saved before resume support has no `train_state`. It resumes from its
+  last `model` with a new optimizer state, which can make the loss jump for a
+  while, and takes its completed epochs and best dev CER from the TensorBoard
+  log.
+
 ## Streaming
 
 A bidirectional encoder needs the whole utterance before it can output

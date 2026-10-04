@@ -16,6 +16,16 @@ def get_names(path, tag):
     return model, preproc
 
 
+def atomic_write(path, write):
+    """
+    Calls write with a temporary path, then moves the file into place, so
+    a crash while writing never leaves a partial file at path.
+    """
+    tmp = path + ".tmp"
+    write(tmp)
+    os.replace(tmp, path)
+
+
 def save(model, preproc, path, tag=""):
     """
     Saves the model weights and config, which with the preprocessor are
@@ -27,9 +37,13 @@ def save(model, preproc, path, tag=""):
         "config": model.config,
         "state_dict": model.state_dict(),
     }
-    torch.save(checkpoint, model_n)
-    with open(preproc_n, "wb") as fid:
-        pickle.dump(preproc, fid)
+    atomic_write(model_n, lambda tmp: torch.save(checkpoint, tmp))
+
+    def write_preproc(tmp):
+        with open(tmp, "wb") as fid:
+            pickle.dump(preproc, fid)
+
+    atomic_write(preproc_n, write_preproc)
 
 
 def load(path, tag=""):
