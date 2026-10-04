@@ -1,0 +1,32 @@
+[project]
+name = "speech"
+version = "0.1.0"
+description = "End-to-end models for automatic speech recognition in PyTorch."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "editdistance>=0.8.1",
+    "numpy>=2.4.2",
+    "scipy>=1.18.1",
+    "soundfile>=0.14.0",
+    "tensorboard>=2.21.0",
+    "torch>=2.14.1",
+    "torchaudio>=2.11.0",
+    "tqdm>=4.70.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.8,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.10",
+]

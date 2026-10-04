@@ -32,5 +32,5 @@ cd ${sph_v} && gcc -o sph2pipe *.c -lm
 cd ..
 rm ${sph_v}.tar.gz
 
-python preprocess.py $1 $2 --convert
+uv run preprocess.py $1 $2 --convert
 rm -rf $sph_v

@@ -1,6 +1,15 @@
 # TODOs
-libs/
 notebooks/
+
+# Speech data, trained models and training logs
+examples/*/data/
+examples/*/models/
+*.flac
+*.sph
+events.out.tfevents.*
+
+# macOS
+.DS_Store
 
 # vim
 .*.swp

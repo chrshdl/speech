@@ -24,14 +24,16 @@ files in `data/timit`:
 
 ## Train 
 
-There is a CTC and a sequence-to-sequence with attention configuration. Before
+There is a CTC and a sequence-to-sequence with attention configuration, plus
+`ctc_streaming_config.json`, a CTC model that can stream (see the top-level
+`README.md`). Before
 training a model, edit the configuration file. In particular, set the
 `save_path` to a location where you'd like to store the model. Edit any other
 parameters for your experiment. From the top-level directory, you can train the
 model with
 
 ``` 
-python train.py examples/timit/seq2seq_config.json
+uv run train.py examples/timit/seq2seq_config.json
 ```
 
 ## Score
@@ -39,23 +41,19 @@ python train.py examples/timit/seq2seq_config.json
 Save the 48 phoneme predictions with the top-level `eval.py` script.
 
 ```
-python eval.py <path_to_model> examples/timit/data/timit/test.json --save predictions.json
+uv run eval.py <path_to_model> examples/timit/data/timit/test.json --save predictions.json
 ```
 
 To score using the reduced phoneme set (39 phonemes) run 
 
 ```
-python examples/timit/score.py predictions.json 
+uv run examples/timit/score.py predictions.json 
 ```
 
 ## Results
 
 TODO, awni, results are from an earlier version of the training set. Need to
 update the results for the 462 speaker training set.
-
-*NB* for best results with all models, evaluate with a batch size of 1.
-Otherwise the scores can be slightly worse due to the fact that we pad the
-inputs to all be the same length in a given batch.
 
 ### seq2seq
 

@@ -1,10 +1,11 @@
+import itertools
 
+import numpy as np
+import shared
 import torch
-import torch.autograd as autograd
 
 from speech.models import CTC
 
-import shared
 
 def test_ctc_model():
     freq_dim = 40
@@ -24,8 +25,70 @@ def test_ctc_model():
     assert len(out.size()) == 3
 
     loss = model.loss(batch)
+    assert torch.isfinite(loss)
+    loss.backward()
+    assert all(torch.isfinite(p.grad).all() for p in model.parameters())
+
     preds = model.infer(batch)
     assert len(preds) == batch_size
+
+
+def brute_force_nll(log_probs, label, blank):
+    # Sums the probability of every alignment that collapses to the label.
+    time_steps, classes = log_probs.shape
+    total = -np.inf
+    for path in itertools.product(range(classes), repeat=time_steps):
+        if CTC.max_decode(list(path), blank) == list(label):
+            score = sum(log_probs[t, c] for t, c in enumerate(path))
+            total = np.logaddexp(total, score)
+    return -total
+
+
+def test_ctc_loss():
+    torch.manual_seed(0)
+    np.random.seed(0)
+    freq_dim = 40
+    vocab_size = 2
+
+    # Small enough to enumerate every alignment.
+    batch = shared.gen_fake_data(freq_dim, vocab_size, max_time=10, max_seq_len=2)
+    model = CTC(freq_dim, vocab_size, shared.model_config)
+
+    with torch.no_grad():
+        loss = model.loss(batch)
+        log_probs = torch.log_softmax(model(batch), dim=2).numpy()
+
+    # The blank is the last class and the loss is averaged over the batch.
+    expected = np.mean(
+        [
+            brute_force_nll(lp, label, model.blank)
+            for lp, label in zip(log_probs, batch[1])
+        ]
+    )
+    assert np.isclose(loss.item(), expected, rtol=1e-4)
+
+
+def test_padding():
+    freq_dim = 40
+    vocab_size = 10
+
+    np.random.seed(0)
+    torch.manual_seed(0)
+    model = CTC(freq_dim, vocab_size, shared.bidirectional_config())
+    model.set_eval()
+
+    inputs, labels = shared.gen_padded_data(freq_dim, vocab_size)
+    batch = (inputs, labels)
+    singles = [([i], [l]) for i, l in zip(inputs, labels)]
+
+    with torch.no_grad():
+        # The batch loss is the mean of each example's loss on its own.
+        loss = model.loss(batch).item()
+        expected = np.mean([model.loss(b).item() for b in singles])
+        assert np.isclose(loss, expected, rtol=1e-5)
+
+        # Decoding a batch matches decoding each example on its own.
+        assert model.infer(batch) == [model.infer(b)[0] for b in singles]
 
 
 def test_argmax_decode():

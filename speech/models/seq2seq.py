@@ -1,18 +1,14 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import math
-import numpy as np
 import random
+
+import numpy as np
 import torch
-import torch.nn as nn
-import torch.autograd as autograd
+from torch import nn
 
 from . import model
 
-class Seq2Seq(model.Model):
 
+class Seq2Seq(model.Model):
     def __init__(self, freq_dim, vocab_size, config):
         super().__init__(freq_dim, config)
 
@@ -21,24 +17,22 @@ class Seq2Seq(model.Model):
         rnn_dim = self.encoder_dim
         embed_dim = decoder_cfg["embedding_dim"]
         self.embedding = nn.Embedding(vocab_size, embed_dim)
-        self.dec_rnn = nn.GRUCell(input_size=embed_dim,
-                                  hidden_size=rnn_dim)
+        self.dec_rnn = nn.GRUCell(input_size=embed_dim, hidden_size=rnn_dim)
 
         self.attend = NNAttention(rnn_dim, log_t=decoder_cfg.get("log_t", False))
 
         self.sample_prob = decoder_cfg.get("sample_prob", 0)
-        self.scheduled_sampling = (self.sample_prob != 0)
+        self.scheduled_sampling = self.sample_prob != 0
 
         # *NB* we predict vocab_size - 1 classes since we
         # never need to predict the start of sequence token.
-        self.fc = model.LinearND(rnn_dim, vocab_size - 1)
+        self.fc = nn.Linear(rnn_dim, vocab_size - 1)
 
     def set_eval(self):
         """
         Set the model to evaluation mode.
         """
         self.eval()
-        self.volatile = True
         self.scheduled_sampling = False
 
     def set_train(self):
@@ -46,56 +40,71 @@ class Seq2Seq(model.Model):
         Set the model to training mode.
         """
         self.train()
-        self.volatile = False
-        self.scheduled_sampling = (self.sample_prob != 0)
+        self.scheduled_sampling = self.sample_prob != 0
 
     def loss(self, batch):
-        x, y = self.collate(*batch)
-        if self.is_cuda:
-            x = x.cuda()
-            y = y.cuda()
-        out, alis = self.forward_impl(x, y)
+        x, y, x_lens, y_lens = self.collate(*batch)
+        x = x.to(self.device)
+        y = y.to(self.device)
+        out, _ = self.forward_impl(x, y, x_lens)
         batch_size, _, out_dim = out.size()
-        out = out.view((-1, out_dim))
-        y = y[:,1:].contiguous().view(-1)
-        loss = nn.functional.cross_entropy(out, y,
-                size_average=False)
-        loss = loss / batch_size
-        return loss
 
-    def forward_impl(self, x, y):
-        x = self.encode(x)
-        out, alis = self.decode(x, y)
+        # Ignore the end padding past each label.
+        targets = y[:, 1:].clone()
+        steps = torch.arange(targets.size(1), device=y.device)
+        targets[steps >= (y_lens.to(y.device) - 1).unsqueeze(1)] = -100
+        loss = nn.functional.cross_entropy(
+            out.reshape(-1, out_dim),
+            targets.reshape(-1),
+            ignore_index=-100,
+            reduction="sum",
+        )
+        return loss / batch_size
+
+    def forward_impl(self, x, y, x_lens=None):
+        x = self.encode(x, x_lens)
+        mask = self.attention_mask(x, x_lens)
+        out, alis = self.decode(x, y, mask)
         return out, alis
 
     def forward(self, batch):
-        x, y = self.collate(*batch)
-        if self.is_cuda:
-            x = x.cuda()
-            y = y.cuda()
-        return self.forward_impl(x, y)[0]
+        x, y, x_lens, _ = self.collate(*batch)
+        x = x.to(self.device)
+        y = y.to(self.device)
+        return self.forward_impl(x, y, x_lens)[0]
 
-    def decode(self, x, y):
+    def attention_mask(self, x, x_lens):
+        """
+        Returns a (batch, time) mask of the encoded frames in each
+        example, or None if there are no lengths.
+        """
+        if x_lens is None:
+            return None
+        lens = self.encoded_lengths(x_lens).to(x.device)
+        return torch.arange(x.size(1), device=x.device) < lens.unsqueeze(1)
+
+    def decode(self, x, y, mask=None):
         """
         x should be shape (batch, time, hidden dimension)
         y should be shape (batch, label sequence length)
+        mask (optional) marks the frames of x to attend to
         """
 
         inputs = self.embedding(y[:, :-1])
 
-        out = []; aligns = []
+        out = []
+        aligns = []
 
-        hx = torch.zeros((x.shape[0], x.shape[2]), requires_grad=False)
-        if self.is_cuda:
-            hx.cuda()
-        ax = None; sx = None;
+        hx = x.new_zeros((x.shape[0], x.shape[2]))
+        ax = None
+        sx = None
         for t in range(y.size()[1] - 1):
-            sample = (out and self.scheduled_sampling)
+            sample = out and self.scheduled_sampling
             if sample and random.random() < self.sample_prob:
                 ix = torch.max(out[-1], dim=2)[1]
                 ix = self.embedding(ix)
             else:
-                ix = inputs[:, t:t+1, :]
+                ix = inputs[:, t : t + 1, :]
 
             if sx is not None:
                 ix = ix + sx
@@ -103,7 +112,7 @@ class Seq2Seq(model.Model):
             hx = self.dec_rnn(ix.squeeze(dim=1), hx)
             ox = hx.unsqueeze(dim=1)
 
-            sx, ax = self.attend(x, ox, ax)
+            sx, ax = self.attend(x, ox, ax, mask)
             aligns.append(ax)
             out.append(self.fc(ox + sx))
 
@@ -111,16 +120,16 @@ class Seq2Seq(model.Model):
         aligns = torch.stack(aligns, dim=1)
         return out, aligns
 
-    def decode_step(self, x, y, state=None, softmax=False):
+    def decode_step(self, x, y, state=None, softmax=False, mask=None):
         """
         x should be shape (batch, time, hidden dimension)
         y should be shape (batch, label sequence length)
+        mask (optional) marks the frames of x to attend to
         """
         if state is None:
-            hx = torch.zeros((x.shape[0], x.shape[2]), requires_grad=False)
-            if self.is_cuda:
-                hx.cuda()
-            ax = None; sx = None;
+            hx = x.new_zeros((x.shape[0], x.shape[2]))
+            ax = None
+            sx = None
         else:
             hx, ax, sx = state
 
@@ -129,7 +138,7 @@ class Seq2Seq(model.Model):
             ix = ix + sx
         hx = self.dec_rnn(ix.squeeze(dim=1), hx=hx)
         ox = hx.unsqueeze(dim=1)
-        sx, ax = self.attend(x, ox, ax=ax)
+        sx, ax = self.attend(x, ox, ax=ax, mask=mask)
         out = ox + sx
         out = self.fc(out.squeeze(dim=1))
         if softmax:
@@ -139,64 +148,62 @@ class Seq2Seq(model.Model):
     def predict(self, batch):
         probs = self(batch)
         argmaxs = torch.max(probs, dim=2)[1]
-        argmaxs = argmaxs.cpu().data.numpy()
-        return [seq.tolist() for seq in argmaxs]
+        return argmaxs.tolist()
 
-    def infer_decode(self, x, y, end_tok, max_len):
+    def infer_decode(self, x, y, end_tok, max_len, mask=None):
         probs = []
         argmaxs = [y]
         state = None
         for e in range(max_len):
-            out, state = self.decode_step(x, y, state=state)
+            out, state = self.decode_step(x, y, state=state, mask=mask)
             probs.append(out)
             y = torch.max(out, dim=1)[1]
             y = y.unsqueeze(dim=1)
             argmaxs.append(y)
-            if torch.sum(y.data == end_tok) == y.numel():
+            if (y == end_tok).all():
                 break
 
         probs = torch.cat(probs)
         argmaxs = torch.cat(argmaxs, dim=1)
         return probs, argmaxs
 
+    @torch.no_grad()
     def infer(self, batch, max_len=200):
         """
         Infer a likely output. No beam search yet.
         """
-        x, y = self.collate(*batch)
-        end_tok = y.data[0, -1] # TODO
-        t = y
-        if self.is_cuda:
-            x = x.cuda()
-            t = y.cuda()
-        x = self.encode(x)
+        x, y, x_lens, _ = self.collate(*batch)
+        end_tok = y[0, -1].item()  # TODO
+        x = self.encode(x.to(self.device), x_lens)
+        mask = self.attention_mask(x, x_lens)
 
         # needs to be the start token, TODO
-        y = t[:, 0:1]
-        _, argmaxs = self.infer_decode(x, y, end_tok, max_len)
-        argmaxs = argmaxs.cpu().data.numpy()
-        return [seq.tolist() for seq in argmaxs]
+        y = y[:, 0:1].to(self.device)
+        _, argmaxs = self.infer_decode(x, y, end_tok, max_len, mask)
+        return argmaxs.tolist()
 
+    @torch.no_grad()
     def beam_search(self, batch, beam_size=10, max_len=200):
-        x, y = self.collate(*batch)
-        start_tok = y.data[0, 0]
-        end_tok = y.data[0, -1] # TODO
-        if self.is_cuda:
-            x = x.cuda()
-            y = y.cuda()
-        x = self.encode(x)
+        x, y, x_lens, _ = self.collate(*batch)
+        start_tok = y[0, 0].item()
+        end_tok = y[0, -1].item()  # TODO
+        x = x.to(self.device)
+        y = y.to(self.device)
+        x = self.encode(x, x_lens)
+        mask = self.attention_mask(x, x_lens)
 
         y = y[:, 0:1].clone()
 
-        beam = [((start_tok,), 0, None)];
+        beam = [((start_tok,), 0, None)]
         complete = []
         for _ in range(max_len):
             new_beam = []
             for hyp, score, state in beam:
-
                 y[0] = hyp[-1]
-                out, state = self.decode_step(x, y, state=state, softmax=True)
-                out = out.cpu().data.numpy().squeeze(axis=0).tolist()
+                out, state = self.decode_step(
+                    x, y, state=state, softmax=True, mask=mask
+                )
+                out = out.squeeze(dim=0).tolist()
                 for i, p in enumerate(out):
                     new_score = score + p
                     new_hyp = hyp + (i,)
@@ -208,8 +215,7 @@ class Seq2Seq(model.Model):
                 if cand[0][-1] == end_tok:
                     complete.append(cand)
 
-            beam = filter(lambda x : x[0][-1] != end_tok, new_beam)
-            beam = beam[:beam_size]
+            beam = [c for c in new_beam if c[0][-1] != end_tok][:beam_size]
 
             if len(beam) == 0:
                 break
@@ -227,28 +233,45 @@ class Seq2Seq(model.Model):
         return [hyp]
 
     def collate(self, inputs, labels):
-        inputs = model.zero_pad_concat(inputs)
-        labels = end_pad_concat(labels)
-        inputs = torch.from_numpy(inputs)
-        labels = torch.from_numpy(labels)
-        if self.volatile:
-            inputs.volatile = True
-            labels.volatile = True
-        return inputs, labels
+        """
+        Returns the padded inputs, the end padded labels, the number of
+        input frames in each example and the length of each label.
+        """
+        x_lens = torch.tensor([i.shape[0] for i in inputs])
+        y_lens = torch.tensor([len(l) for l in labels])
+        inputs = torch.from_numpy(model.zero_pad_concat(inputs))
+        labels = torch.from_numpy(end_pad_concat(labels))
+        return inputs, labels, x_lens, y_lens
+
 
 def end_pad_concat(labels):
     # Assumes last item in each example is the end token.
     batch_size = len(labels)
     end_tok = labels[0][-1]
     max_len = max(len(l) for l in labels)
-    cat_labels = np.full((batch_size, max_len),
-                    fill_value=end_tok, dtype=np.int64)
+    cat_labels = np.full((batch_size, max_len), fill_value=end_tok, dtype=np.int64)
     for e, l in enumerate(labels):
-        cat_labels[e, :len(l)] = l
+        cat_labels[e, : len(l)] = l
     return cat_labels
 
-class Attention(nn.Module):
 
+def attention_softmax(pax, mask=None, log_t=False):
+    """
+    Normalizes attention scores with shape (batch size, time) over the
+    time steps the mask keeps. With log_t the scores are scaled by the
+    log of the number of kept time steps.
+    """
+    if log_t:
+        if mask is None:
+            pax = math.log(pax.size(1)) * pax
+        else:
+            pax = torch.log(mask.sum(dim=1, keepdim=True).to(pax.dtype)) * pax
+    if mask is not None:
+        pax = pax.masked_fill(~mask, float("-inf"))
+    return nn.functional.softmax(pax, dim=1)
+
+
+class Attention(nn.Module):
     def __init__(self, kernel_size=11, log_t=False):
         """
         Module which Performs a single attention step along the
@@ -267,14 +290,13 @@ class Attention(nn.Module):
         based on performance. See
         https://gist.github.com/awni/9989dd31642d42405903dec8ab91d1f0
         """
-        super(Attention, self).__init__()
-        assert kernel_size % 2 == 1, \
-            "Kernel size should be odd for 'same' conv."
+        super().__init__()
+        assert kernel_size % 2 == 1, "Kernel size should be odd for 'same' conv."
         padding = (kernel_size - 1) // 2
         self.conv = nn.Conv1d(1, 1, kernel_size, padding=padding)
         self.log_t = log_t
 
-    def forward(self, eh, dhx, ax=None):
+    def forward(self, eh, dhx, ax=None, mask=None):
         """
         Arguments:
             eh (FloatTensor): the encoder hidden state with
@@ -285,6 +307,8 @@ class Attention(nn.Module):
                 encoder state.
             ax (FloatTensor): one time step of the attention
                 vector.
+            mask (BoolTensor): marks the time steps of eh to attend
+                to, with shape (batch size, time).
 
         Returns the summary of the encoded hidden state
         and the corresponding alignment.
@@ -295,16 +319,12 @@ class Attention(nn.Module):
         pax = eh * dhx
         pax = torch.sum(pax, dim=2)
 
-
         if ax is not None:
             ax = ax.unsqueeze(dim=1)
             ax = self.conv(ax).squeeze(dim=1)
             pax = pax + ax
 
-        if self.log_t:
-            log_t = math.log(pax.size()[1])
-            pax = log_t * pax
-        ax = nn.functional.softmax(pax,  dim=1)
+        ax = attention_softmax(pax, mask, self.log_t)
 
         # At this point sx should have size (batch size, time).
         # Reduce the encoder state accross time weighting each
@@ -313,35 +333,32 @@ class Attention(nn.Module):
         sx = torch.sum(eh * sx, dim=1, keepdim=True)
         return sx, ax
 
+
 class ProdAttention(nn.Module):
-
     def __init__(self):
-        super(ProdAttention, self).__init__()
+        super().__init__()
 
-    def forward(self, eh, dhx, ax=None):
+    def forward(self, eh, dhx, ax=None, mask=None):
         pax = eh * dhx
         pax = torch.sum(pax, dim=2)
 
-        ax = nn.functional.softmax(pax, dim=1)
+        ax = attention_softmax(pax, mask)
 
         sx = ax.unsqueeze(2)
         sx = torch.sum(eh * sx, dim=1, keepdim=True)
         return sx, ax
 
-class NNAttention(nn.Module):
 
+class NNAttention(nn.Module):
     def __init__(self, n_channels, kernel_size=15, log_t=False):
-        super(NNAttention, self).__init__()
-        assert kernel_size % 2 == 1, \
-            "Kernel size should be odd for 'same' conv."
+        super().__init__()
+        assert kernel_size % 2 == 1, "Kernel size should be odd for 'same' conv."
         padding = (kernel_size - 1) // 2
         self.conv = nn.Conv1d(1, n_channels, kernel_size, padding=padding)
-        self.nn = nn.Sequential(
-                     nn.ReLU(),
-                     model.LinearND(n_channels, 1))
+        self.nn = nn.Sequential(nn.ReLU(), nn.Linear(n_channels, 1))
         self.log_t = log_t
 
-    def forward(self, eh, dhx, ax=None):
+    def forward(self, eh, dhx, ax=None, mask=None):
         pax = eh + dhx
         if ax is not None:
             ax = ax.unsqueeze(dim=1)
@@ -350,10 +367,7 @@ class NNAttention(nn.Module):
 
         pax = self.nn(pax)
         pax = pax.squeeze(dim=2)
-        if self.log_t:
-            log_t = math.log(pax.size()[1])
-            pax = log_t * pax
-        ax = nn.functional.softmax(pax, dim=1)
+        ax = attention_softmax(pax, mask, self.log_t)
 
         sx = ax.unsqueeze(2)
         sx = torch.sum(eh * sx, dim=1, keepdim=True)

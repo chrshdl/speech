@@ -8,67 +8,61 @@ are currently supported.
 The goal of this software is to facilitate research in end-to-end models for
 speech recognition. The models are implemented in PyTorch.
 
-The software has only been tested in Python3.6. 
-
-**We will not be providing backward compatability for Python2.7.**
+The software requires Python 3.13 or later.
 
 ## Install
 
-We recommend creating a virtual environment and installing the python
-requirements there.
+Install [uv](https://docs.astral.sh/uv/), then from the top level directory run:
 
 ```
-virtualenv <path_to_your_env>
-source <path_to_your_env>/bin/activate
-pip install -r requirements.txt
+uv sync
 ```
 
-Then follow the installation instructions for a version of
-[PyTorch](http://pytorch.org/) which works for your machine.
+This creates a virtual environment with PyTorch and the other requirements and
+installs the `speech` package into it. If you need a PyTorch build for a
+specific CUDA version, see the
+[uv PyTorch guide](https://docs.astral.sh/uv/guides/integration/pytorch/).
 
-After all the python requirements are installed, from the top level directory,
-run:
-
-```
-make
-```
-
-The build process requires CMake as well as Make.
-
-After that, source the `setup.sh` from the repo root.
+You can verify the install was successful by running the tests.
 
 ```
-source setup.sh
-```
-
-Consider adding this to your `bashrc`.
-
-You can verify the install was successful by running the
-tests from the `tests` directory.
-
-```
-cd tests
-pytest
+uv run pytest
 ```
 
 ## Run 
 
 To train a model run
 ```
-python train.py <path_to_config>
+uv run train.py <path_to_config>
 ```
 
 After the model is done training you can evaluate it with
 
 ```
-python eval.py <path_to_model> <path_to_data_json>
+uv run eval.py <path_to_model> <path_to_data_json>
 ```
 
 To see the available options for each script use `-h`: 
 
 ```
-python {train, eval}.py -h
+uv run {train, eval}.py -h
 ```
+
+## Streaming
+
+A bidirectional encoder needs the whole utterance before it can output
+anything. For streaming recognition, use a unidirectional RNN followed by a
+lookahead convolution as in [Deep Speech 2]. Set `"bidirectional" : false` and
+`"lookahead" : <frames>` in the model's `encoder` config. The lookahead is
+counted in encoder frames, after the stride of the convolutional front end. For
+example, with 10 ms input frames and a total stride of 2, a lookahead of 10 sees
+200 ms of future audio. See `examples/timit/ctc_streaming_config.json`.
+
+To encode audio as it arrives, call `model.encode_stream` with each chunk of
+input frames and the state it returned on the previous call. Pass `final=True`
+with the last chunk. The streamed outputs match `model.encode` on the full input.
+
+[Deep Speech 2]: https://arxiv.org/abs/1512.02595
 
 ## Examples
 

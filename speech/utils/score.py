@@ -1,8 +1,5 @@
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import editdistance
+
 
 def compute_cer(results):
     """
@@ -12,7 +9,6 @@ def compute_cer(results):
 
     Returns the CER for the full set.
     """
-    dist = sum(editdistance.eval(label, pred)
-                for label, pred in results)
+    dist = sum(editdistance.eval(label, pred) for label, pred in results)
     total = sum(len(label) for label, _ in results)
     return dist / total
