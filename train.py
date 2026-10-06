@@ -265,6 +265,11 @@ def run(config, device, resume=False):
     for e in range(start_epoch, opt_cfg["epochs"]):
         start = time.time()
 
+        # Set before the loader starts its workers, which copy the dataset.
+        train_ldr.dataset.set_epoch(e)
+        active = ", ".join(train_ldr.dataset.active) or "none"
+        print(f"Epoch {e}, augmentations: {active}")
+
         run_state = run_epoch(
             model, optimizer, precision, train_ldr, writer, *run_state
         )

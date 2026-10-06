@@ -236,3 +236,40 @@ def test_noise(tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(ValueError):
         loader.NoiseSource(str(tmp_path / "empty"))
+
+
+def test_from_epoch():
+    preproc = loader.Preprocessor("test.json", start_and_end=False)
+    volume = {"dbfs": [-6, -6]}
+    augment = {
+        "noise": [
+            {"source": ".", "snr": [5, 5]},
+            {"source": "test.json", "snr": [5, 5], "layers": [2, 2], "from_epoch": 1},
+        ],
+        "reverb": {"delay": [10, 10], "decay": [0.7, 0.7], "from_epoch": 2},
+        "volume": volume,
+    }
+    dataset = loader.AudioDataset("test.json", preproc, 2, augment)
+    early = loader.AudioDataset(
+        "test.json", preproc, 2, {"noise": augment["noise"][:1], "volume": volume}
+    )
+
+    def item(ds):
+        torch.manual_seed(0)
+        return ds[0][0]
+
+    # Before their from_epoch, augmentations are skipped and draw no
+    # random numbers, so the others augment exactly as without them.
+    assert list(dataset.active) == ["noise", "volume"]
+    assert len(dataset.active["noise"]) == 1
+    assert np.array_equal(item(dataset), item(early))
+
+    dataset.set_epoch(1)
+    assert len(dataset.active["noise"]) == 2
+    assert "from_epoch" not in dataset.active["noise"][1]
+    assert not np.array_equal(item(dataset), item(early))
+
+    dataset.set_epoch(2)
+    assert list(dataset.active) == ["noise", "reverb", "volume"]
+    assert "from_epoch" not in dataset.active["reverb"]
+    item(dataset)

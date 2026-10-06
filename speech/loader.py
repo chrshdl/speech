@@ -100,12 +100,16 @@ class AudioDataset(tud.Dataset):
         Arguments:
             augment (dict, optional): Maps the names in AUGMENTATIONS to
                 the arguments of their functions, to augment each example
-                as it is loaded.
+                as it is loaded, or a list of them for noise. Each can
+                also have a from_epoch, the epoch, counted from 0, from
+                which it is applied, so the model can learn from clean
+                audio first.
         """
 
         data = read_data_json(data_json)
         self.preproc = preproc
-        self.augment = augment
+        self.augment = augment or {}
+        self.set_epoch(0)
 
         bucket_diff = 4
         max_len = max(len(x["text"]) for x in data)
@@ -125,16 +129,32 @@ class AudioDataset(tud.Dataset):
     def __len__(self):
         return len(self.data)
 
+    def set_epoch(self, epoch):
+        """
+        Sets the training epoch, counted from 0, which decides the
+        augmentations that have a from_epoch.
+        """
+        self.epoch = epoch
+        self.active = {}
+        for name, configs in self.augment.items():
+            # Noise can be one overlay or a list, such as noise and babble.
+            configs = configs if isinstance(configs, list) else [configs]
+            on = [
+                {k: v for k, v in c.items() if k != "from_epoch"}
+                for c in configs
+                if epoch >= c.get("from_epoch", 0)
+            ]
+            if on:
+                self.active[name] = on if name == "noise" else on[0]
+
     def __getitem__(self, idx):
         datum = self.data[idx]
-        if not self.augment:
+        augment = self.active
+        if not augment:
             return self.preproc.preprocess(datum["audio"], datum["text"])
 
-        augment = self.augment
         audio, sample_rate = wave.array_from_wave(datum["audio"])
-        # Noise can be one overlay or a list, such as noise and babble.
-        overlays = augment.get("noise", [])
-        for overlay in [overlays] if isinstance(overlays, dict) else overlays:
+        for overlay in augment.get("noise", []):
             audio = noise(audio, sample_rate=sample_rate, **overlay)
         if "reverb" in augment:
             audio = reverb(audio, sample_rate=sample_rate, **augment["reverb"])

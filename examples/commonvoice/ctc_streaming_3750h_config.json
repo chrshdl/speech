@@ -17,15 +17,16 @@
         "start_and_end" : false,
         "num_workers" : 8,
         "noise" : [
-            {"p" : 0.9, "source" : "examples/noise/data", "snr" : [8, 16]},
+            {"p" : 0.9, "source" : "examples/noise/data", "snr" : [8, 16], "from_epoch" : 1},
             {
                 "p" : 0.1,
                 "source" : "examples/librispeech/data/LibriSpeech/train-clean-100.json",
                 "layers" : [8, 12],
-                "snr" : [8, 16]
+                "snr" : [8, 16],
+                "from_epoch" : 1
             }
         ],
-        "reverb" : {"p" : 0.2, "delay" : [2, 18], "decay" : [0.55, 0.85]},
+        "reverb" : {"p" : 0.2, "delay" : [2, 18], "decay" : [0.55, 0.85], "from_epoch" : 1},
         "volume" : {"p" : 0.2, "dbfs" : [-13, 7]},
         "pitch" : {"factor" : [0.9, 1.1]},
         "tempo" : {"factor" : [0.9, 1.1]},

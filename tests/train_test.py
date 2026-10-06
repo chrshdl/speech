@@ -20,7 +20,13 @@ def make_config(save_path, epochs, mixed_precision=None):
             "start_and_end": False,
             "num_workers": 0,
             "noise": {"source": ".", "snr": [5, 15], "p": 0.5},
-            "reverb": {"delay": [2, 18], "decay": [0.55, 0.85], "p": 0.5},
+            # Starts after the resumed run's stop, at the third epoch.
+            "reverb": {
+                "delay": [2, 18],
+                "decay": [0.55, 0.85],
+                "p": 0.5,
+                "from_epoch": 2,
+            },
             "volume": {"dbfs": [-13, 7], "p": 0.5},
             "pitch": {"factor": [0.9, 1.1]},
             "tempo": {"factor": [0.9, 1.1]},
@@ -66,8 +72,13 @@ def weights(save_path):
 
 
 @pytest.mark.parametrize("precision", [None, "bf16", "fp16"])
-def test_resume(tmp_path, precision):
+def test_resume(tmp_path, precision, capsys):
     train_run(make_config(tmp_path / "full", 4, precision), seed=0)
+
+    # Reverb starts at the third epoch, counted from 0.
+    log = capsys.readouterr().out
+    assert "Epoch 1, augmentations: noise, volume" in log
+    assert "Epoch 2, augmentations: noise, reverb, volume" in log
 
     # Stop after two epochs, then resume for two more. The second seed
     # shows that the resumed run restores the random number state.

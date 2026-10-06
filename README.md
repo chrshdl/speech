@@ -96,7 +96,9 @@ uv run train.py <path_to_config> --resume
 
 Each of these keys in a config's `data` augments the training data, and
 none is used for dev. They are applied in this order, each with a chance `p`
-of 1 unless set:
+of 1 unless set. Each can also set `from_epoch`, the epoch, counted from 0,
+from which it is applied, so the model can learn from clean audio before
+noise is added:
 
 | Key | What it does | Example |
 |---|---|---|

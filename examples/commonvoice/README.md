@@ -6,23 +6,70 @@ audiobooks of LibriSpeech for speech in the real world.
 
 ## Setup
 
-Common Voice is distributed through the [Mozilla Data Collective]. Download the
-latest Common Voice Scripted Speech release for English there, 26.0 from June
-2026 or newer. Downloading
-means agreeing not to try to identify the speakers. Extract it, then from the
-top level directory run
+The configs train on Common Voice and all 960 hours of LibriSpeech, about
+3,750 hours, with background noise for augmentation. Run these steps from the
+top level directory. Plan for about 350 GB of free space while preparing the
+data, and about 250 GB once the Common Voice archive and MP3s are deleted.
+
+### 1. Install
+
+Clone the repository and install its dependencies with [uv]:
 
 ```
-uv run examples/commonvoice/preprocess.py <path_to_extracted>/en \
+git clone https://github.com/chrshdl/speech.git
+cd speech
+uv sync
+```
+
+### 2. LibriSpeech
+
+Download and index all of LibriSpeech, about 60 GB. The archives are extracted
+while they download, so they never take space on disk.
+
+```
+uv run examples/librispeech/download.py examples/librispeech/data --sets \
+    train-clean-100 train-clean-360 train-other-500 dev-clean test-clean
+uv run examples/librispeech/preprocess.py examples/librispeech/data --sets \
+    train-clean-100 train-clean-360 train-other-500 dev-clean test-clean
+```
+
+### 3. Noise
+
+Download the background noise recordings, which takes seconds:
+
+```
+uv run examples/noise/download.py examples/noise/data
+```
+
+### 4. Common Voice
+
+Common Voice is distributed through the [Mozilla Data Collective]. Sign in
+there, open Common Voice Scripted Speech for English, 26.0 from June 2026 or
+newer, accept its terms and download it, about 88 GB. Downloading means
+agreeing not to try to identify the speakers.
+
+Extract the archive and find the directory that holds `clips/` and the `.tsv`
+files:
+
+```
+mkdir -p ~/cv
+tar -xzf <downloaded archive> -C ~/cv
+find ~/cv -name validated.tsv
+```
+
+Then convert it, with the directory `find` printed, which ends in `/en`:
+
+```
+uv run examples/commonvoice/preprocess.py <directory with validated.tsv> \
     examples/commonvoice/data
 ```
 
-where `en` is the directory that holds `clips/` and the `.tsv` files. This
-writes `train.json`, `dev.json` and `test.json` to `examples/commonvoice/data`,
-with the clips converted to 16 kHz FLAC in `examples/commonvoice/data/clips`.
-The conversion runs on every CPU core, and an interrupted run continues where
-it stopped. The FLAC clips take about twice the space of the MP3s, so plan for
-about 260 GB in total, or delete the MP3s afterwards.
+This writes `train.json`, `dev.json` and `test.json` to
+`examples/commonvoice/data`, with the clips converted to 16 kHz FLAC in
+`examples/commonvoice/data/clips`. The conversion runs on every CPU core, and
+an interrupted run continues where it stopped when run again. At the end it
+prints the clips and hours of each split. Once they look right, delete the
+archive and `~/cv` to free about 90 to 180 GB.
 
 The script
 
@@ -36,25 +83,7 @@ The script
   official train split without leaking dev or test material into training.
   `--train-from train` uses the official train split instead.
 
-## Train
-
-The configs train a streaming CTC model of 31 million parameters, five
-unidirectional GRU layers of 1,024 units with a 200 ms lookahead, on Common
-Voice and all 960 hours of LibriSpeech, about 3,750 hours. They augment the
-training audio as Mozilla's DeepSpeech 0.9 did: background noise, babble,
-reverb, volume, pitch and tempo, plus SpecAugment. Besides Common Voice,
-prepare LibriSpeech, about 60 GB, and the noise recordings:
-
-```
-uv run examples/librispeech/download.py examples/librispeech/data --sets \
-    train-clean-100 train-clean-360 train-other-500 dev-clean test-clean
-uv run examples/librispeech/preprocess.py examples/librispeech/data --sets \
-    train-clean-100 train-clean-360 train-other-500 dev-clean test-clean
-uv run examples/noise/download.py examples/noise/data
-```
-
-With Common Voice's FLAC clips, plan for about 250 GB of free space, or about
-350 GB until its archive and MP3s are deleted.
+### 5. Benchmark
 
 Before a run that takes days, measure the speed on the machine with
 `benchmark.py`. It times training steps on real batches for each batch size
@@ -65,6 +94,19 @@ set:
 uv run benchmark.py examples/commonvoice/ctc_streaming_3750h_config.json \
     --batch-sizes 16,32,64 --precisions none,bf16
 ```
+
+If another batch size or precision is clearly faster than the config's, change
+`batch_size` or `mixed_precision` in the config.
+
+## Train
+
+The configs train a streaming CTC model of 31 million parameters, five
+unidirectional GRU layers of 1,024 units with a 200 ms lookahead. They augment
+the training audio as Mozilla's DeepSpeech 0.9 did: background noise, babble,
+reverb, volume, pitch and tempo, plus SpecAugment. The noise, babble and
+reverb start with the second epoch, as `"from_epoch" : 1`, since a CTC model
+first has to learn which frames belong to which characters, which noise makes
+harder. One epoch over 3,750 hours should be enough for that.
 
 ### On an Apple M4 Max
 
@@ -97,3 +139,4 @@ committing to a full run.
 
 [Mozilla Common Voice]: https://commonvoice.mozilla.org
 [Mozilla Data Collective]: https://mozilladatacollective.com
+[uv]: https://docs.astral.sh/uv/
