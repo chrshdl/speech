@@ -1,6 +1,6 @@
 {
     "seed" : 2017,
-    "save_path" : "examples/commonvoice/models/ctc_streaming",
+    "save_path" : "examples/commonvoice/models/ctc_streaming_3750h_gpu",
     "mixed_precision" : "bf16",
 
     "data" : {
