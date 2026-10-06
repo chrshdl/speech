@@ -19,6 +19,9 @@ def make_config(save_path, epochs, mixed_precision=None):
             "dev_set": "test.json",
             "start_and_end": False,
             "num_workers": 0,
+            "volume": {"dbfs": [-13, 7], "p": 0.5},
+            "pitch": {"factor": [0.9, 1.1]},
+            "tempo": {"factor": [0.9, 1.1]},
             "spec_augment": {
                 "freq_masks": 2,
                 "freq_width": 20,

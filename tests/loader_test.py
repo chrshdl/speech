@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 import torch
 
 from speech import loader
@@ -92,3 +93,76 @@ def test_spec_augment():
     # Without masks nothing changes.
     none = dict(args, freq_masks=0, time_masks=0)
     assert np.array_equal(loader.spec_augment(features, **none), features)
+
+
+def test_volume():
+    audio, _ = wave.array_from_wave("test0.wav")
+
+    # A quiet level sets the peak, a loud one clips at full scale.
+    quiet = loader.volume(audio, dbfs=[-6, -6])
+    assert np.abs(quiet).max() == pytest.approx(32768 * 10 ** (-6 / 20), rel=1e-4)
+    loud = loader.volume(audio, dbfs=[6, 6])
+    clipped = (loud >= 32767) | (loud <= -32768)
+    assert clipped.any()
+    gain = 32768 * 10 ** (6 / 20) / np.abs(audio).max()
+    assert np.allclose(loud[~clipped], audio[~clipped] * gain, rtol=1e-5)
+
+    assert loader.volume(audio, dbfs=[6, 6], p=0) is audio
+    silent = np.zeros(100, dtype=np.int16)
+    assert loader.volume(silent, dbfs=[6, 6]) is silent
+
+
+def test_pitch():
+    # A smooth bump around bin 80, like a formant.
+    bins = np.arange(161)
+    features = np.tile(np.exp(-(((bins - 80) / 3) ** 2)), (10, 1)).astype(np.float32)
+
+    # A lower pitch moves the peak down and fills the top with silence.
+    lower = loader.pitch(features, factor=[0.5, 0.5])
+    assert lower.shape == features.shape
+    assert abs(lower[0].argmax() - 40) <= 1
+    assert (lower[:, 81:] == features.min()).all()
+
+    # A higher pitch moves it up.
+    assert abs(loader.pitch(features, factor=[1.5, 1.5])[0].argmax() - 120) <= 1
+    assert np.array_equal(loader.pitch(features, factor=[1, 1]), features)
+    assert loader.pitch(features, factor=[0.5, 0.5], p=0) is features
+
+
+def test_tempo():
+    features = np.random.RandomState(0).randn(100, 161).astype(np.float32)
+    assert loader.tempo(features, factor=[2, 2]).shape == (50, 161)
+    assert loader.tempo(features, factor=[0.5, 0.5]).shape == (200, 161)
+    assert np.array_equal(loader.tempo(features, factor=[1, 1]), features)
+    assert loader.tempo(features, factor=[2, 2], p=0) is features
+
+
+def test_augmented_dataset():
+    preproc = loader.Preprocessor("test.json", start_and_end=False)
+    augment = {
+        "volume": {"dbfs": [-13, 7], "p": 0.5},
+        "pitch": {"factor": [0.9, 1.1]},
+        "tempo": {"factor": [0.9, 1.1]},
+        "spec_augment": {
+            "freq_masks": 2,
+            "freq_width": 15,
+            "time_masks": 2,
+            "time_width": 10,
+        },
+    }
+    plain = loader.AudioDataset("test.json", preproc, 2)
+    augmented = loader.AudioDataset("test.json", preproc, 2, augment)
+
+    torch.manual_seed(0)
+    inputs, targets = augmented[0]
+    clean_inputs, clean_targets = plain[0]
+    assert targets == clean_targets
+    assert inputs.shape[1] == clean_inputs.shape[1]
+    assert 0.85 * len(clean_inputs) <= len(inputs) <= 1.15 * len(clean_inputs)
+
+    # The same seed repeats the augmentation, another seed changes it.
+    torch.manual_seed(0)
+    assert np.array_equal(augmented[0][0], inputs)
+    torch.manual_seed(1)
+    other = augmented[0][0]
+    assert other.shape != inputs.shape or not np.array_equal(other, inputs)

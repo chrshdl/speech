@@ -2,11 +2,17 @@ import json
 import random
 
 import numpy as np
+import scipy.ndimage
 import scipy.signal
 import torch
 import torch.utils.data as tud
 
 from speech.utils import wave
+
+# The training augmentations a config's data can set, in the order they
+# are applied: volume on the audio, pitch and tempo on the spectrogram,
+# then spec_augment on the normalized features.
+AUGMENTATIONS = ("volume", "pitch", "tempo", "spec_augment")
 
 
 class Preprocessor:
@@ -60,10 +66,12 @@ class Preprocessor:
         return text[s:e]
 
     def preprocess(self, wave_file, text):
-        inputs = log_specgram_from_file(wave_file)
-        inputs = (inputs - self.mean) / self.std
+        inputs = self.normalize(log_specgram_from_file(wave_file))
         targets = self.encode(text)
         return inputs, targets
+
+    def normalize(self, features):
+        return (features - self.mean) / self.std
 
     @property
     def input_dim(self):
@@ -86,8 +94,9 @@ class AudioDataset(tud.Dataset):
     def __init__(self, data_json, preproc, batch_size, augment=None):
         """
         Arguments:
-            augment (dict, optional): The arguments of spec_augment, to
-                augment each example as it is loaded.
+            augment (dict, optional): Maps the names in AUGMENTATIONS to
+                the arguments of their functions, to augment each example
+                as it is loaded.
         """
 
         data = read_data_json(data_json)
@@ -114,10 +123,83 @@ class AudioDataset(tud.Dataset):
 
     def __getitem__(self, idx):
         datum = self.data[idx]
-        inputs, targets = self.preproc.preprocess(datum["audio"], datum["text"])
-        if self.augment is not None:
-            inputs = spec_augment(inputs, **self.augment)
-        return inputs, targets
+        if not self.augment:
+            return self.preproc.preprocess(datum["audio"], datum["text"])
+
+        augment = self.augment
+        audio, sample_rate = wave.array_from_wave(datum["audio"])
+        if "volume" in augment:
+            audio = volume(audio, **augment["volume"])
+        features = log_specgram(audio, sample_rate)
+        if "pitch" in augment:
+            features = pitch(features, **augment["pitch"])
+        if "tempo" in augment:
+            features = tempo(features, **augment["tempo"])
+        inputs = self.preproc.normalize(features)
+        if "spec_augment" in augment:
+            inputs = spec_augment(inputs, **augment["spec_augment"])
+        return inputs, self.preproc.encode(datum["text"])
+
+
+def _uniform(low, high):
+    # Augmentations draw from torch's generator, so a resumed training run
+    # repeats them.
+    return low + (high - low) * float(torch.rand(()))
+
+
+def _chance(p):
+    return float(torch.rand(())) < p
+
+
+def volume(audio, dbfs, p=1.0):
+    """
+    Scales 16 bit audio so its peak is at a random level, clipping what
+    exceeds full scale. DeepSpeech used this with p 0.2.
+
+    Arguments:
+        audio (ndarray): 16 bit samples.
+        dbfs (list): The range of peak levels in dBFS, where 0 is full
+            scale. [-13, 7] matches DeepSpeech's -10 to 10, which counts a
+            full-scale peak as 3 dBFS.
+        p (float): The probability of changing the volume.
+    """
+    peak = np.abs(audio).max()
+    if peak == 0 or not _chance(p):
+        return audio
+    level = _uniform(*dbfs)
+    gain = 32768 * 10 ** (level / 20) / peak
+    return np.clip(audio * gain, -32768, 32767).astype(np.float32)
+
+
+def pitch(features, factor, p=1.0):
+    """
+    Changes the pitch by stretching a log spectrogram with shape (time,
+    freq) along its frequency axis by a random factor. Bins emptied by a
+    lower pitch get the spectrogram's lowest value, as silence. DeepSpeech
+    used factors from 0.9 to 1.1 on every example.
+    """
+    if not _chance(p):
+        return features
+    bins = features.shape[1]
+    stretched = scipy.ndimage.zoom(features, (1, _uniform(*factor)), order=1)
+    if stretched.shape[1] >= bins:
+        return stretched[:, :bins]
+    pad = np.full(
+        (len(features), bins - stretched.shape[1]), features.min(), features.dtype
+    )
+    return np.concatenate([stretched, pad], axis=1)
+
+
+def tempo(features, factor, p=1.0):
+    """
+    Changes the tempo by stretching a spectrogram with shape (time, freq)
+    along its time axis, where a factor above 1 is faster speech with
+    fewer frames. DeepSpeech used factors from 0.9 to 1.1 on every example.
+    """
+    if not _chance(p):
+        return features
+    frames = max(1, round(len(features) / _uniform(*factor)))
+    return scipy.ndimage.zoom(features, (frames / len(features), 1), order=1)
 
 
 def spec_augment(

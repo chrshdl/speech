@@ -85,6 +85,25 @@ uv run train.py <path_to_config> --resume
   while, and takes its completed epochs and best dev CER from the TensorBoard
   log.
 
+### Data augmentation
+
+Each of these keys in a config's `data` augments the training data, and
+none is used for dev. They are applied in this order, each with a chance `p`
+of 1 unless set:
+
+| Key | What it does | Example |
+|---|---|---|
+| `volume` | Sets the peak of the audio to a random level in dBFS, where 0 is full scale, clipping what exceeds it | `{"p" : 0.2, "dbfs" : [-13, 7]}` |
+| `pitch` | Shifts the pitch by stretching the spectrogram's frequency axis by a random factor | `{"factor" : [0.9, 1.1]}` |
+| `tempo` | Speeds speech up or down by stretching the spectrogram's time axis by a random factor, where above 1 is faster | `{"factor" : [0.9, 1.1]}` |
+| `spec_augment` | Masks random frequency bands and time spans of the features ([SpecAugment]) | see `examples/commonvoice/ctc_streaming_config.json` |
+
+The examples are the settings Mozilla's [DeepSpeech 0.9] trained with. Its
+volume range of -10 to 10 counts a full-scale peak as 3 dBFS, which is -13 to
+7 here. It also overlaid noise and babble and added reverb, codec and
+bandwidth effects, which this repository does not have yet. The random
+choices come from PyTorch's generator, so augmented runs resume exactly.
+
 ### Mixed precision and combined datasets
 
 Set `"mixed_precision"` at the top level of a config to compute the network
@@ -250,6 +269,8 @@ For the LibriSpeech LM and the streaming CTC model:
 [LibriSpeech LM corpus]: https://www.openslr.org/11/
 
 [Deep Speech 2]: https://arxiv.org/abs/1512.02595
+[DeepSpeech 0.9]: https://github.com/mozilla/DeepSpeech/releases/tag/v0.9.0
+[SpecAugment]: https://arxiv.org/abs/1904.08779
 
 ## Examples
 

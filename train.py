@@ -204,12 +204,11 @@ def run(config, device, resume=False):
         )
     workers = data_cfg.get("num_workers", 4)
     # Only the training data is augmented.
+    augment = {
+        name: data_cfg[name] for name in loader.AUGMENTATIONS if name in data_cfg
+    }
     train_ldr = loader.make_loader(
-        data_cfg["train_set"],
-        preproc,
-        batch_size,
-        workers,
-        augment=data_cfg.get("spec_augment"),
+        data_cfg["train_set"], preproc, batch_size, workers, augment=augment
     )
     dev_ldr = loader.make_loader(data_cfg["dev_set"], preproc, batch_size, workers)
 
