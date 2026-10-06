@@ -42,6 +42,13 @@ After the model is done training you can evaluate it with
 uv run eval.py <path_to_model> <path_to_data_json>
 ```
 
+To measure how fast a config trains on this machine, and how long an epoch
+will take, before starting a long run:
+
+```
+uv run benchmark.py <path_to_config>
+```
+
 To see the available options for each script use `-h`: 
 
 ```
@@ -98,11 +105,11 @@ of 1 unless set:
 | `volume` | Sets the peak of the audio to a random level in dBFS, where 0 is full scale, clipping what exceeds it | `{"p" : 0.2, "dbfs" : [-13, 7]}` |
 | `pitch` | Shifts the pitch by stretching the spectrogram's frequency axis by a random factor | `{"factor" : [0.9, 1.1]}` |
 | `tempo` | Speeds speech up or down by stretching the spectrogram's time axis by a random factor, where above 1 is faster | `{"factor" : [0.9, 1.1]}` |
-| `spec_augment` | Masks random frequency bands and time spans of the features ([SpecAugment]) | see `examples/commonvoice/ctc_streaming_config.json` |
+| `spec_augment` | Masks random frequency bands and time spans of the features ([SpecAugment]) | see `examples/commonvoice/ctc_streaming_3750h_gpu_config.json` |
 
 The examples are the settings Mozilla's [DeepSpeech 0.9] trained with, and
-`examples/commonvoice/ctc_streaming_config.json` uses all of them, with babble
-from LibriSpeech. Where they differ:
+the configs in `examples/commonvoice` use all of them, with babble from
+LibriSpeech. Where they differ:
 
 - DeepSpeech measured the signal-to-noise ratio between peak levels, which
   gave louder noise for the same numbers than the power ratio here.
@@ -133,7 +140,7 @@ does not cover them there.
 
 `train_set` and `dev_set` can be lists of dataset json files, to train on
 several datasets at once, such as LibriSpeech and Common Voice in
-`examples/commonvoice/ctc_streaming_config.json`.
+`examples/commonvoice/ctc_streaming_3750h_gpu_config.json`.
 
 ## Streaming
 
