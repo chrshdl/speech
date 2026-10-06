@@ -19,6 +19,8 @@ def make_config(save_path, epochs, mixed_precision=None):
             "dev_set": "test.json",
             "start_and_end": False,
             "num_workers": 0,
+            "noise": {"source": ".", "snr": [5, 15], "p": 0.5},
+            "reverb": {"delay": [2, 18], "decay": [0.55, 0.85], "p": 0.5},
             "volume": {"dbfs": [-13, 7], "p": 0.5},
             "pitch": {"factor": [0.9, 1.1]},
             "tempo": {"factor": [0.9, 1.1]},

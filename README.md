@@ -93,16 +93,29 @@ of 1 unless set:
 
 | Key | What it does | Example |
 |---|---|---|
+| `noise` | Mixes random segments of recordings into the audio at a random signal-to-noise ratio in dB, keeping its peak. `source` is a directory of recordings or a dataset json, and `layers` mixes several, as babble from speech. A list adds several overlays. | `{"p" : 0.9, "source" : "examples/noise/data", "snr" : [8, 16]}` |
+| `reverb` | Adds reverberation from five comb filters with a random delay in ms and decay per echo in dB, keeping the peak | `{"p" : 0.2, "delay" : [2, 18], "decay" : [0.55, 0.85]}` |
 | `volume` | Sets the peak of the audio to a random level in dBFS, where 0 is full scale, clipping what exceeds it | `{"p" : 0.2, "dbfs" : [-13, 7]}` |
 | `pitch` | Shifts the pitch by stretching the spectrogram's frequency axis by a random factor | `{"factor" : [0.9, 1.1]}` |
 | `tempo` | Speeds speech up or down by stretching the spectrogram's time axis by a random factor, where above 1 is faster | `{"factor" : [0.9, 1.1]}` |
 | `spec_augment` | Masks random frequency bands and time spans of the features ([SpecAugment]) | see `examples/commonvoice/ctc_streaming_config.json` |
 
-The examples are the settings Mozilla's [DeepSpeech 0.9] trained with. Its
-volume range of -10 to 10 counts a full-scale peak as 3 dBFS, which is -13 to
-7 here. It also overlaid noise and babble and added reverb, codec and
-bandwidth effects, which this repository does not have yet. The random
-choices come from PyTorch's generator, so augmented runs resume exactly.
+The examples are the settings Mozilla's [DeepSpeech 0.9] trained with, and
+`examples/commonvoice/ctc_streaming_config.json` uses all of them, with babble
+from LibriSpeech. Where they differ:
+
+- DeepSpeech measured the signal-to-noise ratio between peak levels, which
+  gave louder noise for the same numbers than the power ratio here.
+- Its volume range of -10 to 10 counts a full-scale peak as 3 dBFS, which is
+  -13 to 7 here.
+- It also added codec and bandwidth effects, which this repository does not
+  have yet.
+
+The reverb is DeepSpeech's, which colors the sound with the tones of its comb
+filters. Recorded room impulse responses would sound more natural. For noise,
+`examples/noise/download.py` downloads the background noise recordings of
+Speech Commands, see `examples/noise/README.md`. The random choices come from
+PyTorch's generator, so augmented runs resume exactly.
 
 ### Mixed precision and combined datasets
 

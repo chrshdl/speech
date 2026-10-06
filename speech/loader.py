@@ -1,18 +1,22 @@
+import glob
 import json
+import math
+import os
 import random
 
 import numpy as np
 import scipy.ndimage
 import scipy.signal
+import soundfile
 import torch
 import torch.utils.data as tud
 
 from speech.utils import wave
 
 # The training augmentations a config's data can set, in the order they
-# are applied: volume on the audio, pitch and tempo on the spectrogram,
-# then spec_augment on the normalized features.
-AUGMENTATIONS = ("volume", "pitch", "tempo", "spec_augment")
+# are applied: noise, reverb and volume on the audio, pitch and tempo on
+# the spectrogram, then spec_augment on the normalized features.
+AUGMENTATIONS = ("noise", "reverb", "volume", "pitch", "tempo", "spec_augment")
 
 
 class Preprocessor:
@@ -128,6 +132,12 @@ class AudioDataset(tud.Dataset):
 
         augment = self.augment
         audio, sample_rate = wave.array_from_wave(datum["audio"])
+        # Noise can be one overlay or a list, such as noise and babble.
+        overlays = augment.get("noise", [])
+        for overlay in [overlays] if isinstance(overlays, dict) else overlays:
+            audio = noise(audio, sample_rate=sample_rate, **overlay)
+        if "reverb" in augment:
+            audio = reverb(audio, sample_rate=sample_rate, **augment["reverb"])
         if "volume" in augment:
             audio = volume(audio, **augment["volume"])
         features = log_specgram(audio, sample_rate)
@@ -149,6 +159,134 @@ def _uniform(low, high):
 
 def _chance(p):
     return float(torch.rand(())) < p
+
+
+def _randint(low, high):
+    return int(torch.randint(low, high + 1, ()))
+
+
+def _keep_peak(audio, original):
+    # Scales the augmented audio back to the original peak, so it never
+    # clips and the volume augmentation still sets the level.
+    peak = np.abs(audio).max()
+    if peak == 0:
+        return audio.astype(np.float32)
+    return (audio * (np.abs(original).max() / peak)).astype(np.float32)
+
+
+class NoiseSource:
+    def __init__(self, source):
+        """
+        Recordings to mix into training audio: a directory of audio files,
+        which are kept in memory, or a dataset json, whose files are read
+        when they are picked, such as speech for babble.
+        """
+        if os.path.isdir(source):
+            self.paths = sorted(
+                p
+                for ext in ("wav", "flac")
+                for p in glob.glob(os.path.join(source, f"*.{ext}"))
+            )
+            self.cache = {}
+        else:
+            self.paths = [d["audio"] for d in read_data_json(source)]
+            self.cache = None
+        if not self.paths:
+            raise ValueError(f"No audio files in {source}")
+
+    def segment(self, frames, sample_rate):
+        """
+        Returns a random segment of a random recording as float samples
+        at the sample rate, looping recordings that are shorter.
+        """
+        path = self.paths[_randint(0, len(self.paths) - 1)]
+        audio = self.cache.get(path) if self.cache is not None else None
+        if audio is None:
+            audio, rate = soundfile.read(path, dtype="float32", always_2d=True)
+            audio = audio.mean(axis=1)
+            if rate != sample_rate:
+                g = math.gcd(rate, sample_rate)
+                audio = scipy.signal.resample_poly(audio, sample_rate // g, rate // g)
+            if self.cache is not None:
+                self.cache[path] = audio
+        if len(audio) < frames:
+            audio = np.tile(audio, math.ceil(frames / len(audio)))
+        start = _randint(0, len(audio) - frames)
+        return audio[start : start + frames]
+
+
+# The noise sources of this process, loaded once each.
+_noise_sources = {}
+
+
+def noise(audio, source, snr, p=1.0, layers=(1, 1), sample_rate=16000):
+    """
+    Mixes random segments of recordings into the audio at a random
+    signal-to-noise ratio, keeping its peak level. DeepSpeech mixed
+    background noise into 90% of its examples, and 8 to 12 layers of
+    speech, as babble, into 10%, both at 8 to 16 dB.
+
+    Arguments:
+        audio (ndarray): The samples to add noise to.
+        source (str): A directory of recordings or a dataset json, see
+            NoiseSource.
+        snr (list): The range of signal-to-noise ratios in dB, as the
+            ratio of the powers of the audio and the added noise.
+            DeepSpeech compared peak levels instead, so the same numbers
+            gave it louder noise.
+        p (float): The probability of adding noise.
+        layers (list): The range of the number of recordings to mix,
+            each at the same power.
+        sample_rate (int): The sample rate of the audio.
+    """
+    power = np.mean(np.square(audio, dtype=np.float64))
+    if power == 0 or not _chance(p):
+        return audio
+    if source not in _noise_sources:
+        _noise_sources[source] = NoiseSource(source)
+    mix = np.zeros(len(audio))
+    for _ in range(_randint(*layers)):
+        layer = _noise_sources[source].segment(len(audio), sample_rate)
+        layer_power = np.mean(np.square(layer, dtype=np.float64))
+        if layer_power > 0:
+            mix += layer / math.sqrt(layer_power)
+    mix_power = np.mean(np.square(mix))
+    if mix_power == 0:
+        return audio
+    gain = math.sqrt(power / mix_power / 10 ** (_uniform(*snr) / 10))
+    return _keep_peak(audio + gain * mix, audio)
+
+
+def reverb(audio, delay, decay, p=1.0, sample_rate=16000):
+    """
+    Adds reverberation as DeepSpeech did, with echoes from five comb
+    filters whose delays are the base delay times 17/17, 19/17, 23/17,
+    29/17 and 31/17, prime ratios so that they do not reinforce each
+    other, keeping the peak level. DeepSpeech applied it to 20% of its
+    examples with a delay of 2 to 18 ms and a decay of 0.55 to 0.85 dB.
+
+    Arguments:
+        audio (ndarray): The samples to reverberate.
+        delay (list): The range of the base delay in milliseconds.
+        decay (list): The range of the decay of each echo in dB.
+        p (float): The probability of adding reverberation.
+        sample_rate (int): The sample rate of the audio.
+    """
+    if not _chance(p) or not np.any(audio):
+        return audio
+    delay_ms = _uniform(*delay)
+    gain = 10 ** (-_uniform(*decay) / 20)
+    signal = np.asarray(audio, dtype=np.float64)
+    result = signal.copy()
+    primes = (17, 19, 23, 29, 31)
+    for prime in primes:
+        frames = max(16, math.floor(delay_ms * prime / primes[0] * sample_rate / 1000))
+        # Each echo repeats the output a delay later: y[n] = x[n] + g y[n - d].
+        feedback = np.zeros(frames + 1)
+        feedback[0] = 1
+        feedback[frames] = -gain
+        result += scipy.signal.lfilter([1.0], feedback, signal)
+    return _keep_peak(result, signal)
 
 
 def volume(audio, dbfs, p=1.0):

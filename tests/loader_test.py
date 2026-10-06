@@ -1,5 +1,8 @@
+import math
+
 import numpy as np
 import pytest
+import soundfile
 import torch
 
 from speech import loader
@@ -140,6 +143,11 @@ def test_tempo():
 def test_augmented_dataset():
     preproc = loader.Preprocessor("test.json", start_and_end=False)
     augment = {
+        "noise": [
+            {"source": ".", "snr": [5, 15], "p": 0.5},
+            {"source": "test.json", "snr": [5, 15], "layers": [2, 3], "p": 0.5},
+        ],
+        "reverb": {"delay": [2, 18], "decay": [0.55, 0.85], "p": 0.5},
         "volume": {"dbfs": [-13, 7], "p": 0.5},
         "pitch": {"factor": [0.9, 1.1]},
         "tempo": {"factor": [0.9, 1.1]},
@@ -166,3 +174,65 @@ def test_augmented_dataset():
     torch.manual_seed(1)
     other = augmented[0][0]
     assert other.shape != inputs.shape or not np.array_equal(other, inputs)
+
+
+def deepspeech_reverb(audio, delay, decay, rate):
+    # DeepSpeech 0.9.3's reverb loop, without its final normalization.
+    decay = 10 ** (-decay / 20)
+    result = np.copy(audio)
+    primes = [17, 19, 23, 29, 31]
+    for delay_prime in primes:
+        layer = np.copy(audio)
+        n_delay = math.floor(delay * (delay_prime / primes[0]) * rate / 1000.0)
+        n_delay = max(16, n_delay)
+        for w_index in range(math.floor(len(audio) / n_delay)):
+            w1 = w_index * n_delay
+            w2 = (w_index + 1) * n_delay
+            width = min(len(audio) - w2, n_delay)
+            layer[w2 : w2 + width] += decay * layer[w1 : w1 + width]
+        result += layer
+    return result
+
+
+def test_reverb():
+    audio, rate = wave.array_from_wave("test0.wav")
+    audio = audio.astype(np.float64)
+    for delay, decay in [(2.0, 0.55), (10.0, 0.7), (18.0, 0.85)]:
+        ours = loader.reverb(audio, delay=[delay, delay], decay=[decay, decay])
+        theirs = deepspeech_reverb(audio, delay, decay, rate)
+        theirs *= np.abs(audio).max() / np.abs(theirs).max()
+        assert np.allclose(ours, theirs, rtol=1e-4, atol=1e-2)
+        # The peak level is kept.
+        assert np.abs(ours).max() == pytest.approx(np.abs(audio).max())
+    assert loader.reverb(audio, delay=[10, 10], decay=[0.7, 0.7], p=0) is audio
+
+
+def test_noise(tmp_path):
+    audio, _ = wave.array_from_wave("test0.wav")
+    audio = audio.astype(np.float32)
+
+    # White noise at another sample rate and shorter than the audio.
+    rng = np.random.RandomState(0)
+    soundfile.write(tmp_path / "white.wav", rng.uniform(-0.5, 0.5, 4000), 8000)
+    torch.manual_seed(0)
+    noisy = loader.noise(audio, source=str(tmp_path), snr=[10, 10])
+    assert noisy.shape == audio.shape
+    assert np.abs(noisy).max() == pytest.approx(np.abs(audio).max())
+
+    # Undo the peak scaling, then measure the added noise against the audio.
+    scale = np.dot(noisy, audio) / np.dot(audio, audio)
+    added = noisy / scale - audio
+    snr = 10 * np.log10(np.mean(audio**2) / np.mean(added**2))
+    assert snr == pytest.approx(10, abs=0.3)
+
+    # Babble mixes several recordings from a dataset.
+    babble = loader.noise(audio, source="test.json", snr=[5, 5], layers=[3, 3])
+    assert babble.shape == audio.shape
+    assert not np.array_equal(babble, audio)
+
+    assert loader.noise(audio, source="test.json", snr=[5, 5], p=0) is audio
+    silent = np.zeros(100, dtype=np.float32)
+    assert loader.noise(silent, source="test.json", snr=[5, 5]) is silent
+    (tmp_path / "empty").mkdir()
+    with pytest.raises(ValueError):
+        loader.NoiseSource(str(tmp_path / "empty"))
