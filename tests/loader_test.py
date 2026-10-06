@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 
 from speech import loader
 from speech.utils import wave
@@ -56,3 +57,38 @@ def test_specgram_stream():
     # scipy computes in float32 for int16 audio, so the log of quiet bins
     # carries some rounding noise.
     assert np.allclose(frames, full, atol=1e-3)
+
+
+def test_spec_augment():
+    rng = np.random.RandomState(0)
+    features = rng.randn(200, 161).astype(np.float32) + 5
+    args = {
+        "freq_masks": 2,
+        "freq_width": 27,
+        "time_masks": 2,
+        "time_width": 40,
+        "time_ratio": 0.1,
+    }
+
+    torch.manual_seed(0)
+    masked = loader.spec_augment(features, **args)
+    assert masked.shape == features.shape
+    assert not np.shares_memory(masked, features)
+
+    # Masked bands and spans are zero, everything else is unchanged.
+    zero_bins = np.all(masked == 0, axis=0)
+    zero_frames = np.all(masked == 0, axis=1)
+    assert zero_bins.sum() <= 2 * 27
+    # Time spans are capped at 10% of the 200 frames.
+    assert zero_frames.sum() <= 2 * 20
+    kept = ~zero_bins[None, :] & ~zero_frames[:, None]
+    assert np.array_equal(masked[kept], features[kept])
+    assert (masked[~kept] == 0).all()
+
+    # The masks come from torch's generator.
+    torch.manual_seed(0)
+    assert np.array_equal(loader.spec_augment(features, **args), masked)
+
+    # Without masks nothing changes.
+    none = dict(args, freq_masks=0, time_masks=0)
+    assert np.array_equal(loader.spec_augment(features, **none), features)

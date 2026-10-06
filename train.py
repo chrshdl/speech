@@ -3,6 +3,8 @@ import json
 import math
 import os
 import random
+import signal
+import sys
 import time
 
 import torch
@@ -18,8 +20,32 @@ from speech.utils.io import atomic_write
 # Everything needed to resume training, saved after each epoch.
 STATE = "train_state"
 
+# The mixed_precision settings and the types they compute in.
+PRECISIONS = {None: None, "bf16": torch.bfloat16, "fp16": torch.float16}
 
-def run_epoch(model, optimizer, train_ldr, writer, it, avg_loss):
+
+class MixedPrecision:
+    """
+    Runs the forward pass in bfloat16 or float16, which GPUs compute much
+    faster with their tensor cores, or in float32 without a mode. The
+    losses stay in float32. float16 has a small range, so its gradients
+    are scaled up to keep small values from rounding to zero.
+    """
+
+    def __init__(self, mode, device):
+        if mode not in PRECISIONS:
+            raise ValueError(f"mixed_precision must be bf16 or fp16, not {mode}")
+        self.dtype = PRECISIONS[mode]
+        self.device_type = device.type
+        self.scaler = torch.amp.GradScaler(device.type, enabled=mode == "fp16")
+
+    def autocast(self):
+        return torch.autocast(
+            self.device_type, dtype=self.dtype, enabled=self.dtype is not None
+        )
+
+
+def run_epoch(model, optimizer, precision, train_ldr, writer, it, avg_loss):
 
     model_t = 0.0
     data_t = 0.0
@@ -28,13 +54,18 @@ def run_epoch(model, optimizer, train_ldr, writer, it, avg_loss):
     for batch in tq:
         start_t = time.time()
         optimizer.zero_grad()
-        loss = model.loss(batch)
-        loss.backward()
+        with precision.autocast():
+            loss = model.loss(batch)
+        precision.scaler.scale(loss).backward()
 
+        # Clip the true gradients, not the scaled ones.
+        precision.scaler.unscale_(optimizer)
         grad_norm = nn.utils.clip_grad_norm_(model.parameters(), 200).item()
         loss = loss.item()
 
-        optimizer.step()
+        # Skips the step if float16 gradients overflowed.
+        precision.scaler.step(optimizer)
+        precision.scaler.update()
 
         # The MPS allocator caches freed blocks for every batch shape it
         # sees, which on a small machine pushes everything else to swap.
@@ -62,14 +93,14 @@ def run_epoch(model, optimizer, train_ldr, writer, it, avg_loss):
     return it, avg_loss
 
 
-def eval_dev(model, ldr, preproc):
+def eval_dev(model, ldr, preproc, precision):
     losses = []
     all_preds = []
     all_labels = []
 
     model.set_eval()
 
-    with torch.no_grad():
+    with torch.no_grad(), precision.autocast():
         for batch in tqdm.tqdm(ldr):
             preds = model.infer(batch)
             loss = model.loss(batch)
@@ -88,7 +119,9 @@ def eval_dev(model, ldr, preproc):
     return loss, cer
 
 
-def save_state(path, model, optimizer, epoch, it, avg_loss, best_so_far):
+def save_state(
+    path, model, optimizer, scheduler, precision, epoch, it, avg_loss, best_so_far
+):
     """
     Saves the state to resume training from after the given number of
     epochs, including the random number generators, which shuffle the
@@ -106,12 +139,14 @@ def save_state(path, model, optimizer, epoch, it, avg_loss, best_so_far):
         "best_so_far": best_so_far,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "scaler": precision.scaler.state_dict(),
         "rng": rng,
     }
     atomic_write(path, lambda tmp: torch.save(state, tmp))
 
 
-def load_state(path, model, optimizer):
+def load_state(path, model, optimizer, scheduler, precision):
     """
     Restores a state saved with save_state. Returns the completed epochs,
     the iteration, the average loss and the best dev CER so far.
@@ -119,6 +154,10 @@ def load_state(path, model, optimizer):
     state = torch.load(path, map_location="cpu")
     model.load_state_dict(state["model"])
     optimizer.load_state_dict(state["optimizer"])
+    if scheduler is not None and state.get("scheduler") is not None:
+        scheduler.load_state_dict(state["scheduler"])
+    if state.get("scaler"):
+        precision.scaler.load_state_dict(state["scaler"])
     rng = state["rng"]
     random.setstate(rng["python"])
     torch.set_rng_state(rng["torch"])
@@ -164,7 +203,14 @@ def run(config, device, resume=False):
             data_cfg["train_set"], start_and_end=data_cfg["start_and_end"]
         )
     workers = data_cfg.get("num_workers", 4)
-    train_ldr = loader.make_loader(data_cfg["train_set"], preproc, batch_size, workers)
+    # Only the training data is augmented.
+    train_ldr = loader.make_loader(
+        data_cfg["train_set"],
+        preproc,
+        batch_size,
+        workers,
+        augment=data_cfg.get("spec_augment"),
+    )
     dev_ldr = loader.make_loader(data_cfg["dev_set"], preproc, batch_size, workers)
 
     # Model
@@ -182,10 +228,23 @@ def run(config, device, resume=False):
             momentum=opt_cfg["momentum"],
         )
 
+    # Lower the learning rate when the dev loss stops improving.
+    scheduler = None
+    if "lr_decay" in opt_cfg:
+        decay = opt_cfg["lr_decay"]
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            factor=decay["factor"],
+            patience=decay["patience"],
+            min_lr=decay.get("min_lr", 0.0),
+        )
+
+    precision = MixedPrecision(config.get("mixed_precision"), device)
+
     start_epoch, it, avg_loss, best_so_far = 0, 0, 0.0, math.inf
     if resume and os.path.exists(state_path):
         start_epoch, it, avg_loss, best_so_far = load_state(
-            state_path, model, optimizer
+            state_path, model, optimizer, scheduler, precision
         )
     elif resume:
         print(
@@ -207,17 +266,23 @@ def run(config, device, resume=False):
     for e in range(start_epoch, opt_cfg["epochs"]):
         start = time.time()
 
-        run_state = run_epoch(model, optimizer, train_ldr, writer, *run_state)
+        run_state = run_epoch(
+            model, optimizer, precision, train_ldr, writer, *run_state
+        )
 
         msg = "Epoch {} completed in {:.2f} (s)."
         print(msg.format(e, time.time() - start))
 
-        dev_loss, dev_cer = eval_dev(model, dev_ldr, preproc)
+        dev_loss, dev_cer = eval_dev(model, dev_ldr, preproc, precision)
 
         # Log for tensorboard
         writer.add_scalar("dev_loss", dev_loss, e)
         writer.add_scalar("dev_cer", dev_cer, e)
+        writer.add_scalar("learning_rate", optimizer.param_groups[0]["lr"], e)
         writer.flush()
+
+        if scheduler is not None:
+            scheduler.step(dev_loss)
 
         speech.save(model, preproc, save_path)
 
@@ -226,7 +291,16 @@ def run(config, device, resume=False):
             best_so_far = dev_cer
             speech.save(model, preproc, save_path, tag="best")
 
-        save_state(state_path, model, optimizer, e + 1, *run_state, best_so_far)
+        save_state(
+            state_path,
+            model,
+            optimizer,
+            scheduler,
+            precision,
+            e + 1,
+            *run_state,
+            best_so_far,
+        )
 
     writer.close()
 
@@ -251,10 +325,18 @@ if __name__ == "__main__":
     with open(args.config, "r") as fid:
         config = json.load(fid)
 
+    # Exit cleanly on SIGTERM, such as from kill, so the data loader shuts
+    # down its worker processes instead of leaving them running.
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(128 + signum))
+
     random.seed(config["seed"])
     torch.manual_seed(config["seed"])
 
     device = speech.best_device()
+    if device.type == "cuda":
+        # Use TF32 tensor cores for the matrix products left in float32.
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
 
     if device.type == "cuda" and args.deterministic:
         torch.backends.cudnn.enabled = False

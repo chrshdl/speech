@@ -22,7 +22,7 @@ class CTC(model.Model):
         x = self.encode(x.to(self.device), x_lens)
         x = self.fc(x)
         if softmax:
-            return F.softmax(x, dim=2)
+            return F.softmax(x.float(), dim=2)
         return x
 
     def loss(self, batch):
@@ -30,7 +30,7 @@ class CTC(model.Model):
         out = self.forward_impl(x, x_lens)
 
         # ctc_loss expects log probabilities with shape (time, batch, classes).
-        log_probs = F.log_softmax(out, dim=2).transpose(0, 1)
+        log_probs = F.log_softmax(out.float(), dim=2).transpose(0, 1)
         loss = F.ctc_loss(
             log_probs,
             y.to(out.device),
@@ -62,7 +62,7 @@ class CTC(model.Model):
         next call. See Model.encode_stream.
         """
         x, state = self.encode_stream(x.to(self.device), state, final)
-        return F.softmax(self.fc(x), dim=2), state
+        return F.softmax(self.fc(x).float(), dim=2), state
 
     @torch.no_grad()
     def infer(self, batch, beam_size=1, lm=None, prune=None):

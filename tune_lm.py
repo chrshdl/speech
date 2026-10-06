@@ -69,13 +69,14 @@ def _evaluate(setting):
 def model_outputs(model_path, dataset_json, tag):
     """Runs the model once over the dataset."""
     model, preproc = speech.load(model_path, tag=tag)
+    model.to(speech.best_device())
     model.set_eval()
     outputs = []
     with torch.no_grad():
         for d in tqdm.tqdm(loader.read_data_json(dataset_json), desc="model"):
             x = preproc.preprocess(d["audio"], d["text"])[0]
             x = torch.from_numpy(x).unsqueeze(0)
-            probs = model.forward_impl(x, softmax=True)[0].numpy()
+            probs = model.forward_impl(x, softmax=True)[0].cpu().numpy()
             outputs.append((probs, d["text"]))
     return outputs, preproc.char_to_int, model.blank
 

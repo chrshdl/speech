@@ -43,7 +43,11 @@ class Transducer(model.Model):
 
     def loss(self, batch):
         x, y, x_lens, y_lens = self.collate(*batch)
-        out = self.forward_impl(x, y, x_lens)
+        out = self.forward_impl(x, y, x_lens).float()
+        # torchaudio has no RNN-T loss for MPS, so compute it on the CPU.
+        # The gradients flow back to the device.
+        if out.device.type == "mps":
+            out = out.cpu()
         loss = rnnt_loss(
             out,
             y.to(out.device, torch.int32),
@@ -53,7 +57,7 @@ class Transducer(model.Model):
             reduction="sum",
         )
         # Average over the batch but not the label lengths, like seq2seq.
-        return loss / out.size(0)
+        return loss.to(self.device) / out.size(0)
 
     def predict(self, y, state=None):
         """

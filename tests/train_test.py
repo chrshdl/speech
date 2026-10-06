@@ -2,21 +2,30 @@ import copy
 import os
 import random
 
+import pytest
 import torch
 
 import speech
 import train
 
 
-def make_config(save_path, epochs):
+def make_config(save_path, epochs, mixed_precision=None):
     return {
         "seed": 0,
+        "mixed_precision": mixed_precision,
         "save_path": str(save_path),
         "data": {
             "train_set": "test.json",
             "dev_set": "test.json",
             "start_and_end": False,
             "num_workers": 0,
+            "spec_augment": {
+                "freq_masks": 2,
+                "freq_width": 20,
+                "time_masks": 2,
+                "time_width": 20,
+                "time_ratio": 0.2,
+            },
         },
         "optimizer": {
             "type": "adam",
@@ -25,6 +34,7 @@ def make_config(save_path, epochs):
             "batch_size": 1,
             "epochs": epochs,
             "learning_rate": 1e-3,
+            "lr_decay": {"factor": 0.5, "patience": 0},
         },
         "model": {
             "class": "CTC",
@@ -50,21 +60,40 @@ def weights(save_path):
     return model.state_dict()
 
 
-def test_resume(tmp_path):
-    train_run(make_config(tmp_path / "full", 3), seed=0)
+@pytest.mark.parametrize("precision", [None, "bf16", "fp16"])
+def test_resume(tmp_path, precision):
+    train_run(make_config(tmp_path / "full", 4, precision), seed=0)
 
-    # Stop after two epochs, then resume for the third. The second seed
+    # Stop after two epochs, then resume for two more. The second seed
     # shows that the resumed run restores the random number state.
-    train_run(make_config(tmp_path / "resumed", 2), seed=0)
-    train_run(make_config(tmp_path / "resumed", 3), seed=1, resume=True)
+    train_run(make_config(tmp_path / "resumed", 2, precision), seed=0)
+    train_run(make_config(tmp_path / "resumed", 4, precision), seed=1, resume=True)
 
     full = weights(tmp_path / "full")
     resumed = weights(tmp_path / "resumed")
     for name, value in full.items():
         assert torch.equal(value, resumed[name]), name
 
+    # The learning rate schedule continues too.
+    full_state = torch.load(tmp_path / "full" / train.STATE)
     state = torch.load(tmp_path / "resumed" / train.STATE)
-    assert state["epoch"] == 3
+    assert state["epoch"] == 4
+    assert state["scheduler"] == full_state["scheduler"]
+    assert state["scaler"] == full_state["scaler"]
+    assert all(torch.isfinite(v).all() for v in resumed.values())
+
+
+def test_mixed_precision_changes_training(tmp_path):
+    # bf16 must really take effect, or the precision tests prove nothing.
+    train_run(make_config(tmp_path / "fp32", 1), seed=0)
+    train_run(make_config(tmp_path / "bf16", 1, "bf16"), seed=0)
+    fp32, bf16 = weights(tmp_path / "fp32"), weights(tmp_path / "bf16")
+    assert any(not torch.equal(fp32[k], bf16[k]) for k in fp32)
+
+
+def test_unknown_precision():
+    with pytest.raises(ValueError):
+        train.MixedPrecision("fp8", torch.device("cpu"))
 
 
 def test_resume_without_state(tmp_path):

@@ -1,0 +1,47 @@
+{
+    "seed" : 2017,
+    "save_path" : "examples/librispeech/models/ctc_streaming_specaug",
+
+    "data" : {
+        "train_set" : "examples/librispeech/data/train.json",
+        "dev_set" : "examples/librispeech/data/dev.json",
+        "start_and_end" : false,
+        "num_workers" : 1,
+        "spec_augment" : {
+            "freq_masks" : 2,
+            "freq_width" : 27,
+            "time_masks" : 2,
+            "time_width" : 40,
+            "time_ratio" : 0.2
+        }
+    },
+
+    "optimizer" : {
+        "type" : "adam",
+        "batch_size" : 8,
+        "epochs" : 30,
+        "learning_rate" : 5e-4,
+        "lr_decay" : {
+            "factor" : 0.5,
+            "patience" : 2,
+            "min_lr" : 1e-5
+        }
+    },
+
+    "model" : {
+        "class" : "CTC",
+        "dropout" : 0.3,
+        "encoder" : {
+            "conv" : [
+                [32, 5, 41, 2],
+                [32, 5, 21, 2]
+            ],
+            "rnn" : {
+                "dim" : 384,
+                "bidirectional" : false,
+                "layers" : 3
+            },
+            "lookahead" : 5
+        }
+    }
+}

@@ -54,7 +54,7 @@ class Seq2Seq(model.Model):
         steps = torch.arange(targets.size(1), device=y.device)
         targets[steps >= (y_lens.to(y.device) - 1).unsqueeze(1)] = -100
         loss = nn.functional.cross_entropy(
-            out.reshape(-1, out_dim),
+            out.reshape(-1, out_dim).float(),
             targets.reshape(-1),
             ignore_index=-100,
             reduction="sum",
@@ -95,7 +95,9 @@ class Seq2Seq(model.Model):
         out = []
         aligns = []
 
-        hx = x.new_zeros((x.shape[0], x.shape[2]))
+        # Under autocast the RNN cell needs inputs in its own precision on
+        # devices that do not cast it, such as MPS.
+        hx = x.new_zeros((x.shape[0], x.shape[2]), dtype=self.dec_rnn.weight_hh.dtype)
         ax = None
         sx = None
         for t in range(y.size()[1] - 1):
@@ -109,7 +111,7 @@ class Seq2Seq(model.Model):
             if sx is not None:
                 ix = ix + sx
 
-            hx = self.dec_rnn(ix.squeeze(dim=1), hx)
+            hx = self.dec_rnn(ix.squeeze(dim=1).to(hx.dtype), hx)
             ox = hx.unsqueeze(dim=1)
 
             sx, ax = self.attend(x, ox, ax, mask)
@@ -127,7 +129,9 @@ class Seq2Seq(model.Model):
         mask (optional) marks the frames of x to attend to
         """
         if state is None:
-            hx = x.new_zeros((x.shape[0], x.shape[2]))
+            hx = x.new_zeros(
+                (x.shape[0], x.shape[2]), dtype=self.dec_rnn.weight_hh.dtype
+            )
             ax = None
             sx = None
         else:
@@ -136,13 +140,13 @@ class Seq2Seq(model.Model):
         ix = self.embedding(y)
         if sx is not None:
             ix = ix + sx
-        hx = self.dec_rnn(ix.squeeze(dim=1), hx=hx)
+        hx = self.dec_rnn(ix.squeeze(dim=1).to(hx.dtype), hx=hx)
         ox = hx.unsqueeze(dim=1)
         sx, ax = self.attend(x, ox, ax=ax, mask=mask)
         out = ox + sx
         out = self.fc(out.squeeze(dim=1))
         if softmax:
-            out = nn.functional.log_softmax(out, dim=1)
+            out = nn.functional.log_softmax(out.float(), dim=1)
         return out, (hx, ax, sx)
 
     def predict(self, batch):

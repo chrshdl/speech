@@ -85,6 +85,24 @@ uv run train.py <path_to_config> --resume
   while, and takes its completed epochs and best dev CER from the TensorBoard
   log.
 
+### Mixed precision and combined datasets
+
+Set `"mixed_precision"` at the top level of a config to compute the network
+in a lower precision, which GPUs run much faster:
+
+- `"bf16"`, bfloat16, for NVIDIA A100, H100 and newer GPUs, and Apple silicon.
+- `"fp16"`, float16, for older NVIDIA GPUs. float16 has a small range, so the
+  gradients are scaled up, and the first few steps of a run can be skipped
+  while the scale settles.
+
+The losses are always computed in float32. On CUDA, the matrix products left
+in float32 use TF32. On Apple silicon the RNNs stay in float32, since autocast
+does not cover them there.
+
+`train_set` and `dev_set` can be lists of dataset json files, to train on
+several datasets at once, such as LibriSpeech and Common Voice in
+`examples/commonvoice/ctc_streaming_config.json`.
+
 ## Streaming
 
 A bidirectional encoder needs the whole utterance before it can output
@@ -238,5 +256,17 @@ For the LibriSpeech LM and the streaming CTC model:
 For examples of model configurations and datasets, visit the examples
 directory. Each example dataset should have instructions and/or scripts for
 downloading and preparing the data. There should also be one or more model
-configurations available. The results for each configuration will documented in
-each examples corresponding `README.md`.
+configurations available. The results for each configuration will be documented
+in each example's `README.md`.
+
+- `examples/librispeech`: read audiobooks. The streaming CTC model, the
+  language model and the decoding described above were tuned on it. Its
+  `README.md` has the recipe and the results, a test-clean WER of 0.470 for
+  the streaming CTC model trained on 100 hours.
+- `examples/commonvoice`: [Mozilla Common Voice], crowd-sourced read speech
+  with many speakers, accents and microphones, for training with LibriSpeech
+  on a GPU.
+- `examples/timit` and `examples/wsj`: the original examples of this
+  repository.
+
+[Mozilla Common Voice]: https://commonvoice.mozilla.org

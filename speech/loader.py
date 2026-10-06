@@ -3,6 +3,7 @@ import random
 
 import numpy as np
 import scipy.signal
+import torch
 import torch.utils.data as tud
 
 from speech.utils import wave
@@ -16,8 +17,9 @@ class Preprocessor:
         """
         Builds a preprocessor from a dataset.
         Arguments:
-            data_json (string): A file containing a json representation
-                of each example per line.
+            data_json (string or list): A file containing a json
+                representation of each example per line, or a list of
+                such files.
             max_samples (int): The maximum number of examples to be used
                 in computing summary statistics.
             start_and_end (bool): Include start and end tokens in labels.
@@ -81,10 +83,16 @@ def compute_mean_std(audio_files):
 
 
 class AudioDataset(tud.Dataset):
-    def __init__(self, data_json, preproc, batch_size):
+    def __init__(self, data_json, preproc, batch_size, augment=None):
+        """
+        Arguments:
+            augment (dict, optional): The arguments of spec_augment, to
+                augment each example as it is loaded.
+        """
 
         data = read_data_json(data_json)
         self.preproc = preproc
+        self.augment = augment
 
         bucket_diff = 4
         max_len = max(len(x["text"]) for x in data)
@@ -106,8 +114,48 @@ class AudioDataset(tud.Dataset):
 
     def __getitem__(self, idx):
         datum = self.data[idx]
-        datum = self.preproc.preprocess(datum["audio"], datum["text"])
-        return datum
+        inputs, targets = self.preproc.preprocess(datum["audio"], datum["text"])
+        if self.augment is not None:
+            inputs = spec_augment(inputs, **self.augment)
+        return inputs, targets
+
+
+def spec_augment(
+    features, freq_masks, freq_width, time_masks, time_width, time_ratio=1.0
+):
+    """
+    SpecAugment (Park et al., 2019): masks random bands of frequencies and
+    spans of time with zeros, the mean of the normalized features. The
+    random choices come from torch's generator, so a resumed training run
+    repeats them.
+
+    Arguments:
+        features (ndarray): Normalized features with shape (time, freq).
+        freq_masks (int): The number of frequency bands to mask.
+        freq_width (int): The largest width of a band, in bins.
+        time_masks (int): The number of time spans to mask.
+        time_width (int): The longest span, in frames.
+        time_ratio (float): Caps the longest span at this share of the
+            frames, so short utterances keep most of their audio.
+
+    Returns a masked copy of the features.
+    """
+
+    def randint(high):
+        return int(torch.randint(high + 1, ()))
+
+    features = features.copy()
+    frames, bins = features.shape
+    for _ in range(freq_masks):
+        width = randint(min(freq_width, bins))
+        start = randint(bins - width)
+        features[:, start : start + width] = 0
+    longest = min(time_width, int(time_ratio * frames))
+    for _ in range(time_masks):
+        width = randint(longest)
+        start = randint(frames - width)
+        features[start : start + width] = 0
+    return features
 
 
 class BatchRandomSampler(tud.sampler.Sampler):
@@ -141,8 +189,8 @@ def collate(batch):
     return tuple(zip(*batch))
 
 
-def make_loader(dataset_json, preproc, batch_size, num_workers=4):
-    dataset = AudioDataset(dataset_json, preproc, batch_size)
+def make_loader(dataset_json, preproc, batch_size, num_workers=4, augment=None):
+    dataset = AudioDataset(dataset_json, preproc, batch_size, augment)
     sampler = BatchRandomSampler(dataset, batch_size)
     loader = tud.DataLoader(
         dataset,
@@ -175,8 +223,16 @@ def log_specgram(audio, sample_rate, window_size=20, step_size=10, eps=1e-10):
 
 
 def read_data_json(data_json):
-    with open(data_json) as fid:
-        return [json.loads(l) for l in fid]
+    """
+    Reads a dataset json file, one example per line, or a list of them,
+    which are concatenated.
+    """
+    paths = [data_json] if isinstance(data_json, str) else data_json
+    data = []
+    for path in paths:
+        with open(path) as fid:
+            data.extend(json.loads(l) for l in fid)
+    return data
 
 
 class SpecgramStream:

@@ -92,6 +92,10 @@ class Model(nn.Module):
         x = x.unsqueeze(1)
         x = self.conv(x)
         x = self.flatten_conv(x)
+        # Autocast can leave the convolutions in a lower precision than the
+        # RNN weights, and on some devices, such as MPS, it does not cast
+        # the RNN to match.
+        x = x.to(self.rnn.weight_ih_l0.dtype)
 
         if lengths is None:
             x, _ = self.rnn(x)
