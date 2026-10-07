@@ -1,5 +1,4 @@
 import argparse
-import math
 import queue
 import shutil
 import sys
@@ -8,88 +7,13 @@ import time
 import numpy as np
 import sounddevice
 import torch
-from torch import nn
 
 import speech
-from speech import loader
-from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, BeamSearch, decode
-from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
+from speech import loader, streaming
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, decode
+from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
+from speech.streaming import Transcriber, model_sample_rate
 from speech.utils import wave
-
-# The window of the training features in milliseconds, see log_specgram.
-WINDOW_MS = 20
-
-
-class Transcriber:
-    def __init__(self, model, preproc, sample_rate, search=None):
-        """
-        Transcribes a stream of audio chunk by chunk. Decodes greedily,
-        or with the given ctc_decoder.BeamSearch, which can include a
-        language model.
-        """
-        self.model = model
-        self.preproc = preproc
-        self.search = search
-        self.specgram = loader.SpecgramStream(sample_rate, window_size=WINDOW_MS)
-        self.state = None
-        self.greedy = []
-        self.prev = model.blank
-        # The number of blank frames since the last label.
-        self.blanks = 0
-
-        # Each encoded frame covers the feature hop times the time stride
-        # of the convolutions.
-        stride = math.prod(c.stride[0] for c in model.conv if isinstance(c, nn.Conv2d))
-        self.frame_seconds = stride * self.specgram.hop / sample_rate
-
-    def push(self, audio, final=False):
-        """
-        Adds the next chunk of audio samples. Pass final with the last
-        chunk to flush the frames held back for the lookahead.
-        """
-        frames = self.specgram.push(audio)
-        frames = (frames - self.preproc.mean) / self.preproc.std
-        frames = torch.from_numpy(frames).float().unsqueeze(0)
-        probs, self.state = self.model.stream(frames, self.state, final)
-        probs = probs[0].cpu().numpy()
-
-        # Greedy CTC decoding: merge repeats, then drop blanks. It also
-        # tracks pauses for the beam search.
-        for p in probs.argmax(axis=1).tolist():
-            if p != self.prev and p != self.model.blank:
-                self.greedy.append(p)
-            self.blanks = self.blanks + 1 if p == self.model.blank else 0
-            self.prev = p
-
-        if self.search is not None:
-            with np.errstate(divide="ignore"):
-                log_probs = np.log(probs)
-            for frame in log_probs.tolist():
-                self.search.step(frame)
-
-    def labels(self, final=False):
-        """
-        The best labels so far. With final, a language model also scores
-        the end of the utterance, such as its last word.
-        """
-        if self.search is None:
-            return self.greedy
-        return list(self.search.best(final)[0])
-
-    def text(self, final=False):
-        return "".join(self.preproc.decode(self.labels(final)))
-
-    @property
-    def pause_seconds(self):
-        """The time since the last label."""
-        return self.blanks * self.frame_seconds
-
-    def clear(self):
-        """Starts a new transcript, keeping the stream going."""
-        self.greedy = []
-        self.blanks = 0
-        if self.search is not None:
-            self.search.reset()
 
 
 def show(prefix, text, done=False):
@@ -103,14 +27,6 @@ def show(prefix, text, done=False):
             text = "…" + text[-(width - 1) :]
     # \033[K clears the rest of the line from the previous draw.
     print(f"\r{prefix}{text}\033[K", end="\n" if done else "", flush=True)
-
-
-def model_sample_rate(preproc):
-    """
-    The sample rate the model was trained on, from the number of
-    frequency bins in each feature frame.
-    """
-    return round((preproc.input_dim - 1) * 2 * 1000 / WINDOW_MS)
 
 
 def read_inputs(inputs, num):
@@ -233,13 +149,11 @@ def listen(model, preproc, chunk_ms, mic_device, pause, new_search):
                     )
                     silent = False
 
-                # Pauses can decode to spaces at the ends of a line.
-                text = transcriber.text().strip()
-                if text and transcriber.pause_seconds >= pause:
-                    show("> ", transcriber.text(final=True).strip(), done=True)
-                    transcriber.clear()
+                line = transcriber.take_line(pause)
+                if line is not None:
+                    show("> ", line, done=True)
                 else:
-                    show("> ", text)
+                    show("> ", transcriber.text().strip())
         except KeyboardInterrupt:
             pass
 
@@ -250,27 +164,20 @@ def listen(model, preproc, chunk_ms, mic_device, pause, new_search):
     show("> " if text else "", text, done=True)
 
 
-def search_factory(args, preproc, blank):
-    """
-    Returns a function that creates the beam search the arguments ask
-    for, or returns None for greedy decoding.
-    """
-    lm = None
-    if args.lm is not None:
-        lm = WordLM.load(args.lm).scorer(
-            preproc.char_to_int, args.lm_weight, args.word_bonus, args.unk_penalty
-        )
-    beam_size = args.beam_size or (BEAM_SIZE if lm is not None else 1)
-    if lm is None and beam_size == 1:
-        return lambda: None
-    return lambda: BeamSearch(blank, beam_size, lm, args.prune)
-
-
 def run(args):
     model, preproc = speech.load(args.model, tag=None if args.last else "best")
     model.to(args.device)
     model.set_eval()
-    new_search = search_factory(args, preproc, model.blank)
+    new_search = streaming.search_factory(
+        model.blank,
+        preproc.char_to_int,
+        args.lm,
+        args.beam_size,
+        args.prune,
+        args.lm_weight,
+        args.word_bonus,
+        args.unk_penalty,
+    )
 
     if args.mic:
         listen(model, preproc, args.chunk_ms, args.mic_device, args.pause, new_search)
@@ -336,7 +243,7 @@ if __name__ == "__main__":
     )
     decoding = parser.add_argument_group("decoding")
     decoding.add_argument(
-        "--lm", help="A word LM json file from speech.models.word_lm."
+        "--lm", help="A word LM .npz file from speech.models.word_lm."
     )
     decoding.add_argument(
         "--beam-size",

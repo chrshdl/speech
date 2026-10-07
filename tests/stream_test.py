@@ -2,8 +2,7 @@ import numpy as np
 import shared
 import torch
 
-import stream
-from speech import loader
+from speech import loader, streaming
 from speech.models import CTC
 from speech.models.ctc_decoder import PRUNE, BeamSearch, decode
 from speech.models.word_lm import WordLM
@@ -22,10 +21,10 @@ def test_transcriber():
     model.set_eval()
 
     audio, sample_rate = wave.array_from_wave("test0.wav")
-    assert stream.model_sample_rate(preproc) == sample_rate
+    assert streaming.model_sample_rate(preproc) == sample_rate
 
     # Feed 100 ms chunks, then flush.
-    transcriber = stream.Transcriber(model, preproc, sample_rate)
+    transcriber = streaming.Transcriber(model, preproc, sample_rate)
     for start in range(0, len(audio), 1600):
         transcriber.push(audio[start : start + 1600])
     transcriber.push(audio[:0], final=True)
@@ -58,7 +57,7 @@ def test_transcriber_with_lm():
 
     audio, sample_rate = wave.array_from_wave("test1.wav")
     search = BeamSearch(model.blank, 8, scorer, PRUNE)
-    transcriber = stream.Transcriber(model, preproc, sample_rate, search)
+    transcriber = streaming.Transcriber(model, preproc, sample_rate, search)
     for start in range(0, len(audio), 1600):
         transcriber.push(audio[start : start + 1600])
     transcriber.push(audio[:0], final=True)
@@ -72,4 +71,24 @@ def test_transcriber_with_lm():
 
     # Clearing starts a new utterance.
     transcriber.clear()
+    assert transcriber.labels() == []
+
+
+def test_take_line():
+    torch.manual_seed(0)
+    preproc = loader.Preprocessor("test.json", start_and_end=False)
+    model = CTC(preproc.input_dim, preproc.vocab_size, shared.model_config)
+    model.set_eval()
+    audio, sample_rate = wave.array_from_wave("test0.wav")
+    transcriber = streaming.Transcriber(model, preproc, sample_rate)
+
+    # No line before any text.
+    assert transcriber.take_line(0.0) is None
+    transcriber.push(audio, final=True)
+    text = transcriber.text().strip()
+    assert text
+
+    # A longer pause than heard keeps the line going.
+    assert transcriber.take_line(transcriber.pause_seconds + 1) is None
+    assert transcriber.take_line(transcriber.pause_seconds) == text
     assert transcriber.labels() == []

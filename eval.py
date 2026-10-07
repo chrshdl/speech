@@ -90,7 +90,7 @@ if __name__ == "__main__":
         "in a frame.",
     )
     decoding.add_argument(
-        "--lm", help="A word LM json file from speech.models.word_lm."
+        "--lm", help="A word LM .npz file from speech.models.word_lm."
     )
     decoding.add_argument(
         "--lm-weight", type=float, default=LM_WEIGHT, help="Scales the LM scores."
