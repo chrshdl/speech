@@ -1,0 +1,421 @@
+:root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --text: #202124;
+  --muted: #5f6368;
+  --step-active: #5f5f5f;
+  --step-active-text: #ffffff;
+  --step-idle: #bdbdbd;
+  --step-idle-text: #ffffff;
+  --box-border: #5f5f5f;
+  --box-bg: #ffffff;
+  --rec: #d0021b;
+  --rec-bg: #fdecee;
+  --wave-bg: #c8c8c8;
+  --wave-line: #000000;
+  --button: #1976d2;
+  --button-hover: #1565c0;
+  --button-text: #ffffff;
+  --control-border: #dadce0;
+  --hover-bg: #f1f3f4;
+  --error: #c5221f;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg: #1a1a19;
+    --text: #f1f1ef;
+    --muted: #b5b4ad;
+    --step-active: #e3e3e0;
+    --step-active-text: #1a1a19;
+    --step-idle: #3a3a38;
+    --step-idle-text: #9a9a96;
+    --box-border: #8a8a87;
+    --box-bg: #1a1a19;
+    --rec: #ff5c6c;
+    --rec-bg: #3b1c21;
+    --wave-bg: #3a3a38;
+    --wave-line: #f1f1ef;
+    --button: #3b8beb;
+    --button-hover: #5a9df0;
+    --button-text: #0b0b0b;
+    --control-border: #4a4a48;
+    --hover-bg: #2c2c2a;
+    --error: #ff8a80;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Roboto, "Helvetica Neue", Arial, system-ui, sans-serif;
+}
+
+main {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 40px 16px 64px;
+}
+
+h1 {
+  margin: 0 0 24px;
+  text-align: center;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+.settings {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.settings label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings select {
+  max-width: 260px;
+  padding: 4px 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.status {
+  min-height: 20px;
+  margin: 12px 0 0;
+  text-align: center;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.status.error {
+  color: var(--error);
+}
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px 40px;
+  margin: 32px 0;
+  padding: 0;
+  list-style: none;
+  font-size: 20px;
+}
+
+.steps li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.circle {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--step-idle);
+  color: var(--step-idle-text);
+  font-size: 18px;
+  transition: background 0.2s;
+}
+
+.steps li.active .circle {
+  background: var(--step-active);
+  color: var(--step-active-text);
+}
+
+.tag {
+  padding: 0 6px;
+  border: 2px solid var(--rec);
+  background: var(--rec-bg);
+}
+
+.box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 72px;
+  border: 4px solid var(--box-border);
+  background: var(--box-bg);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+/* Long text keeps its last three lines in view, the newest words. */
+.box p {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  /* Room for three lines from the start, so nothing below moves while
+     the text grows. */
+  min-height: calc(3 * 1.3em);
+  max-height: calc(3 * 1.3em);
+  margin: 0;
+  overflow: hidden;
+  text-align: center;
+  font-size: 30px;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.box-mic {
+  position: absolute;
+  left: 32px;
+  width: 32px;
+  height: 32px;
+  fill: var(--rec);
+  visibility: hidden;
+}
+
+body[data-state="recording"] .box {
+  border-color: var(--rec);
+  background: var(--rec-bg);
+}
+
+body[data-state="recording"] .box-mic {
+  visibility: visible;
+}
+
+.wave {
+  display: block;
+  width: 100%;
+  height: 72px;
+  margin-top: 32px;
+  background: var(--wave-bg);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin-top: 40px;
+}
+
+.record {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 164px;
+  height: 48px;
+  padding: 0 24px;
+  border: none;
+  border-radius: 4px;
+  background: var(--button);
+  color: var(--button-text);
+  font-family: inherit;
+  font-size: 18px;
+  font-weight: 500;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+}
+
+.record:hover {
+  background: var(--button-hover);
+}
+
+.record:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.record svg {
+  width: 22px;
+  height: 22px;
+  fill: currentcolor;
+}
+
+.icon-pause,
+body[data-state="recording"] .icon-record {
+  display: none;
+}
+
+body[data-state="recording"] .icon-pause {
+  display: block;
+}
+
+.file {
+  font-size: 14px;
+  color: var(--muted);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.file input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.file:has(input:disabled) {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.file:has(input:focus-visible) {
+  outline: 2px solid var(--button);
+  outline-offset: 2px;
+}
+
+.history {
+  margin-top: 48px;
+}
+
+.history-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-bottom: 8px;
+}
+
+.history h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.history ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px solid var(--control-border);
+  font-size: 18px;
+  line-height: 1.4;
+}
+
+.history li span {
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+
+.clear,
+.delete {
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.clear:hover,
+.delete:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+
+.clear:focus-visible,
+.delete:focus-visible {
+  outline: 2px solid var(--button);
+  outline-offset: 0;
+}
+
+/* The negative margins line the text and icons up with the lines' right
+   edge, while their hover backgrounds keep some room. */
+.clear {
+  margin-right: -8px;
+  padding: 6px 8px;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.history:has(ol:empty) .clear {
+  display: none;
+}
+
+/* Centered on the first line of text, shown on hover or keyboard focus. */
+.delete {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -3px -10px -3px 0;
+  padding: 0;
+  opacity: 0;
+}
+
+.history li:hover .delete,
+.delete:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .delete {
+    opacity: 1;
+  }
+}
+
+.delete svg {
+  width: 20px;
+  height: 20px;
+  fill: currentcolor;
+}
+
+.empty {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.history ol:not(:empty) + .empty {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  h1 {
+    font-size: 32px;
+  }
+
+  .steps {
+    flex-direction: column;
+    align-items: flex-start;
+    font-size: 17px;
+  }
+
+  .box {
+    padding: 16px 16px 16px 56px;
+  }
+
+  .box p {
+    font-size: 24px;
+  }
+
+  .box-mic {
+    left: 16px;
+  }
+}

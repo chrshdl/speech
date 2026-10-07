@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Speech Recording</title>
+    <link rel="icon" href="data:,">
+    <link rel="stylesheet" href="/style.css">
+  </head>
+  <body data-state="idle">
+    <main>
+      <h1>Speech Recording</h1>
+
+      <div class="settings">
+        <label>Model <select id="model"></select></label>
+        <label>Language model <select id="lm"></select></label>
+      </div>
+      <p id="status" class="status" role="status"></p>
+
+      <ol class="steps">
+        <li id="step-record"><span class="circle">1</span><span>Click <em>RECORD</em></span></li>
+        <li id="step-say">
+          <span class="circle">2</span>
+          <span>Say something in English when the box is <span class="tag">red</span></span>
+        </li>
+      </ol>
+
+      <section id="box" class="box" aria-live="polite" aria-label="Live transcript">
+        <svg class="box-mic" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+        </svg>
+        <p id="partial"></p>
+      </section>
+
+      <canvas id="wave" class="wave" aria-hidden="true"></canvas>
+
+      <div class="actions">
+        <button id="record" class="record" type="button">
+          <svg class="icon-record" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.92V21h2v-3.08A7 7 0 0 0 19 11h-2z"/>
+          </svg>
+          <svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>
+          </svg>
+          <span id="record-label">Record</span>
+        </button>
+        <label class="file">
+          or transcribe an audio file
+          <input id="file" type="file" accept="audio/*,.flac,.wav">
+        </label>
+      </div>
+
+      <section class="history">
+        <div class="history-head">
+          <h2>Transcript</h2>
+          <button id="clear" class="clear" type="button">Clear all</button>
+        </div>
+        <ol id="lines"></ol>
+        <p id="empty" class="empty">Finished lines appear here, newest first.</p>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

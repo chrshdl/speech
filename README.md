@@ -170,6 +170,22 @@ sounddevice`. Given audio files or a dataset json instead of `--mic`,
 `stream.py` feeds the audio chunk by chunk and checks the result against
 decoding the whole file at once.
 
+### Browser demo
+
+To try the models in a browser run
+
+```
+uv run serve.py
+```
+
+and open http://127.0.0.1:8000. The page lists the streaming CTC models
+(directories with a `best_model`) and the LM `.npz` files under `examples`,
+or under the directory given with `--models`. Click RECORD and speak, or pick
+an audio file, which is streamed at real-time pace. The page sends 16 bit audio
+to the server over a WebSocket and shows the transcript as it grows, with
+finished lines listed below. Decoding runs on the CPU unless `--device` says
+otherwise.
+
 ### Language model
 
 CTC models can decode with a word bigram language model in the prefix beam
