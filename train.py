@@ -120,7 +120,7 @@ def eval_dev(model, ldr, preproc, precision):
 
 
 def save_state(
-    path, model, optimizer, scheduler, precision, epoch, it, avg_loss, best_so_far
+    path, model, optimizer, schedulers, precision, epoch, it, avg_loss, best_so_far
 ):
     """
     Saves the state to resume training from after the given number of
@@ -139,14 +139,14 @@ def save_state(
         "best_so_far": best_so_far,
         "model": model.state_dict(),
         "optimizer": optimizer.state_dict(),
-        "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "schedulers": {name: s.state_dict() for name, s in schedulers.items()},
         "scaler": precision.scaler.state_dict(),
         "rng": rng,
     }
     atomic_write(path, lambda tmp: torch.save(state, tmp))
 
 
-def load_state(path, model, optimizer, scheduler, precision):
+def load_state(path, model, optimizer, schedulers, precision):
     """
     Restores a state saved with save_state. Returns the completed epochs,
     the iteration, the average loss and the best dev CER so far.
@@ -154,8 +154,13 @@ def load_state(path, model, optimizer, scheduler, precision):
     state = torch.load(path, map_location="cpu")
     model.load_state_dict(state["model"])
     optimizer.load_state_dict(state["optimizer"])
-    if scheduler is not None and state.get("scheduler") is not None:
-        scheduler.load_state_dict(state["scheduler"])
+    saved = state.get("schedulers")
+    if saved is None:
+        # States saved before lr_anneal hold only the lr_decay schedule.
+        saved = {"lr_decay": state.get("scheduler")}
+    for name, scheduler in schedulers.items():
+        if saved.get(name) is not None:
+            scheduler.load_state_dict(saved[name])
     if state.get("scaler"):
         precision.scaler.load_state_dict(state["scaler"])
     rng = state["rng"]
@@ -185,6 +190,39 @@ def logged_progress(save_path):
     return max(e.step for e in dev_cer) + 1, min(e.value for e in dev_cer)
 
 
+def make_schedulers(optimizer, opt_cfg):
+    """
+    Returns the learning rate schedules a config's optimizer sets, by
+    name. lr_anneal divides the learning rate by a constant factor after
+    every epoch, as Deep Speech 2 did with 1.2. lr_decay multiplies it by
+    a factor when the dev loss stops improving for `patience` epochs.
+    Both can be used together.
+    """
+    schedulers = {}
+    if "lr_anneal" in opt_cfg:
+        schedulers["lr_anneal"] = torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=1 / opt_cfg["lr_anneal"]
+        )
+    if "lr_decay" in opt_cfg:
+        decay = opt_cfg["lr_decay"]
+        schedulers["lr_decay"] = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer,
+            factor=decay["factor"],
+            patience=decay["patience"],
+            min_lr=decay.get("min_lr", 0.0),
+        )
+    return schedulers
+
+
+def step_schedulers(schedulers, dev_loss):
+    """Steps the schedules at the end of an epoch."""
+    for name, scheduler in schedulers.items():
+        if name == "lr_decay":
+            scheduler.step(dev_loss)
+        else:
+            scheduler.step()
+
+
 def run(config, device, resume=False):
 
     opt_cfg = config["optimizer"]
@@ -207,8 +245,14 @@ def run(config, device, resume=False):
     augment = {
         name: data_cfg[name] for name in loader.AUGMENTATIONS if name in data_cfg
     }
+    sortagrad = data_cfg.get("sortagrad", False)
     train_ldr = loader.make_loader(
-        data_cfg["train_set"], preproc, batch_size, workers, augment=augment
+        data_cfg["train_set"],
+        preproc,
+        batch_size,
+        workers,
+        augment=augment,
+        sortagrad=sortagrad,
     )
     dev_ldr = loader.make_loader(data_cfg["dev_set"], preproc, batch_size, workers)
 
@@ -227,23 +271,14 @@ def run(config, device, resume=False):
             momentum=opt_cfg["momentum"],
         )
 
-    # Lower the learning rate when the dev loss stops improving.
-    scheduler = None
-    if "lr_decay" in opt_cfg:
-        decay = opt_cfg["lr_decay"]
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer,
-            factor=decay["factor"],
-            patience=decay["patience"],
-            min_lr=decay.get("min_lr", 0.0),
-        )
+    schedulers = make_schedulers(optimizer, opt_cfg)
 
     precision = MixedPrecision(config.get("mixed_precision"), device)
 
     start_epoch, it, avg_loss, best_so_far = 0, 0, 0.0, math.inf
     if resume and os.path.exists(state_path):
         start_epoch, it, avg_loss, best_so_far = load_state(
-            state_path, model, optimizer, scheduler, precision
+            state_path, model, optimizer, schedulers, precision
         )
     elif resume:
         print(
@@ -268,7 +303,12 @@ def run(config, device, resume=False):
         # Set before the loader starts its workers, which copy the dataset.
         train_ldr.dataset.set_epoch(e)
         active = ", ".join(train_ldr.dataset.active) or "none"
-        print(f"Epoch {e}, augmentations: {active}")
+        order = "shortest first (SortaGrad)" if sortagrad and e == 0 else "random"
+        lr = optimizer.param_groups[0]["lr"]
+        print(
+            f"Epoch {e}, augmentations: {active}, batch order: {order}, "
+            f"learning rate: {lr:.3g}"
+        )
 
         run_state = run_epoch(
             model, optimizer, precision, train_ldr, writer, *run_state
@@ -285,8 +325,7 @@ def run(config, device, resume=False):
         writer.add_scalar("learning_rate", optimizer.param_groups[0]["lr"], e)
         writer.flush()
 
-        if scheduler is not None:
-            scheduler.step(dev_loss)
+        step_schedulers(schedulers, dev_loss)
 
         speech.save(model, preproc, save_path)
 
@@ -299,7 +338,7 @@ def run(config, device, resume=False):
             state_path,
             model,
             optimizer,
-            scheduler,
+            schedulers,
             precision,
             e + 1,
             *run_state,

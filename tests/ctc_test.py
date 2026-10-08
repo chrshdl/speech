@@ -197,3 +197,28 @@ def test_lm_changes_decoding():
     scorer = lm.scorer(char_to_int, weight=1.0)
     labels, _ = decode(probs, beam_size=8, blank=blank, lm=scorer)
     assert text(labels) == "the cat"
+
+
+def test_batch_norm_trains():
+    # A few steps on one batch lower the loss of a model with batch
+    # normalization, and inference afterwards uses its running averages.
+    torch.manual_seed(0)
+    np.random.seed(0)
+    freq_dim, vocab_size = 40, 10
+    batch = shared.gen_fake_data(freq_dim, vocab_size, max_time=60, max_seq_len=5)
+    model = CTC(freq_dim, vocab_size, shared.batch_norm_config(shared.model_config))
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    model.set_train()
+    losses = []
+    for _ in range(30):
+        optimizer.zero_grad()
+        loss = model.loss(batch)
+        loss.backward()
+        optimizer.step()
+        losses.append(loss.item())
+    assert losses[-1] < 0.8 * losses[0]
+    model.set_eval()
+    probs = model.forward_impl(
+        torch.from_numpy(batch[0][0]).float().unsqueeze(0), softmax=True
+    )
+    assert torch.allclose(probs.sum(dim=2), torch.ones(1, probs.size(1)), atol=1e-5)

@@ -1,10 +1,12 @@
+import copy
+
 import numpy as np
 import pytest
 import shared
 import torch
 
 import speech.models
-from speech.models.model import zero_pad_concat
+from speech.models.model import BatchNormGRU, ConvBatchNorm, zero_pad_concat
 
 
 def test_model():
@@ -69,12 +71,18 @@ def test_lookahead_requires_unidirectional():
         speech.models.Model(40, config)
 
 
-@pytest.mark.parametrize("lookahead", [0, 1, 4])
-def test_encode_stream(lookahead):
+@pytest.mark.parametrize(
+    "lookahead, batch_norm", [(0, False), (1, False), (4, False), (2, True)]
+)
+def test_encode_stream(lookahead, batch_norm):
     torch.manual_seed(0)
     freq_dim, time_steps = 40, 75
-    model = speech.models.Model(freq_dim, streaming_config(lookahead))
+    config = streaming_config(lookahead)
+    if batch_norm:
+        config = shared.batch_norm_config(config)
+    model = speech.models.Model(freq_dim, config)
     shared.randomize_lookahead(model)
+    shared.randomize_batch_norm(model)
     model.set_eval()
     x = torch.randn(2, time_steps, freq_dim)
 
@@ -107,16 +115,20 @@ def test_encode_stream(lookahead):
 
 
 @pytest.mark.parametrize(
-    "bidirectional, lookahead", [(False, 0), (False, 3), (True, 0)]
+    "bidirectional, lookahead, batch_norm",
+    [(False, 0, False), (False, 3, False), (True, 0, False), (False, 3, True)],
 )
-def test_encode_ignores_padding(bidirectional, lookahead):
+def test_encode_ignores_padding(bidirectional, lookahead, batch_norm):
     torch.manual_seed(0)
     np.random.seed(0)
     freq_dim = 40
     config = streaming_config(lookahead)
     config["encoder"]["rnn"]["bidirectional"] = bidirectional
+    if batch_norm:
+        config = shared.batch_norm_config(config)
     model = speech.models.Model(freq_dim, config)
     shared.randomize_lookahead(model)
+    shared.randomize_batch_norm(model)
     model.set_eval()
 
     inputs, _ = shared.gen_padded_data(freq_dim, 1)
@@ -132,3 +144,93 @@ def test_encode_ignores_padding(bidirectional, lookahead):
             assert single.size(1) == n
             assert torch.allclose(batched[i, :n], single[0], atol=1e-5)
             assert (batched[i, n:] == 0).all()
+
+
+def test_config_without_batch_norm():
+    # Models saved before batch normalization keep their modules and
+    # parameter names, so their checkpoints still load.
+    model = speech.models.Model(40, streaming_config(0))
+    assert type(model.rnn) is torch.nn.GRU
+    names = set(model.state_dict())
+    assert {"conv.0.weight", "conv.0.bias", "rnn.weight_ih_l1"} <= names
+    assert not any("norm" in n or "running" in n for n in names)
+
+
+def test_batch_norm_modules():
+    model = speech.models.Model(40, shared.batch_norm_config(streaming_config(0)))
+    convs = [m for m in model.conv if isinstance(m, torch.nn.Conv2d)]
+    assert all(c.bias is None for c in convs)
+    norms = [m for m in model.conv if isinstance(m, ConvBatchNorm)]
+    assert len(norms) == len(convs)
+    clips = [m for m in model.conv if isinstance(m, torch.nn.Hardtanh)]
+    assert [(c.min_val, c.max_val) for c in clips] == [(0, 20)] * len(convs)
+    assert isinstance(model.rnn, BatchNormGRU)
+    assert len(model.rnn.layers) == 2 and not model.rnn.bidirectional
+
+
+def test_conv_batch_norm_skips_padding():
+    # In training, the statistics are those of the valid frames alone:
+    # the same as nn.BatchNorm2d on the examples' valid frames side by side.
+    torch.manual_seed(0)
+    channels, freq = 3, 5
+    lengths = [7, 4]
+    x = torch.randn(2, channels, 9, freq)
+    norm = ConvBatchNorm(channels)
+    torch.nn.init.uniform_(norm.weight, 0.5, 2.0)
+    torch.nn.init.normal_(norm.bias)
+    reference = torch.nn.BatchNorm2d(channels)
+    reference.load_state_dict(norm.state_dict())
+
+    out = norm(x, lengths)
+    valid = torch.cat([x[i : i + 1, :, :n] for i, n in enumerate(lengths)], dim=2)
+    expected = reference(valid)
+    start = 0
+    for i, n in enumerate(lengths):
+        assert torch.allclose(
+            out[i, :, :n], expected[0, :, start : start + n], atol=1e-5
+        )
+        start += n
+    assert torch.allclose(norm.running_mean, reference.running_mean, atol=1e-6)
+    assert torch.allclose(norm.running_var, reference.running_var, atol=1e-6)
+
+
+def test_batch_norm_training_ignores_padding():
+    # Extra padding changes neither the encoding of the valid frames nor
+    # the running statistics, in the convolutions or the RNN.
+    torch.manual_seed(0)
+    np.random.seed(0)
+    freq_dim = 40
+    model = speech.models.Model(freq_dim, shared.batch_norm_config(streaming_config(3)))
+    shared.randomize_lookahead(model)
+    model.train()
+    inputs, _ = shared.gen_padded_data(freq_dim, 1)
+    lengths = [len(i) for i in inputs]
+    enc_lens = model.encoded_lengths(lengths)
+    x = torch.from_numpy(zero_pad_concat(inputs))
+    padded = torch.cat([x, torch.zeros(x.size(0), 30, freq_dim)], dim=1)
+
+    results = []
+    for batch in [x, padded]:
+        torch.manual_seed(1)
+        trained = copy.deepcopy(model)
+        out = trained.encode(batch, lengths)
+        stats = [b.clone() for n, b in trained.named_buffers() if "running" in n]
+        results.append((out, stats))
+    (out, stats), (out_padded, stats_padded) = results
+    for i, n in enumerate(enc_lens):
+        assert torch.allclose(out[i, :n], out_padded[i, :n], atol=1e-5)
+    for a, b in zip(stats, stats_padded):
+        assert torch.allclose(a, b, atol=1e-6)
+
+
+def test_batch_norm_autocast():
+    # Mixed precision runs the convolutions in bfloat16; the batch
+    # normalization still computes in float32 and returns their dtype.
+    torch.manual_seed(0)
+    model = speech.models.Model(40, shared.batch_norm_config(streaming_config(0)))
+    x = torch.randn(2, 30, 40)
+    with torch.autocast("cpu", dtype=torch.bfloat16):
+        h = model.conv_forward(x.unsqueeze(1), [30, 20])
+        out = model.encode(x, [30, 20])
+    assert h.dtype == torch.bfloat16
+    assert torch.isfinite(out).all()

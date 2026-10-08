@@ -42,3 +42,22 @@ def gen_padded_data(
     inputs = [np.random.randn(t, freq_dim) for t in time_steps]
     labels = [np.random.randint(0, output_dim, n) for n in label_lens]
     return inputs, labels
+
+
+def batch_norm_config(config):
+    """The config with Deep Speech 2's batch normalization and clipped ReLU."""
+    config = copy.deepcopy(config)
+    config["encoder"]["batch_norm"] = True
+    config["encoder"]["relu_clip"] = 20
+    return config
+
+
+def randomize_batch_norm(model):
+    # Batch normalization starts as the identity at inference. Random
+    # statistics and weights make tests sensitive to how it is applied.
+    for m in model.modules():
+        if isinstance(m, torch.nn.modules.batchnorm._BatchNorm):
+            m.running_mean.normal_()
+            m.running_var.uniform_(0.5, 2.0)
+            torch.nn.init.uniform_(m.weight, 0.5, 2.0)
+            torch.nn.init.normal_(m.bias)

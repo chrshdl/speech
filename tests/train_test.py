@@ -45,6 +45,7 @@ def make_config(save_path, epochs, mixed_precision=None):
             "batch_size": 1,
             "epochs": epochs,
             "learning_rate": 1e-3,
+            "lr_anneal": 1.2,
             "lr_decay": {"factor": 0.5, "patience": 0},
         },
         "model": {
@@ -94,9 +95,48 @@ def test_resume(tmp_path, precision, capsys):
     full_state = torch.load(tmp_path / "full" / train.STATE)
     state = torch.load(tmp_path / "resumed" / train.STATE)
     assert state["epoch"] == 4
-    assert state["scheduler"] == full_state["scheduler"]
+    assert state["schedulers"] == full_state["schedulers"]
+    assert set(state["schedulers"]) == {"lr_anneal", "lr_decay"}
     assert state["scaler"] == full_state["scaler"]
     assert all(torch.isfinite(v).all() for v in resumed.values())
+
+
+def test_lr_anneal(tmp_path, capsys):
+    # The learning rate is divided by the factor after every epoch.
+    config = make_config(tmp_path / "anneal", 3)
+    del config["optimizer"]["lr_decay"]
+    config["optimizer"]["lr_anneal"] = 2.0
+    train_run(config, seed=0)
+    log = capsys.readouterr().out
+    for e, lr in enumerate(["0.001", "0.0005", "0.00025"]):
+        assert f"Epoch {e}, " in log
+        assert f"learning rate: {lr}" in log.split(f"Epoch {e}, ")[1].split("\n")[0]
+    state = torch.load(tmp_path / "anneal" / train.STATE)
+    assert state["optimizer"]["param_groups"][0]["lr"] == pytest.approx(1.25e-4)
+
+
+def test_resume_state_without_lr_anneal(tmp_path):
+    # Training states saved before lr_anneal hold the lr_decay schedule
+    # under "scheduler", and still resume with it.
+    config = make_config(tmp_path / "full", 2)
+    del config["optimizer"]["lr_anneal"]
+    train_run(config, seed=0)
+    resumed = make_config(tmp_path / "resumed", 1)
+    del resumed["optimizer"]["lr_anneal"]
+    train_run(resumed, seed=0)
+    path = tmp_path / "resumed" / train.STATE
+    state = torch.load(path)
+    state["scheduler"] = state.pop("schedulers")["lr_decay"]
+    torch.save(state, path)
+    resumed["optimizer"]["epochs"] = 2
+    train_run(resumed, seed=1, resume=True)
+
+    full = weights(tmp_path / "full")
+    for name, value in weights(tmp_path / "resumed").items():
+        assert torch.equal(value, full[name]), name
+    full_state = torch.load(tmp_path / "full" / train.STATE)
+    state = torch.load(path)
+    assert state["schedulers"] == full_state["schedulers"]
 
 
 def test_mixed_precision_changes_training(tmp_path):

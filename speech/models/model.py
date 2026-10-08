@@ -19,12 +19,23 @@ class Model(nn.Module):
 
         encoder_cfg = config["encoder"]
         conv_cfg = encoder_cfg["conv"]
+        # Batch normalization and a clipped ReLU as in Deep Speech 2 keep
+        # the activations of deep models from growing until the RNN
+        # saturates and stops learning.
+        batch_norm = encoder_cfg.get("batch_norm", False)
+        relu_clip = encoder_cfg.get("relu_clip")
 
         convs = []
         in_c = 1
         for out_c, h, w, s in conv_cfg:
-            conv = nn.Conv2d(in_c, out_c, (h, w), stride=(s, s), padding=0)
-            convs.extend([conv, nn.ReLU()])
+            # Batch normalization removes the mean, which cancels a bias.
+            conv = nn.Conv2d(
+                in_c, out_c, (h, w), stride=(s, s), padding=0, bias=not batch_norm
+            )
+            convs.append(conv)
+            if batch_norm:
+                convs.append(ConvBatchNorm(out_c))
+            convs.append(nn.Hardtanh(0, relu_clip) if relu_clip else nn.ReLU())
             if config["dropout"] != 0:
                 convs.append(nn.Dropout(p=config["dropout"]))
             in_c = out_c
@@ -34,7 +45,7 @@ class Model(nn.Module):
         assert conv_out > 0, "Convolutional ouptut frequency dimension is negative."
 
         rnn_cfg = encoder_cfg["rnn"]
-        self.rnn = nn.GRU(
+        self.rnn = (BatchNormGRU if batch_norm else nn.GRU)(
             input_size=conv_out,
             hidden_size=rnn_cfg["dim"],
             num_layers=rnn_cfg["layers"],
@@ -89,8 +100,7 @@ class Model(nn.Module):
 
         Returns the encoding with shape (batch, time, encoder_dim).
         """
-        x = x.unsqueeze(1)
-        x = self.conv(x)
+        x = self.conv_forward(x.unsqueeze(1), lengths)
         x = self.flatten_conv(x)
         # Autocast can leave the convolutions in a lower precision than the
         # RNN weights, and on some devices, such as MPS, it does not cast
@@ -180,6 +190,22 @@ class Model(nn.Module):
 
         return x, StreamState(conv_state, rnn_state, lookahead_state)
 
+    def conv_forward(self, x, lengths=None):
+        """
+        Applies the convolutional front end to input with shape (batch,
+        1, time, freq). Given the number of input frames of each
+        example, its batch normalization skips the padding past them.
+        """
+        for layer in self.conv:
+            if isinstance(layer, ConvBatchNorm):
+                x = layer(x, lengths)
+            else:
+                x = layer(x)
+            if isinstance(layer, nn.Conv2d) and lengths is not None:
+                k, s = layer.kernel_size[0], layer.stride[0]
+                lengths = [math.ceil((int(n) - k + 1) / s) for n in lengths]
+        return x
+
     @staticmethod
     def flatten_conv(x):
         """
@@ -221,6 +247,106 @@ class Model(nn.Module):
     @property
     def encoder_dim(self):
         return self._encoder_dim
+
+
+class ConvBatchNorm(nn.BatchNorm2d):
+    """
+    Batch normalization of convolution outputs with shape (batch,
+    channels, time, freq), per channel over all time steps and
+    frequencies, as in Deep Speech 2. It computes in float32, also under
+    autocast. At inference it uses the running averages from training,
+    a fixed scale and shift per channel, so streaming is unaffected.
+    """
+
+    def forward(self, x, lengths=None):
+        """
+        Arguments:
+            lengths (optional): The number of valid frames of each
+                example. In training, the statistics then skip the
+                padding past them.
+        """
+        if not self.training or lengths is None:
+            return super().forward(x.float()).to(x.dtype)
+
+        valid = torch.arange(x.size(2), device=x.device) < torch.as_tensor(
+            lengths, device=x.device
+        ).unsqueeze(1)
+        mask = valid[:, None, :, None].float()
+        count = mask.sum() * x.size(3)
+        xf = x.float()
+        mean = (xf * mask).sum(dim=(0, 2, 3)) / count
+        var = ((xf - mean[:, None, None]) ** 2 * mask).sum(dim=(0, 2, 3)) / count
+        with torch.no_grad():
+            m = self.momentum
+            self.running_mean.mul_(1 - m).add_(mean, alpha=m)
+            # The running variance is unbiased, as in nn.BatchNorm2d.
+            self.running_var.mul_(1 - m).add_(var * count / (count - 1), alpha=m)
+            self.num_batches_tracked += 1
+        out = (xf - mean[:, None, None]) / torch.sqrt(var[:, None, None] + self.eps)
+        out = out * self.weight[:, None, None] + self.bias[:, None, None]
+        return out.to(x.dtype)
+
+
+class BatchNormGRU(nn.Module):
+    def __init__(
+        self,
+        input_size,
+        hidden_size,
+        num_layers,
+        batch_first,
+        dropout,
+        bidirectional,
+    ):
+        """
+        A stack of GRU layers with sequence-wise batch normalization of
+        each layer's input, adapted from Deep Speech 2. Its statistics
+        are over all frames of all sequences in the batch. A packed
+        sequence holds only the frames within each sequence's length, so
+        padding never enters them. Deep Speech 2 normalizes the input
+        projection W·x inside the recurrence instead, which PyTorch's
+        fused GRU does not allow. At inference the running averages from
+        training normalize each frame on its own, so streaming is
+        unaffected. Takes the arguments of nn.GRU and, like it, returns
+        the output and the final state of every layer.
+        """
+        super().__init__()
+        assert batch_first, "BatchNormGRU only supports batch_first."
+        self.bidirectional = bidirectional
+        out_size = hidden_size * (2 if bidirectional else 1)
+        sizes = [input_size] + [out_size] * (num_layers - 1)
+        self.norms = nn.ModuleList(nn.BatchNorm1d(n) for n in sizes)
+        self.layers = nn.ModuleList(
+            nn.GRU(n, hidden_size, batch_first=True, bidirectional=bidirectional)
+            for n in sizes
+        )
+        # As in nn.GRU, on the output of every layer but the last.
+        self.dropout = nn.Dropout(dropout)
+
+    @property
+    def weight_ih_l0(self):
+        return self.layers[0].weight_ih_l0
+
+    def forward(self, x, state=None):
+        directions = 2 if self.bidirectional else 1
+        states = [None] * len(self.layers) if state is None else state.split(directions)
+        finals = []
+        for i, (norm, gru) in enumerate(zip(self.norms, self.layers)):
+            if i > 0:
+                x = self.frames(x, self.dropout)
+            x, h = gru(self.frames(x, norm), states[i])
+            finals.append(h)
+        return x, torch.cat(finals)
+
+    @staticmethod
+    def frames(x, fn):
+        """
+        Applies fn to the frames of a packed sequence or of a tensor
+        with shape (batch, time, features).
+        """
+        if isinstance(x, rnn_utils.PackedSequence):
+            return x._replace(data=fn(x.data))
+        b, t, f = x.size()
+        return fn(x.reshape(b * t, f)).view(b, t, f)
 
 
 class Lookahead(nn.Module):

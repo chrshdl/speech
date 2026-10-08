@@ -404,16 +404,31 @@ class BatchRandomSampler(tud.sampler.Sampler):
     by batch without replacement.
     """
 
-    def __init__(self, data_source, batch_size):
+    def __init__(self, data_source, batch_size, sortagrad=False):
+        """
+        Arguments:
+            sortagrad (bool): SortaGrad from Deep Speech 2: in the first
+                epoch, as set by the data source's set_epoch, take the
+                batches in increasing order of their longest example.
+                Short examples first keep the RNN's state from
+                exploding early in training.
+        """
         it_end = len(data_source) - batch_size + 1
         self.batches = [range(i, i + batch_size) for i in range(0, it_end, batch_size)]
         self.data_source = data_source
+        self.sortagrad = sortagrad
 
     def __iter__(self):
-        # Shuffle a copy, so each epoch's order depends only on the random
-        # state and a resumed run repeats it.
-        batches = list(self.batches)
-        random.shuffle(batches)
+        if self.sortagrad and self.data_source.epoch == 0:
+            data = self.data_source.data
+            batches = sorted(
+                self.batches, key=lambda b: max(data[i]["duration"] for i in b)
+            )
+        else:
+            # Shuffle a copy, so each epoch's order depends only on the
+            # random state and a resumed run repeats it.
+            batches = list(self.batches)
+            random.shuffle(batches)
         return (i for b in batches for i in b)
 
     def __len__(self):
@@ -429,9 +444,11 @@ def collate(batch):
     return tuple(zip(*batch))
 
 
-def make_loader(dataset_json, preproc, batch_size, num_workers=4, augment=None):
+def make_loader(
+    dataset_json, preproc, batch_size, num_workers=4, augment=None, sortagrad=False
+):
     dataset = AudioDataset(dataset_json, preproc, batch_size, augment)
-    sampler = BatchRandomSampler(dataset, batch_size)
+    sampler = BatchRandomSampler(dataset, batch_size, sortagrad)
     loader = tud.DataLoader(
         dataset,
         batch_size=batch_size,

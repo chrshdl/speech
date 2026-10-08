@@ -111,7 +111,8 @@ noise is added:
 
 The examples are the settings Mozilla's [DeepSpeech 0.9] trained with, and
 the configs in `examples/commonvoice` use all of them, with babble from
-LibriSpeech. Where they differ:
+LibriSpeech, but add noise to 30% of the clips instead of 90%, see its
+README. Where these augmentations differ from DeepSpeech's:
 
 - DeepSpeech measured the signal-to-noise ratio between peak levels, which
   gave louder noise for the same numbers than the power ratio here.
@@ -143,6 +144,39 @@ does not cover them there.
 `train_set` and `dev_set` can be lists of dataset json files, to train on
 several datasets at once, such as LibriSpeech and Common Voice in
 `examples/commonvoice/ctc_streaming_3750h_gpu_config.json`.
+
+### Learning rate schedules
+
+Two keys in a config's `optimizer` lower the learning rate during training.
+Both can be used together, and both continue after `--resume`:
+
+| Key | What it does | Example |
+|---|---|---|
+| `lr_anneal` | Divides the learning rate by a constant factor after every epoch, as [Deep Speech 2] did with 1.2 | `"lr_anneal" : 1.2` |
+| `lr_decay` | Multiplies the learning rate by `factor` when the dev loss has not improved for `patience` epochs, down to `min_lr` | `{"factor" : 0.5, "patience" : 1, "min_lr" : 1e-5}` |
+
+The log shows the learning rate at the start of each epoch.
+
+### Training deep models
+
+Deep RNNs can stop learning early in training: the activations of the
+convolutions grow until the gates of the GRU saturate, where their gradient
+is almost zero. [Deep Speech 2] keeps them stable with batch normalization
+and a curriculum, which these keys turn on:
+
+| Key | Where | What it does |
+|---|---|---|
+| `"batch_norm" : true` | model `encoder` | Batch normalization after each convolution, per channel over all time steps, which replaces the convolution's bias, and sequence-wise on the input of each GRU layer, over all frames of all sequences in the batch. The statistics skip the padding. At inference the running averages from training are used, so streaming gives the same result as encoding the whole input. |
+| `"relu_clip" : 20` | model `encoder` | The convolutions' ReLU clipped to `min(max(x, 0), 20)` |
+| `"sortagrad" : true` | `data` | SortaGrad: the first epoch takes the batches in increasing order of their longest example, later epochs are random |
+
+Deep Speech 2 normalizes the input projection inside the recurrence instead
+of the layer's input, which PyTorch's fused GRU does not allow. The first
+3,750 hour run of `examples/commonvoice` trained without these keys and never
+learned: after one epoch the inputs to its first GRU layer's gates averaged
+178, against 0.04 at the start and 3 in the 100 hour model, 98% of the gates
+were saturated, and its output no longer depended on the audio. The smaller
+100 hour model trains without them.
 
 ## Streaming
 

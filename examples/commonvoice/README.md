@@ -101,17 +101,27 @@ If another batch size or precision is clearly faster than the config's, change
 ## Train
 
 The configs train a streaming CTC model of 31 million parameters, five
-unidirectional GRU layers of 1,024 units with a 200 ms lookahead. They augment
-the training audio as Mozilla's DeepSpeech 0.9 did: background noise, babble,
-reverb, volume, pitch and tempo, plus SpecAugment. The noise, babble and
-reverb start with the second epoch, as `"from_epoch" : 1`, since a CTC model
-first has to learn which frames belong to which characters, which noise makes
-harder. One epoch over 3,750 hours should be enough for that.
+unidirectional GRU layers of 1,024 units with a 200 ms lookahead. Like Deep
+Speech 2, it uses batch normalization, a clipped ReLU and SortaGrad, without
+which a model this deep stopped learning in its first epoch, see "Training
+deep models" in the main README.
+
+The configs augment the training audio as Mozilla's DeepSpeech 0.9 did:
+background noise, babble, reverb, volume, pitch and tempo, plus SpecAugment.
+DeepSpeech added noise to 90% of the clips, while Deep Speech 2 found that "too
+much noise augmentation tends to make optimization difficult" and added it to
+40%. Here noise goes to 30% and babble to 10%, so 37% of the clips get at least
+one. The noise, babble and reverb start with the second epoch, as
+`"from_epoch" : 1`, since a CTC model first has to learn which frames belong
+to which characters, which noise makes harder. One epoch over 3,750 hours
+should be enough for that.
 
 ### On an Apple M4 Max
 
 `ctc_streaming_3750h_config.json` uses bfloat16, batches of 32, 8 data loader
-workers and 6 epochs. Keep the Mac awake while it trains:
+workers and 6 epochs. Adam's learning rate starts at 5e-4 and is divided by
+1.2 after every epoch, as in Deep Speech 2, to 2.0e-4 in the last. Keep the
+Mac awake while it trains:
 
 ```
 caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_config.json
@@ -128,7 +138,8 @@ epochs go a long way.
 ### On an NVIDIA GPU
 
 `ctc_streaming_3750h_gpu_config.json` is meant for a GPU with bfloat16, such
-as an A100 or H100, with batches of 32, 16 data loader workers and 12 epochs:
+as an A100 or H100, with batches of 32, 16 data loader workers and 12 epochs,
+over which the learning rate falls from 5e-4 to 6.7e-5:
 
 ```
 uv run train.py examples/commonvoice/ctc_streaming_3750h_gpu_config.json

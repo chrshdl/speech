@@ -1,4 +1,6 @@
+import json
 import math
+import random
 
 import numpy as np
 import pytest
@@ -273,3 +275,41 @@ def test_from_epoch():
     assert list(dataset.active) == ["noise", "reverb", "volume"]
     assert "from_epoch" not in dataset.active["reverb"]
     item(dataset)
+
+
+def test_sortagrad(tmp_path):
+    # The dataset groups examples by transcript length, so here the
+    # short transcripts of long clips come first. With SortaGrad the
+    # first epoch still takes the batches in increasing order of their
+    # longest example; later epochs are random.
+    data_json = tmp_path / "data.json"
+    with open(data_json, "w") as fid:
+        for i in range(12):
+            text = "a" * (4 + 4 * (i % 3))
+            duration = [9.0, 5.0, 1.0][i % 3] + i / 100
+            fid.write(json.dumps({"text": text, "duration": duration, "audio": ""}))
+            fid.write("\n")
+    dataset = loader.AudioDataset(str(data_json), None, 2)
+    sampler = loader.BatchRandomSampler(dataset, 2, sortagrad=True)
+
+    def batch_durations():
+        order = list(sampler)
+        assert sorted(order) == list(range(len(dataset)))
+        return [
+            max(dataset.data[i]["duration"] for i in order[j : j + 2])
+            for j in range(0, len(order), 2)
+        ]
+
+    assert [d["duration"] for d in dataset.data] != sorted(
+        d["duration"] for d in dataset.data
+    )
+    durations = batch_durations()
+    assert durations == sorted(durations)
+
+    dataset.set_epoch(1)
+    orders = set()
+    for seed in range(5):
+        random.seed(seed)
+        orders.add(tuple(sampler))
+    assert len(orders) > 1
+    assert batch_durations() != durations
