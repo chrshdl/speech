@@ -178,6 +178,14 @@ learned: after one epoch the inputs to its first GRU layer's gates averaged
 were saturated, and its output no longer depended on the audio. The smaller
 100 hour model trains without them.
 
+Batch normalization does not reach the recurrence itself. At a learning rate
+of 5e-4, which suits the 4×512 GRU of the 100 hour model, the recurrent
+weights of the 5×1024 GRU grew until 20 to 46% of its gates saturated, and
+its loss stopped falling after 200 steps. At 2e-4 fewer than 2% saturated
+and it learned as fast as the smaller model. Adam moves every weight by about
+the learning rate, so a layer with twice the inputs changes twice as fast,
+and wider models need a lower rate.
+
 ## Streaming
 
 A bidirectional encoder needs the whole utterance before it can output

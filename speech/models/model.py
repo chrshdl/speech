@@ -277,11 +277,15 @@ class ConvBatchNorm(nn.BatchNorm2d):
         mean = (xf * mask).sum(dim=(0, 2, 3)) / count
         var = ((xf - mean[:, None, None]) ** 2 * mask).sum(dim=(0, 2, 3)) / count
         with torch.no_grad():
+            self.num_batches_tracked += 1
+            # Without a momentum, as in nn.BatchNorm2d, the running
+            # averages are plain averages over all batches.
             m = self.momentum
+            if m is None:
+                m = 1 / self.num_batches_tracked.item()
             self.running_mean.mul_(1 - m).add_(mean, alpha=m)
             # The running variance is unbiased, as in nn.BatchNorm2d.
             self.running_var.mul_(1 - m).add_(var * count / (count - 1), alpha=m)
-            self.num_batches_tracked += 1
         out = (xf - mean[:, None, None]) / torch.sqrt(var[:, None, None] + self.eps)
         out = out * self.weight[:, None, None] + self.bias[:, None, None]
         return out.to(x.dtype)

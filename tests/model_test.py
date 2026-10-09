@@ -168,30 +168,34 @@ def test_batch_norm_modules():
     assert len(model.rnn.layers) == 2 and not model.rnn.bidirectional
 
 
-def test_conv_batch_norm_skips_padding():
+@pytest.mark.parametrize("momentum", [0.1, None])
+def test_conv_batch_norm_skips_padding(momentum):
     # In training, the statistics are those of the valid frames alone:
-    # the same as nn.BatchNorm2d on the examples' valid frames side by side.
+    # the same as nn.BatchNorm2d on the examples' valid frames side by
+    # side, over several batches, with a momentum or a plain average.
     torch.manual_seed(0)
     channels, freq = 3, 5
     lengths = [7, 4]
-    x = torch.randn(2, channels, 9, freq)
-    norm = ConvBatchNorm(channels)
+    norm = ConvBatchNorm(channels, momentum=momentum)
     torch.nn.init.uniform_(norm.weight, 0.5, 2.0)
     torch.nn.init.normal_(norm.bias)
-    reference = torch.nn.BatchNorm2d(channels)
+    reference = torch.nn.BatchNorm2d(channels, momentum=momentum)
     reference.load_state_dict(norm.state_dict())
 
-    out = norm(x, lengths)
-    valid = torch.cat([x[i : i + 1, :, :n] for i, n in enumerate(lengths)], dim=2)
-    expected = reference(valid)
-    start = 0
-    for i, n in enumerate(lengths):
-        assert torch.allclose(
-            out[i, :, :n], expected[0, :, start : start + n], atol=1e-5
-        )
-        start += n
+    for _ in range(3):
+        x = torch.randn(2, channels, 9, freq)
+        out = norm(x, lengths)
+        valid = torch.cat([x[i : i + 1, :, :n] for i, n in enumerate(lengths)], dim=2)
+        expected = reference(valid)
+        start = 0
+        for i, n in enumerate(lengths):
+            assert torch.allclose(
+                out[i, :, :n], expected[0, :, start : start + n], atol=1e-5
+            )
+            start += n
     assert torch.allclose(norm.running_mean, reference.running_mean, atol=1e-6)
     assert torch.allclose(norm.running_var, reference.running_var, atol=1e-6)
+    assert norm.num_batches_tracked == reference.num_batches_tracked == 3
 
 
 def test_batch_norm_training_ignores_padding():

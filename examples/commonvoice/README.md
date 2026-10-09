@@ -119,8 +119,8 @@ should be enough for that.
 ### On an Apple M4 Max
 
 `ctc_streaming_3750h_config.json` uses bfloat16, batches of 32, 8 data loader
-workers and 6 epochs. Adam's learning rate starts at 5e-4 and is divided by
-1.2 after every epoch, as in Deep Speech 2, to 2.0e-4 in the last. Keep the
+workers and 6 epochs. Adam's learning rate starts at 2e-4 and is divided by
+1.2 after every epoch, as in Deep Speech 2, to 8.0e-5 in the last. Keep the
 Mac awake while it trains:
 
 ```
@@ -135,11 +135,23 @@ model after every epoch and continues after a stop with `--resume`. Each
 epoch sees 37 times the audio of an epoch on `train-clean-100`, so a few
 epochs go a long way.
 
+To check early that the model learns, print its loss per character over the
+first epoch, after an hour or two:
+
+```
+uv run python examples/commonvoice/loss_per_char.py examples/commonvoice/ctc_streaming_3750h_config.json
+```
+
+SortaGrad orders the first epoch from short clips to long ones, so the raw
+loss in the log climbs even while the model improves. Per character it
+should fall steadily, as it did from about 3 to 2.2 in the first 300 steps on
+LibriSpeech. A model that does not learn stays at about 2.7.
+
 ### On an NVIDIA GPU
 
 `ctc_streaming_3750h_gpu_config.json` is meant for a GPU with bfloat16, such
 as an A100 or H100, with batches of 32, 16 data loader workers and 12 epochs,
-over which the learning rate falls from 5e-4 to 6.7e-5:
+over which the learning rate falls from 2e-4 to 2.7e-5:
 
 ```
 uv run train.py examples/commonvoice/ctc_streaming_3750h_gpu_config.json
