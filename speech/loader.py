@@ -113,7 +113,8 @@ class AudioDataset(tud.Dataset):
 
         bucket_diff = 4
         max_len = max(len(x["text"]) for x in data)
-        num_buckets = max_len // bucket_diff
+        # At least one bucket, also when every transcript is short.
+        num_buckets = max(1, max_len // bucket_diff)
         buckets = [[] for _ in range(num_buckets)]
         for d in data:
             bid = min(len(d["text"]) // bucket_diff, num_buckets - 1)

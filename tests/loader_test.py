@@ -313,3 +313,14 @@ def test_sortagrad(tmp_path):
         orders.add(tuple(sampler))
     assert len(orders) > 1
     assert batch_durations() != durations
+
+
+def test_dataset_with_short_transcripts(tmp_path):
+    # Transcripts shorter than a length bucket still make a dataset.
+    data_json = tmp_path / "data.json"
+    with open(data_json, "w") as fid:
+        for text, duration in [("a", 1.2), ("i", 0.4), ("ok", 0.8)]:
+            fid.write(json.dumps({"text": text, "duration": duration, "audio": ""}))
+            fid.write("\n")
+    dataset = loader.AudioDataset(str(data_json), None, 1)
+    assert [d["duration"] for d in dataset.data] == [0.4, 0.8, 1.2]
