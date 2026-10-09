@@ -169,6 +169,8 @@ and a curriculum, which these keys turn on:
 | `"batch_norm" : true` | model `encoder` | Batch normalization after each convolution, per channel over all time steps, which replaces the convolution's bias, and sequence-wise on the input of each GRU layer, over all frames of all sequences in the batch. The statistics skip the padding. At inference the running averages from training are used, so streaming gives the same result as encoding the whole input. |
 | `"relu_clip" : 20` | model `encoder` | The convolutions' ReLU clipped to `min(max(x, 0), 20)` |
 | `"sortagrad" : true` | `data` | SortaGrad: the first epoch takes the batches in increasing order of their longest example, later epochs are random |
+| `"accumulate" : 8` | `optimizer` | Averages the gradients of this many batches per optimizer step, a larger batch than fits in memory at once |
+| `"grad_clip" : 400` | `optimizer` | Rescales the gradients to at most this norm, 200 by default |
 
 Deep Speech 2 normalizes the input projection inside the recurrence instead
 of the layer's input, which PyTorch's fused GRU does not allow. The first
@@ -185,6 +187,16 @@ its loss stopped falling after 200 steps. At 2e-4 fewer than 2% saturated
 and it learned as fast as the smaller model. Adam moves every weight by about
 the learning rate, so a layer with twice the inputs changes twice as fast,
 and wider models need a lower rate.
+
+Deep Speech 2 trained on batches of 512 utterances, rescaling gradients to a
+norm of 400. With batches of 32 the 5×1024 model learned on LibriSpeech, but
+not on the Common Voice mix, where SortaGrad starts the epoch with clips of
+two seconds: within 400 steps 35% of its gates saturated and its CER on
+Common Voice stayed at 0.95. Their gradients are too noisy for a model
+that has not yet learned anything. With 8 batches of 32 accumulated into
+batches of 256 and a clip of 400, at most 5% of the gates saturated and the
+CER fell to 0.64 in 300 steps. Batch normalization normalizes each batch of
+32 on its own, as before.
 
 ## Streaming
 

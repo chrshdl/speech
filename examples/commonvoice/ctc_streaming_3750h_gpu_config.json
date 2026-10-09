@@ -43,6 +43,8 @@
     "optimizer" : {
         "type" : "adam",
         "batch_size" : 32,
+        "accumulate" : 8,
+        "grad_clip" : 400,
         "epochs" : 12,
         "learning_rate" : 2e-4,
         "lr_anneal" : 1.2

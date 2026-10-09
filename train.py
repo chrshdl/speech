@@ -45,27 +45,46 @@ class MixedPrecision:
         )
 
 
-def run_epoch(model, optimizer, precision, train_ldr, writer, it, avg_loss):
-
+def run_epoch(
+    model,
+    optimizer,
+    precision,
+    train_ldr,
+    writer,
+    it,
+    avg_loss,
+    accumulate=1,
+    grad_clip=200,
+):
+    """
+    Trains for one epoch and returns the iteration and the average loss.
+    Each optimizer step averages the gradients of `accumulate` batches, a
+    larger batch than fits in memory at once, and rescales them to a norm
+    of at most `grad_clip`. A last partial group of batches still makes a
+    step. The iteration counts batches.
+    """
     model_t = 0.0
     data_t = 0.0
     end_t = time.time()
+    grad_norm = 0.0
+    n = len(train_ldr)
+    optimizer.zero_grad()
     tq = tqdm.tqdm(train_ldr)
-    for batch in tq:
+    for i, batch in enumerate(tq):
         start_t = time.time()
-        optimizer.zero_grad()
         with precision.autocast():
             loss = model.loss(batch)
-        precision.scaler.scale(loss).backward()
-
-        # Clip the true gradients, not the scaled ones.
-        precision.scaler.unscale_(optimizer)
-        grad_norm = nn.utils.clip_grad_norm_(model.parameters(), 200).item()
+        precision.scaler.scale(loss / accumulate).backward()
         loss = loss.item()
 
-        # Skips the step if float16 gradients overflowed.
-        precision.scaler.step(optimizer)
-        precision.scaler.update()
+        if (i + 1) % accumulate == 0 or i + 1 == n:
+            # Clip the true gradients, not the scaled ones.
+            precision.scaler.unscale_(optimizer)
+            grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip).item()
+            # Skips the step if float16 gradients overflowed.
+            precision.scaler.step(optimizer)
+            precision.scaler.update()
+            optimizer.zero_grad()
 
         # The MPS allocator caches freed blocks for every batch shape it
         # sees, which on a small machine pushes everything else to swap.
@@ -311,7 +330,14 @@ def run(config, device, resume=False):
         )
 
         run_state = run_epoch(
-            model, optimizer, precision, train_ldr, writer, *run_state
+            model,
+            optimizer,
+            precision,
+            train_ldr,
+            writer,
+            *run_state,
+            accumulate=opt_cfg.get("accumulate", 1),
+            grad_clip=opt_cfg.get("grad_clip", 200),
         )
 
         msg = "Epoch {} completed in {:.2f} (s)."

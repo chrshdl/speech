@@ -2,14 +2,16 @@ import copy
 import os
 import random
 
+import numpy as np
 import pytest
+import shared
 import torch
 
 import speech
 import train
 
 
-def make_config(save_path, epochs, mixed_precision=None):
+def make_config(save_path, epochs, mixed_precision=None, accumulate=1):
     return {
         "seed": 0,
         "mixed_precision": mixed_precision,
@@ -47,6 +49,8 @@ def make_config(save_path, epochs, mixed_precision=None):
             "learning_rate": 1e-3,
             "lr_anneal": 1.2,
             "lr_decay": {"factor": 0.5, "patience": 0},
+            "accumulate": accumulate,
+            "grad_clip": 400,
         },
         "model": {
             "class": "CTC",
@@ -72,9 +76,14 @@ def weights(save_path):
     return model.state_dict()
 
 
-@pytest.mark.parametrize("precision", [None, "bf16", "fp16"])
-def test_resume(tmp_path, precision, capsys):
-    train_run(make_config(tmp_path / "full", 4, precision), seed=0)
+@pytest.mark.parametrize(
+    # float16 skips its first steps while the gradient scale settles, which
+    # with accumulation would be all of the first epoch's few steps here.
+    "precision, accumulate",
+    [(None, 2), ("bf16", 2), ("fp16", 1)],
+)
+def test_resume(tmp_path, precision, accumulate, capsys):
+    train_run(make_config(tmp_path / "full", 4, precision, accumulate), seed=0)
 
     # Reverb starts at the third epoch, counted from 0.
     log = capsys.readouterr().out
@@ -83,8 +92,12 @@ def test_resume(tmp_path, precision, capsys):
 
     # Stop after two epochs, then resume for two more. The second seed
     # shows that the resumed run restores the random number state.
-    train_run(make_config(tmp_path / "resumed", 2, precision), seed=0)
-    train_run(make_config(tmp_path / "resumed", 4, precision), seed=1, resume=True)
+    train_run(make_config(tmp_path / "resumed", 2, precision, accumulate), seed=0)
+    train_run(
+        make_config(tmp_path / "resumed", 4, precision, accumulate),
+        seed=1,
+        resume=True,
+    )
 
     full = weights(tmp_path / "full")
     resumed = weights(tmp_path / "resumed")
@@ -137,6 +150,56 @@ def test_resume_state_without_lr_anneal(tmp_path):
     full_state = torch.load(tmp_path / "full" / train.STATE)
     state = torch.load(path)
     assert state["schedulers"] == full_state["schedulers"]
+
+
+class NoWriter:
+    def add_scalar(self, *args):
+        pass
+
+
+def accumulation_model():
+    torch.manual_seed(0)
+    config = make_config("unused", 1)["model"] | {"dropout": 0.0}
+    return speech.models.CTC(40, 10, config)
+
+
+def test_accumulate_matches_a_larger_batch():
+    # Two batches of one example, accumulated, make the same step as one
+    # batch of both. Batch normalization would differ, since it
+    # normalizes each batch with its own statistics, so the model has none.
+    np.random.seed(0)
+    inputs, labels = shared.gen_fake_data(
+        40, 10, max_time=60, max_seq_len=5, batch_size=2
+    )
+    precision = train.MixedPrecision(None, torch.device("cpu"))
+    models = []
+    for batches, accumulate in [
+        ([(inputs, labels)], 1),
+        ([(inputs[:1], labels[:1]), (inputs[1:], labels[1:])], 2),
+    ]:
+        model = accumulation_model()
+        # SGD, unlike Adam, depends on the scale of the gradients, so this
+        # also checks that the accumulated batches are averaged.
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        train.run_epoch(
+            model, optimizer, precision, batches, NoWriter(), 0, 0.0, accumulate
+        )
+        models.append(model)
+    for (name, a), b in zip(models[0].named_parameters(), models[1].parameters()):
+        assert torch.allclose(a, b, atol=1e-6), name
+
+
+def test_accumulate_steps_on_a_partial_group():
+    np.random.seed(0)
+    batches = [shared.gen_fake_data(40, 10, max_time=60, max_seq_len=5, batch_size=1)]
+    batches = batches * 3
+    model = accumulation_model()
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    precision = train.MixedPrecision(None, torch.device("cpu"))
+    it, _ = train.run_epoch(model, optimizer, precision, batches, NoWriter(), 0, 0.0, 2)
+    assert it == 3
+    steps = {int(state["step"]) for state in optimizer.state.values()}
+    assert steps == {2}
 
 
 def test_mixed_precision_changes_training(tmp_path):
