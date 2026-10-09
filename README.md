@@ -190,13 +190,19 @@ and wider models need a lower rate.
 
 Deep Speech 2 trained on batches of 512 utterances, rescaling gradients to a
 norm of 400. With batches of 32 the 5×1024 model learned on LibriSpeech, but
-not on the Common Voice mix, where SortaGrad starts the epoch with clips of
-two seconds: within 400 steps 35% of its gates saturated and its CER on
-Common Voice stayed at 0.95. Their gradients are too noisy for a model
-that has not yet learned anything. With 8 batches of 32 accumulated into
-batches of 256 and a clip of 400, at most 5% of the gates saturated and the
-CER fell to 0.64 in 300 steps. Batch normalization normalizes each batch of
-32 on its own, as before.
+not on the Common Voice mix in SortaGrad order: within 400 steps 35% of its
+gates saturated and its CER on Common Voice stayed at 0.95. With 8 batches
+of 32 accumulated into batches of 256 and a clip of 400, at most 5% of the
+gates saturated. Batch normalization normalizes each batch of 32 on its own,
+as before.
+
+SortaGrad does not suit the Common Voice mix, though. Its shortest clips, of
+two to four seconds, do not let a new model learn to read the audio, with
+batches of 32 or of 256, and in the sorted order of 3,750 hours they fill
+the first many hours of training. With batches of 256 the model only began
+to learn once the clips reached about six seconds. In random order it
+learned from the start, also with batches of 32: its CER on Common Voice
+fell to 0.77 in 400 steps, against 0.95 in sorted order.
 
 ## Streaming
 

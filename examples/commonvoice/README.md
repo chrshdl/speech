@@ -102,9 +102,11 @@ If another batch size or precision is clearly faster than the config's, change
 
 The configs train a streaming CTC model of 31 million parameters, five
 unidirectional GRU layers of 1,024 units with a 200 ms lookahead. Like Deep
-Speech 2, it uses batch normalization, a clipped ReLU and SortaGrad, without
-which a model this deep stopped learning in its first epoch, see "Training
-deep models" in the main README.
+Speech 2, it uses batch normalization, a clipped ReLU and large batches,
+without which a model this deep stopped learning in its first epoch. Unlike
+Deep Speech 2, it trains in random order from the start, without SortaGrad,
+since the shortest Common Voice clips do not let a new model learn. See
+"Training deep models" in the main README.
 
 The configs augment the training audio as Mozilla's DeepSpeech 0.9 did:
 background noise, babble, reverb, volume, pitch and tempo, plus SpecAugment.
@@ -137,17 +139,13 @@ model after every epoch and continues after a stop with `--resume`. Each
 epoch sees 37 times the audio of an epoch on `train-clean-100`, so a few
 epochs go a long way.
 
-To check early that the model learns, print its loss per character over the
-first epoch, after an hour or two:
-
-```
-uv run python examples/commonvoice/loss_per_char.py examples/commonvoice/ctc_streaming_3750h_config.json
-```
-
-SortaGrad orders the first epoch from short clips to long ones, so the raw
-loss in the log climbs even while the model improves. Per character it
-should fall steadily, as it did from about 3 to 2.2 in the first 300 steps on
-LibriSpeech. A model that does not learn stays at about 2.7.
+To check early that the model learns, watch `avg_loss` in the progress bar,
+a running average of the loss per batch. In random order it does not depend
+on where the epoch is, and it should fall steadily within the first half
+hour. A first run that never learned stayed at about 210 to 230. With
+SortaGrad the raw loss climbs with the clip length even while the model
+improves, so `loss_per_char.py` prints that run's loss per character
+instead.
 
 ### On an NVIDIA GPU
 
