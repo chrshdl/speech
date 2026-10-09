@@ -30,6 +30,24 @@ LS_TRAIN = "examples/librispeech/data/LibriSpeech/train-clean-100.json"
 LS_DEV = "examples/librispeech/data/LibriSpeech/dev-clean.json"
 # The augmentations of the full run's first epoch.
 EPOCH0_AUGMENT = ["volume", "pitch", "tempo", "spec_augment"]
+# Deep Speech 2 computes its spectrograms from power normalized clips. Set
+# for a setup through the environment, which the loader's workers inherit.
+POWER_NORM = "TRIALS_POWER_NORM"
+TARGET_RMS = 32768 * 10 ** (-20 / 20)
+_log_specgram = loader.log_specgram
+
+
+def power_normalized_specgram(audio, sample_rate, *args, **kwargs):
+    """log_specgram, of the clip scaled to an RMS of -20 dBFS if enabled."""
+    if os.environ.get(POWER_NORM):
+        audio = np.asarray(audio, dtype=np.float32)
+        rms = np.sqrt(np.mean(audio**2))
+        if rms > 0:
+            audio = audio * (TARGET_RMS / rms)
+    return _log_specgram(audio, sample_rate, *args, **kwargs)
+
+
+loader.log_specgram = power_normalized_specgram
 
 
 def setups(base, small):
@@ -58,6 +76,26 @@ def setups(base, small):
             "model": big,
             "lr": 2e-4,
             "augment": False,
+        },
+        "G": {
+            "desc": "A with power normalized clips",
+            "model": big,
+            "lr": 2e-4,
+            "power_norm": True,
+        },
+        "H": {
+            "desc": "A with batches of 256, clipped at 400",
+            "model": big,
+            "lr": 2e-4,
+            "accumulate": 8,
+            "clip": 400,
+        },
+        "I": {
+            "desc": "B with power normalized clips",
+            "model": big,
+            "lr": 2e-4,
+            "sortagrad": False,
+            "power_norm": True,
         },
     }
 
@@ -117,6 +155,10 @@ def saturation(model, x):
 def run(name, setup, base, args, devs, device):
     torch.manual_seed(0)
     random.seed(0)
+    if setup.get("power_norm"):
+        os.environ[POWER_NORM] = "1"
+    else:
+        os.environ.pop(POWER_NORM, None)
     data_cfg = base["data"]
     train_json = LS_TRAIN if setup.get("data") == "ls" else args.train
     preproc = loader.Preprocessor(train_json, start_and_end=False)
@@ -146,29 +188,34 @@ def run(name, setup, base, args, devs, device):
     def precision():
         return autocast(device, base.get("mixed_precision"))
 
+    # Several batches per optimizer step make a larger batch.
+    accumulate = setup.get("accumulate", 1)
     model.set_train()
     per_char, rows = [], []
     start = time.time()
     print(f"[{name}] {setup['desc']}", flush=True)
-    for step, batch in enumerate(ldr):
-        if step == args.steps:
-            break
-        optimizer.zero_grad()
+    optimizer.zero_grad()
+    step = 0
+    for i, batch in enumerate(ldr):
         with precision():
             loss = model.loss(batch)
-        loss.backward()
-        nn.utils.clip_grad_norm_(model.parameters(), 200)
+        (loss / accumulate).backward()
+        per_char.append(loss.item() / np.mean([len(lab) for lab in batch[1]]))
+        if (i + 1) % accumulate:
+            continue
+        nn.utils.clip_grad_norm_(model.parameters(), setup.get("clip", 200))
         optimizer.step()
+        optimizer.zero_grad()
         if device.type == "mps":
             torch.mps.empty_cache()
-        per_char.append(loss.item() / np.mean([len(lab) for lab in batch[1]]))
-        if (step + 1) % args.every == 0:
+        step += 1
+        if step % args.every == 0:
             cers = {
                 k: dev_cer(model, d, preproc, precision) for k, d in dev_ldrs.items()
             }
             row = dict(
-                step=step + 1,
-                loss=float(np.median(per_char[-100:])),
+                step=step,
+                loss=float(np.median(per_char[-args.every * accumulate :])),
                 sat=saturation(model, probe),
                 **cers,
             )
@@ -179,6 +226,9 @@ def run(name, setup, base, args, devs, device):
                 f" | worst gate saturation {row['sat']:.0%} | {time.time() - start:4.0f}s",
                 flush=True,
             )
+        if step == args.steps:
+            break
+    os.environ.pop(POWER_NORM, None)
     return rows
 
 
