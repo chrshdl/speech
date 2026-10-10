@@ -1545,6 +1545,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "rapidfuzz" },
@@ -1558,7 +1559,6 @@ dependencies = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "matplotlib" },
     { name = "pytest" },
     { name = "ruff" },
@@ -1573,6 +1573,7 @@ train = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", specifier = ">=0.143.0" },
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
@@ -1586,7 +1587,6 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "httpx", specifier = ">=0.28.1" },
     { name = "matplotlib", specifier = ">=3.11.2" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "ruff", specifier = ">=0.16.10" },

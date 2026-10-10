@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import dataclasses
+import datetime
 import json
 import threading
 
@@ -16,7 +17,8 @@ from speech import export, loader, streaming
 from speech.backend import engine
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
-from speech.backend.messages import AudioInputKind
+from speech.backend.messages import AudioInputKind, NoticeCard
+from speech.intents import Intent, Match
 from speech.models import CTC
 from speech.utils import wave
 
@@ -40,11 +42,21 @@ def model_path(tmp_path):
     return export_model(tmp_path / "model.onnx")
 
 
-def make_recognizer(path, audio_input=AudioInputKind.CLIENT, **settings):
+def make_recognizer(
+    path, audio_input=AudioInputKind.CLIENT, intents=None, handlers=None, **settings
+):
     model = streaming.load(path)
     new_search = streaming.search_factory(model.blank, model.char_to_int)
     settings = Settings(**({"card_timeout": 0.2, "audio_timeout": 1.0} | settings))
-    return Recognizer(model, new_search, audio_input, settings, model_name="tiny")
+    return Recognizer(
+        model,
+        new_search,
+        audio_input,
+        settings,
+        model_name="tiny",
+        intents=intents,
+        handlers=handlers,
+    )
 
 
 def transcribe(path, audio):
@@ -475,3 +487,88 @@ def test_shutdown_ends_streams(model_path):
 
     asyncio.run(run())
     assert recognizer.state == "IDLE"
+
+
+class FixedIntents:
+    """Finds every utterance as close to an intent as the score says."""
+
+    threshold = -2.0
+
+    def __init__(self, score):
+        self.score = score
+
+    def closest(self, probs):
+        assert len(probs) > 0
+        return Match(Intent("GetTime", ("what time is it",)), self.score, "")
+
+
+class Clock:
+    """Answers with a card, or fails."""
+
+    def __init__(self, fail=False):
+        self.fail = fail
+        self.closed = False
+
+    async def card(self, card_id):
+        if self.fail:
+            raise OSError("offline")
+        return NoticeCard(id=card_id, title="Time", text="It is noon.")
+
+    async def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize(
+    ("score", "fail", "title"),
+    [
+        (-0.5, False, "Time"),
+        (-0.5, True, "Sorry, I can't answer that right now"),
+        (-3.0, False, "You said"),
+    ],
+)
+def test_intents(model_path, score, fail, title):
+    audio, _ = wave.array_from_wave("test0.wav")
+    clock = Clock(fail)
+    recognizer = make_recognizer(
+        model_path,
+        intents=FixedIntents(score),
+        handlers={"GetTime": clock},
+        answer_card_timeout=0.4,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            start = await svc.start("HOLD_TO_TALK")
+            socket = await stream_audio(svc.address, start, audio)
+            await socket.close()
+            events = await svc.events.until("CaptureFinished")
+            events += await svc.events.until("ClearCard")
+            return start, events
+
+    start, events = asyncio.run(run())
+    dialog = start["dialogRequestId"]
+    after = actions(events)[actions(events).index("CaptureFinished") :]
+    shown = [e for e in events if e["action"] == "ShowCard"][-1]["payload"]["card"]
+    assert shown["title"] == title
+    if score >= FixedIntents.threshold:
+        assert after == [
+            "CaptureFinished",
+            "IntentRecognized",
+            "ShowCard",
+            "DialogStateChanged",
+            "ClearCard",
+        ]
+        intent = next(e for e in events if e["action"] == "IntentRecognized")
+        assert intent["payload"] == {
+            "dialogRequestId": dialog,
+            "intent": "GetTime",
+            "score": score,
+        }
+        # Answers stay longer than transcripts.
+        times = {e["action"]: e["timestamp"] for e in events}
+        shown_at = datetime.datetime.fromisoformat(times["ShowCard"])
+        cleared_at = datetime.datetime.fromisoformat(times["ClearCard"])
+        assert (cleared_at - shown_at).total_seconds() >= 0.4
+    else:
+        assert "IntentRecognized" not in after
+    assert clock.closed

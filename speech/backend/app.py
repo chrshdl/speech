@@ -4,11 +4,14 @@ The HTTP API of the speech recognition service, see docs/backend-api.md.
 
 import asyncio
 import contextlib
+import os
 from collections.abc import AsyncIterator
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Response, WebSocket, status
+from fastapi.responses import RedirectResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
+from fastapi.staticfiles import StaticFiles
 from pydantic.json_schema import models_json_schema
 
 from speech.backend.engine import Busy
@@ -23,6 +26,10 @@ from speech.backend.messages import (
     StopCaptureRequest,
     StopCaptureResponse,
 )
+
+# The browser client in web/assistant, which shares web/recorder.js with
+# serve.py's page.
+WEB_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "web")
 
 
 def create_app(recognizer, microphone=None):
@@ -184,6 +191,12 @@ def create_app(recognizer, microphone=None):
                 recognizer.deliver(np.frombuffer(data, dtype="<i2"), stream_id)
         finally:
             ended.cancel()
+
+    @app.get("/", include_in_schema=False)
+    async def home():
+        return RedirectResponse("/assistant/")
+
+    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
     def openapi():
         # The events are not responses, so add their schemas by hand.

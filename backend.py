@@ -10,9 +10,11 @@ import os
 import uvicorn
 
 from speech import streaming
+from speech.backend import weather
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
+from speech.intents import IntentRecognizer
 
 
 def main(args):
@@ -25,7 +27,12 @@ def main(args):
         max_capture=args.max_capture,
         audio_timeout=args.audio_timeout,
         card_timeout=args.card_timeout,
+        answer_card_timeout=args.answer_card_timeout,
     )
+    intents = IntentRecognizer(
+        [weather.INTENT], model.char_to_int, model.blank, model.frame_seconds
+    )
+    handlers = {weather.INTENT.name: weather.Weather(args.weather_location)}
     recognizer = Recognizer(
         model,
         new_search,
@@ -33,6 +40,8 @@ def main(args):
         settings,
         model_name=os.path.basename(os.path.normpath(args.model)),
         language_model=os.path.basename(args.lm) if args.lm else None,
+        intents=intents,
+        handlers=handlers,
     )
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
@@ -98,6 +107,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--threads", type=int, help="The CPU threads to run the model with."
     )
+    parser.add_argument(
+        "--weather-location",
+        default="Berlin",
+        help="The place to answer questions for the weather for.",
+    )
     limits = parser.add_argument_group("time limits in seconds")
     defaults = Settings()
     limits.add_argument(
@@ -129,6 +143,13 @@ if __name__ == "__main__":
         type=float,
         default=defaults.card_timeout,
         help="A card with the final transcript is cleared after this long.",
+    )
+    limits.add_argument(
+        "--answer-card-timeout",
+        type=float,
+        default=defaults.answer_card_timeout,
+        help="A card that answers a question, such as for the weather, is cleared "
+        "after this long.",
     )
     args = parser.parse_args()
     if args.mic_device is not None and args.mic_device.isdigit():

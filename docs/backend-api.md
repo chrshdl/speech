@@ -3,8 +3,14 @@
 `backend.py` runs streaming speech recognition as a service, such as on a
 Raspberry Pi that a head unit or another client talks to. The client
 starts and stops captures, and the service sends events with the
-transcript and the display cards to show. The client renders what the
-service tells it, and the service decides what to show and for how long.
+transcript and the display cards to show. When an utterance asks for
+something the service can answer, such as "what's the weather?", it
+recognizes the intent and shows the answer, see [Intents](#intents). The
+client renders what the service tells it, and the service decides what to
+show and for how long.
+
+The service also serves a client at `/`: a landing page with a
+microphone button, see [The browser client](#the-browser-client).
 
 The interactive reference, with the schemas of every request, response
 and event, is served at `/docs`, and the OpenAPI document at
@@ -89,7 +95,8 @@ when there are no events for a while.
 | `Recognition.DialogStateChanged` | `state`, `dialogRequestId` (null when `IDLE`) | The dialog state changes |
 | `Recognition.TranscriptUpdated` | `dialogRequestId`, `text` | The transcript so far changes. It can still change, also earlier words with a language model. |
 | `Recognition.EndOfSpeechDetected` | `dialogRequestId` | A `TAP_TO_TALK` capture heard the end of speech |
-| `Recognition.CaptureFinished` | `dialogRequestId`, `text`, `reason` | The final transcript, the last event of every capture. `text` is empty if no speech was recognized. |
+| `Recognition.CaptureFinished` | `dialogRequestId`, `text`, `reason` | The final transcript. `text` is empty if no speech was recognized. |
+| `Recognition.IntentRecognized` | `dialogRequestId`, `intent`, `score` | The capture asked for an intent, such as `GetWeather`. The card with the answer follows. |
 | `Display.ShowCard` | `card` | Show the card, see [Display cards](#display-cards) |
 | `Display.ClearCard` | `cardId` | Dismiss the card with the id |
 | `Audio.StartAudioStream` | `streamId`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Stream the capture's audio, with audio input from the client |
@@ -126,17 +133,20 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 |---|---|---|
 | `TranscriptCard` | `title`, `text`, `isFinal` | The transcript, growing while `isFinal` is false. Show words that can still change as such. |
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
+| `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. |
 
 The lifecycle of a capture's card:
 
 1. start-capture shows a `TranscriptCard` titled "Listening…", which
    replaces any card shown.
 2. It is updated as the transcript changes.
-3. When the capture finishes, it becomes the final transcript, titled
-   "You said", or a `NoticeCard` if no speech was recognized or no audio
-   arrived.
-4. 8 seconds later the service sends `ClearCard`. A new capture replaces
-   the card sooner.
+3. When the capture finishes, it becomes the answer to the intent the
+   capture asked for, such as a `WeatherCard`. Otherwise it becomes the
+   final transcript, titled "You said", or a `NoticeCard` if no speech
+   was recognized or no audio arrived.
+4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
+   for an answer, which takes longer to read. A new capture replaces the
+   card sooner.
 
 When the user dismisses the card, such as by tapping its X, tell the
 service with card-dismissed. It then neither updates the card nor sends
@@ -144,6 +154,35 @@ service with card-dismissed. It then neither updates the card nor sends
 
 Clients should render the card types they know and ignore the others, so
 new types can be added.
+
+## Intents
+
+An intent is something an utterance asks for, with a name and sample
+utterances, such as `GetWeather` with "what's the weather", "how's the
+weather today" and "weather forecast". When a capture finishes, the
+service aligns the model's output for the whole utterance to each sample,
+character by character, and scores how close the best alignment comes to
+the model's own best guess. If the closest sample scores at least -2, as
+a mean log probability per character, the capture asked for its intent:
+the service publishes `IntentRecognized` and shows the card of its
+handler's answer.
+
+Matching the model's output rather than the transcript finds the intent
+also when the transcript is misspelled, as it often is for short commands
+with the models trained on audiobooks. On synthesized questions for the
+weather in 16 voices, -2 matched 99% of them, 2% of other short commands
+such as "what's the news?", and none of 300 LibriSpeech sentences. Played
+from a laptop's speaker to its microphone, three of four questions
+matched although their transcripts read like "when the winher". The log
+names the closest intent and its score also when it does not match.
+
+| Intent | Answer |
+|---|---|
+| `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com), for the place given with `--weather-location`, by default Berlin. Without internet access, a `NoticeCard` says it cannot answer. |
+
+To add an intent, give `speech.intents.Intent` its samples, in the
+model's characters, and pass a handler whose `card(card_id)` returns the
+card to show, see `speech/backend/weather.py` and `backend.py`.
 
 ## Audio streaming
 
@@ -206,6 +245,19 @@ Client                                     Service
   |  <------ ShowCard "You said"             |
   |  <------ DialogStateChanged IDLE         |
 ```
+
+## The browser client
+
+`web/assistant`, served at `/`, is a client for a screen such as the
+Pi's: a clock on a landing page and a round microphone button in the
+upper right corner. Tapping it, or pressing Space, starts a `TAP_TO_TALK`
+capture, and tapping it while listening stops it. The button shows the
+dialog state, with a ring that follows the loudness while listening and
+spins while thinking, and the page shows the cards the service sends.
+
+With audio input from the client the page records from the browser's
+microphone, which browsers only allow on `localhost` or over HTTPS. With
+the service's microphone it only starts and stops captures.
 
 ## Running the service
 

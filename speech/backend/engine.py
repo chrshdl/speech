@@ -24,6 +24,7 @@ from speech.backend.messages import (
     DialogStateChanged,
     EndOfSpeechDetected,
     Initiator,
+    IntentRecognized,
     Message,
     NoticeCard,
     ShowCard,
@@ -37,6 +38,12 @@ log = logging.getLogger(__name__)
 
 # Ends a capture's audio, see Recognizer.stop_capture.
 _STOP = object()
+# How a capture can end and still ask for an intent.
+_ANSWERABLE = {
+    CaptureEndReason.END_OF_SPEECH,
+    CaptureEndReason.STOP_CAPTURE,
+    CaptureEndReason.MAX_DURATION,
+}
 
 
 @dataclasses.dataclass
@@ -53,6 +60,11 @@ class Settings:
     audio_timeout: float = 5.0
     # A final card is cleared after this long.
     card_timeout: float = 8.0
+    # A card that answers an intent, such as the weather, is cleared after
+    # this long, as it takes longer to read.
+    answer_card_timeout: float = 30.0
+    # The longest wait for the answer to an intent.
+    answer_timeout: float = 10.0
 
 
 class Busy(Exception):
@@ -139,6 +151,8 @@ class Recognizer:
         settings=None,
         model_name="",
         language_model=None,
+        intents=None,
+        handlers=None,
     ):
         """
         Arguments:
@@ -151,6 +165,11 @@ class Recognizer:
             model_name (str): The model's name for Info.
             language_model (str): The language model's name for Info, if
                 new_search uses one.
+            intents (IntentRecognizer, optional): Recognizes what a capture
+                asks for.
+            handlers (dict, optional): Answers each intent by name, with an
+                object whose async card(card_id) returns the card to show
+                and whose async close() releases it.
         """
         self.model = model
         self.new_search = new_search
@@ -158,6 +177,8 @@ class Recognizer:
         self.settings = settings or Settings()
         self.model_name = model_name
         self.language_model = language_model
+        self.intents = intents
+        self.handlers = handlers or {}
         self.bus = EventBus()
         self.state = DialogState.IDLE
         self.capture = None
@@ -285,6 +306,8 @@ class Recognizer:
                 await self.capture.task
         self._cancel_card_timer()
         self.bus.close()
+        for handler in self.handlers.values():
+            await handler.close()
 
     async def _run(self, capture):
         """Transcribes the capture's audio until the capture ends."""
@@ -360,10 +383,51 @@ class Recognizer:
         self.bus.publish(
             CaptureFinished(dialog_request_id=capture.id, text=text, reason=reason)
         )
-        self._show(self._final_card(capture, text, reason))
-        self._start_card_timer()
+        card, timeout = await self._answer(capture, text, reason)
+        self._show(card)
+        self._start_card_timer(timeout)
         self.capture = None
         self._set_state(DialogState.IDLE)
+
+    async def _answer(self, capture, text, reason):
+        """
+        Returns the card to show at the end of the capture, and how long to
+        show it: the answer to the intent the capture asks for, or else
+        the final transcript.
+        """
+        match = None
+        if text and self.intents is not None and reason in _ANSWERABLE:
+            match = await asyncio.to_thread(
+                self.intents.closest, capture.transcriber.probs()
+            )
+        if match is None or match.score < self.intents.threshold:
+            if match is not None:
+                log.info(
+                    "Capture %s is no intent, closest %s, score %.2f",
+                    capture.id,
+                    match.intent.name,
+                    match.score,
+                )
+            return self._final_card(capture, text, reason), self.settings.card_timeout
+        name = match.intent.name
+        log.info("Capture %s asked for %s, score %.2f", capture.id, name, match.score)
+        self.bus.publish(
+            IntentRecognized(
+                dialog_request_id=capture.id, intent=name, score=match.score
+            )
+        )
+        try:
+            card = await asyncio.wait_for(
+                self.handlers[name].card(capture.id), self.settings.answer_timeout
+            )
+        except Exception:
+            log.exception("Capture %s could not be answered", capture.id)
+            card = NoticeCard(
+                id=capture.id,
+                title="Sorry, I can't answer that right now",
+                text="Please try again later.",
+            )
+        return card, self.settings.answer_card_timeout
 
     def _transcript_card(self, capture, text, final):
         title = "You said" if final else "Listening…"
@@ -388,13 +452,13 @@ class Recognizer:
         self.card = card
         self.bus.publish(ShowCard(card=card))
 
-    def _start_card_timer(self):
+    def _start_card_timer(self, timeout):
         if self.card is None:
             return
         card_id = self.card.id
 
         async def clear():
-            await asyncio.sleep(self.settings.card_timeout)
+            await asyncio.sleep(timeout)
             if self.card is not None and self.card.id == card_id:
                 self.card = None
                 self.card_timer = None

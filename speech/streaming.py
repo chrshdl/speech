@@ -90,6 +90,8 @@ class Transcriber:
         # The number of blank frames since the last label.
         self.blanks = 0
         self.frame_seconds = model.frame_seconds
+        # The output probabilities of the transcript's frames.
+        self.frames = []
 
     def push(self, audio, final=False):
         """
@@ -98,6 +100,7 @@ class Transcriber:
         """
         frames = self.specgram.push(audio)
         probs, self.state = self.model.stream(frames, self.state, final)
+        self.frames.append(probs)
 
         # Greedy CTC decoding: merge repeats, then drop blanks. It also
         # tracks pauses for the beam search.
@@ -125,6 +128,15 @@ class Transcriber:
     def text(self, final=False):
         return self.model.decode(self.labels(final))
 
+    def probs(self):
+        """
+        The output probabilities of the transcript's frames, with shape
+        (frames, labels + 1).
+        """
+        if not self.frames:
+            return np.zeros((0, self.model.blank + 1), np.float32)
+        return np.concatenate(self.frames)
+
     @property
     def pause_seconds(self):
         """The time since the last label."""
@@ -146,5 +158,6 @@ class Transcriber:
         """Starts a new transcript, keeping the stream going."""
         self.greedy = []
         self.blanks = 0
+        self.frames = []
         if self.search is not None:
             self.search.reset()

@@ -485,8 +485,11 @@ uv run --no-default-groups backend.py best_model-int8.onnx --lm lm.npz --host 0.
 ```
 
 It listens to the Pi's microphone, or with `--audio-input client` to
-audio the client streams. See [docs/backend-api.md](docs/backend-api.md)
-for the API, and `deploy/speech-backend.service` to start it with the Pi.
+audio the client streams. It recognizes intents in what is said, such as
+"what's the weather?", and shows the answer, a card with the weather.
+At http://127.0.0.1:8080 it serves a client with a landing page and a
+microphone button. See [docs/backend-api.md](docs/backend-api.md) for the
+API, and `deploy/speech-backend.service` to start it with the Pi.
 
 [ONNX Runtime]: https://onnxruntime.ai
 

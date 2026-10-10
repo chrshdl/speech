@@ -84,7 +84,47 @@ class NoticeCard(CamelModel):
     text: str
 
 
-Card = Annotated[TranscriptCard | NoticeCard, Field(discriminator="type")]
+class WeatherCondition(enum.StrEnum):
+    CLEAR = "CLEAR"
+    PARTLY_CLOUDY = "PARTLY_CLOUDY"
+    CLOUDY = "CLOUDY"
+    FOG = "FOG"
+    DRIZZLE = "DRIZZLE"
+    RAIN = "RAIN"
+    SNOW = "SNOW"
+    THUNDERSTORM = "THUNDERSTORM"
+
+
+class WeatherDay(CamelModel):
+    date: datetime.date
+    condition: WeatherCondition
+    high: float
+    low: float
+
+
+class WeatherCard(CamelModel):
+    """The current weather and the forecast for the next days."""
+
+    type: Literal["WeatherCard"] = "WeatherCard"
+    id: str
+    location: str
+    condition: WeatherCondition
+    # The condition in words, such as "Partly cloudy".
+    description: str
+    # False at night, for a moon rather than a sun.
+    is_day: bool
+    temperature: float
+    feels_like: float
+    # Relative humidity in percent.
+    humidity: int
+    wind_speed: float
+    # Today first.
+    days: list[WeatherDay]
+    temperature_unit: str = "°C"
+    wind_speed_unit: str = "km/h"
+
+
+Card = Annotated[TranscriptCard | NoticeCard | WeatherCard, Field(discriminator="type")]
 
 
 # The payloads of the events the service publishes. The class name is the
@@ -110,13 +150,29 @@ class TranscriptUpdated(Payload):
     text: str
 
 
+class IntentRecognized(Payload):
+    """
+    The capture asked for something the service can answer, such as the
+    weather, published after CaptureFinished. The card with the answer
+    follows.
+    """
+
+    TOPIC = "Recognition"
+    dialog_request_id: str
+    # Such as "GetWeather".
+    intent: str
+    # How well the utterance matched the intent's closest sample
+    # utterance, a log probability per character, at most 0.
+    score: float
+
+
 class EndOfSpeechDetected(Payload):
     TOPIC = "Recognition"
     dialog_request_id: str
 
 
 class CaptureFinished(Payload):
-    """The final transcript, the last event of every capture."""
+    """The final transcript, which every capture ends with."""
 
     TOPIC = "Recognition"
     dialog_request_id: str
@@ -173,6 +229,7 @@ EVENTS = (
     TranscriptUpdated,
     EndOfSpeechDetected,
     CaptureFinished,
+    IntentRecognized,
     ShowCard,
     ClearCard,
     StartAudioStream,

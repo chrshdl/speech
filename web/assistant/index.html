@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Assistant</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-state="IDLE" data-connection="connecting">
+    <header class="bar">
+      <p class="status" id="status" role="status"></p>
+      <button class="mic" id="mic" type="button" aria-label="Talk" title="Talk (Space)">
+        <span class="mic-ring" aria-hidden="true"></span>
+        <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+        </svg>
+      </button>
+    </header>
+
+    <main>
+      <section class="home" id="home">
+        <p class="greeting" id="greeting"></p>
+        <p class="clock" id="clock"></p>
+        <p class="date" id="date"></p>
+        <p class="hint">Tap the microphone and ask <q>What’s the weather?</q></p>
+      </section>
+
+      <section class="stage" id="stage" aria-live="polite"></section>
+    </main>
+
+    <template id="card-template">
+      <article class="card">
+        <header class="card-header">
+          <h2 class="card-title"></h2>
+          <button class="card-close" type="button" aria-label="Dismiss">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="card-body"></div>
+      </article>
+    </template>
+
+    <script src="icons.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>
