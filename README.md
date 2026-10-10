@@ -474,6 +474,20 @@ Tips:
   page to other devices, but browsers only allow the microphone on
   `localhost` or over HTTPS, so from another device only audio files work.
 
+### Speech recognizer service
+
+`backend.py` runs the recognizer as a service with an HTTP API, for a head
+unit or another client to start and stop captures and show the transcript
+and display cards it sends:
+
+```
+uv run --no-default-groups backend.py best_model-int8.onnx --lm lm.npz --host 0.0.0.0
+```
+
+It listens to the Pi's microphone, or with `--audio-input client` to
+audio the client streams. See [docs/backend-api.md](docs/backend-api.md)
+for the API, and `deploy/speech-backend.service` to start it with the Pi.
+
 [ONNX Runtime]: https://onnxruntime.ai
 
 ## Examples
