@@ -5,11 +5,30 @@ API key.
 """
 
 import datetime
+import re
 
 import httpx
+from rapidfuzz import fuzz, process
 
-from speech.backend.messages import WeatherCard, WeatherCondition, WeatherDay
+from speech.backend import places
+from speech.backend.messages import (
+    NoticeCard,
+    WeatherCard,
+    WeatherCondition,
+    WeatherDay,
+)
 from speech.intents import Intent
+
+# The places the weather can be asked for by name.
+PLACES = places.load()
+# The lowest similarity, out of 100, of a misspelled name to one of
+# PLACES, such as "breman" to "bremen".
+CLOSE = 80
+# Words said after a place, such as "what's the weather in hamburg today".
+TRAILING = re.compile(r"\s+(today|tomorrow|now|right now|please)$")
+# Primes Whisper for the words of the intent, so it writes "weather" rather
+# than "whether".
+PROMPT = "What's the weather in Hamburg?"
 
 INTENT = Intent(
     "GetWeather",
@@ -27,7 +46,17 @@ INTENT = Intent(
         "what's the weather forecast",
         "weather forecast",
         "weather",
+        "what's the weather in {city}",
+        "what is the weather in {city}",
+        "how is the weather in {city}",
+        "how's the weather in {city}",
+        "what's the weather like in {city}",
+        "what's the weather in {city} today",
+        "what's the weather in {city} tomorrow",
+        "tell me the weather in {city}",
+        "weather in {city}",
     ),
+    {"city": tuple(PLACES)},
 )
 
 GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
@@ -77,23 +106,73 @@ class Weather:
     def __init__(self, location, client=None):
         """
         Arguments:
-            location (str): The place to report the weather for, such as
-                "Berlin", which Open-Meteo looks up when first needed.
+            location (str): The place to report the weather for when none
+                is asked for, such as "Berlin".
             client (httpx.AsyncClient, optional): Makes the requests.
         """
         self.location = location
         self.client = client or httpx.AsyncClient(timeout=5)
-        self.place = None
+        # The places looked up with Open-Meteo, by name.
+        self.found = {}
 
-    async def card(self, card_id):
-        """Returns a WeatherCard. Raises an httpx.HTTPError if offline."""
-        if self.place is None:
-            self.place = await self._find(self.location)
+    async def card(self, card_id, slots=None):
+        """
+        Returns a WeatherCard for the city slot, or else for the location,
+        or a NoticeCard if the place is unknown. Raises an httpx.HTTPError
+        if offline.
+        """
+        city = (slots or {}).get("city")
+        place = await self.place(city or self.location)
+        if place is None:
+            return NoticeCard(
+                id=card_id,
+                title="Sorry, I don't know that place",
+                text=f"I couldn't find {city or self.location}.",
+            )
+        return await self._forecast(card_id, place)
+
+    async def place(self, name):
+        """
+        The Place of a name, said or written: one of PLACES, or one close
+        to it, as for a misspelled transcript, or else one Open-Meteo
+        finds. None if there is none.
+        """
+        said = places.spoken(name) or ""
+        said = TRAILING.sub("", said)
+        if said in PLACES:
+            return PLACES[said]
+        close = process.extractOne(
+            said, list(PLACES), scorer=fuzz.ratio, score_cutoff=CLOSE
+        )
+        if close is not None:
+            return PLACES[close[0]]
+        if said not in self.found:
+            self.found[said] = await self._find(said)
+        return self.found[said]
+
+    async def _find(self, name):
+        response = await self.client.get(
+            GEOCODING_URL, params={"name": name, "count": 1, "format": "json"}
+        )
+        response.raise_for_status()
+        results = response.json().get("results")
+        if not results:
+            return None
+        result = results[0]
+        return places.Place(
+            result["name"],
+            result.get("country_code", ""),
+            result["latitude"],
+            result["longitude"],
+            result.get("population", 0),
+        )
+
+    async def _forecast(self, card_id, place):
         response = await self.client.get(
             FORECAST_URL,
             params={
-                "latitude": self.place["latitude"],
-                "longitude": self.place["longitude"],
+                "latitude": place.latitude,
+                "longitude": place.longitude,
                 "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
                 "weather_code,wind_speed_10m,is_day",
                 "daily": "weather_code,temperature_2m_max,temperature_2m_min",
@@ -123,7 +202,7 @@ class Weather:
         ]
         return WeatherCard(
             id=card_id,
-            location=self.place["name"],
+            location=place.name,
             condition=now,
             description=description,
             is_day=bool(current["is_day"]),
@@ -133,16 +212,6 @@ class Weather:
             wind_speed=current["wind_speed_10m"],
             days=days,
         )
-
-    async def _find(self, name):
-        response = await self.client.get(
-            GEOCODING_URL, params={"name": name, "count": 1, "format": "json"}
-        )
-        response.raise_for_status()
-        results = response.json().get("results")
-        if not results:
-            raise LookupError(f"Open-Meteo does not know the place {name!r}.")
-        return results[0]
 
     async def close(self):
         await self.client.aclose()

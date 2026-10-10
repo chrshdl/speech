@@ -9,18 +9,16 @@ import os
 
 import uvicorn
 
-from speech import streaming
+from speech import onnx_model, streaming, whisper_model
 from speech.backend import weather
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
-from speech.intents import IntentRecognizer
+from speech.intents import IntentRecognizer, TextIntentRecognizer
 
 
 def main(args):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-    model = streaming.load(args.model, "best", "cpu", args.threads)
-    new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
     settings = Settings(
         end_of_speech=args.end_of_speech,
         no_speech_timeout=args.no_speech_timeout,
@@ -29,19 +27,16 @@ def main(args):
         card_timeout=args.card_timeout,
         answer_card_timeout=args.answer_card_timeout,
     )
-    intents = IntentRecognizer(
-        [weather.INTENT], model.char_to_int, model.blank, model.frame_seconds
-    )
-    handlers = {weather.INTENT.name: weather.Weather(args.weather_location)}
+    new_transcriber, sample_rate, intents = load(args)
     recognizer = Recognizer(
-        model,
-        new_search,
+        new_transcriber,
+        sample_rate,
         AudioInputKind[args.audio_input.upper()],
         settings,
         model_name=os.path.basename(os.path.normpath(args.model)),
         language_model=os.path.basename(args.lm) if args.lm else None,
         intents=intents,
-        handlers=handlers,
+        handlers={weather.INTENT.name: weather.Weather(args.weather_location)},
     )
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
@@ -54,6 +49,42 @@ def main(args):
         timeout_graceful_shutdown=5,
     )
     Server(config, recognizer).run()
+
+
+def load(args):
+    """
+    Loads the model and returns a function that creates the transcriber
+    of a capture, the sample rate, and the intent recognizer for the
+    model: Whisper exported by export_whisper.py transcribes each capture
+    when it ends, and its transcript is matched to the intents, while a
+    streaming CTC model transcribes as the audio arrives, and its output is
+    matched to them.
+    """
+    session = None
+    if args.model.endswith(".onnx"):
+        session = onnx_model.open_session(args.model, args.threads)
+    if session is not None and whisper_model.is_whisper(session):
+        if args.lm:
+            raise SystemExit("--lm only applies to streaming CTC models.")
+        whisper = whisper_model.WhisperModel(session)
+        return (
+            lambda: whisper_model.WhisperTranscriber(whisper),
+            whisper.sample_rate,
+            TextIntentRecognizer([weather.INTENT]),
+        )
+    if session is not None:
+        model = onnx_model.OnnxModel(session=session)
+    else:
+        model = streaming.load(args.model, "best", "cpu", args.threads)
+    new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
+    intents = IntentRecognizer(
+        [weather.INTENT], model.char_to_int, model.blank, model.frame_seconds
+    )
+    return (
+        lambda: streaming.Transcriber(model, new_search()),
+        model.sample_rate,
+        intents,
+    )
 
 
 class Server(uvicorn.Server):
@@ -83,7 +114,8 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "model",
-        help="A model exported to .onnx by export.py, or a PyTorch model directory.",
+        help="A streaming CTC model exported to .onnx by export.py, or its PyTorch "
+        "directory, or Whisper exported to .onnx by export_whisper.py.",
     )
     parser.add_argument("--lm", help="A word LM .npz file from speech.models.word_lm.")
     parser.add_argument(

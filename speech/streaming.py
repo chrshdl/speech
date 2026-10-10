@@ -138,6 +138,11 @@ class Transcriber:
         return np.concatenate(self.frames)
 
     @property
+    def heard_speech(self):
+        """Whether the transcript has any text."""
+        return bool(self.text().strip())
+
+    @property
     def pause_seconds(self):
         """The time since the last label."""
         return self.blanks * self.frame_seconds

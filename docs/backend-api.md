@@ -93,10 +93,10 @@ when there are no events for a while.
 | Event | Payload | When |
 |---|---|---|
 | `Recognition.DialogStateChanged` | `state`, `dialogRequestId` (null when `IDLE`) | The dialog state changes |
-| `Recognition.TranscriptUpdated` | `dialogRequestId`, `text` | The transcript so far changes. It can still change, also earlier words with a language model. |
+| `Recognition.TranscriptUpdated` | `dialogRequestId`, `text` | The transcript so far changes. It can still change, also earlier words with a language model. Not sent with Whisper. |
 | `Recognition.EndOfSpeechDetected` | `dialogRequestId` | A `TAP_TO_TALK` capture heard the end of speech |
 | `Recognition.CaptureFinished` | `dialogRequestId`, `text`, `reason` | The final transcript. `text` is empty if no speech was recognized. |
-| `Recognition.IntentRecognized` | `dialogRequestId`, `intent`, `score` | The capture asked for an intent, such as `GetWeather`. The card with the answer follows. |
+| `Recognition.IntentRecognized` | `dialogRequestId`, `intent`, `score`, `slots` | The capture asked for an intent, such as `GetWeather` with `{"city": "hamburg"}`. The card with the answer follows. |
 | `Display.ShowCard` | `card` | Show the card, see [Display cards](#display-cards) |
 | `Display.ClearCard` | `cardId` | Dismiss the card with the id |
 | `Audio.StartAudioStream` | `streamId`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Stream the capture's audio, with audio input from the client |
@@ -159,30 +159,81 @@ new types can be added.
 
 An intent is something an utterance asks for, with a name and sample
 utterances, such as `GetWeather` with "what's the weather", "how's the
-weather today" and "weather forecast". When a capture finishes, the
-service aligns the model's output for the whole utterance to each sample,
-character by character, and scores how close the best alignment comes to
-the model's own best guess. If the closest sample scores at least -2, as
-a mean log probability per character, the capture asked for its intent:
-the service publishes `IntentRecognized` and shows the card of its
-handler's answer.
+weather today" and "what's the weather in {city}". A sample can have a
+slot, such as `{city}`, which stands for any of its values, and the
+value said is passed to the intent's handler. When a capture finishes,
+the service recognizes the intent in one of two ways.
+
+**From the model's output.** The service aligns the model's output for
+the whole utterance to each sample, character by character, and scores
+how close the best alignment comes to the model's own best guess. If the
+closest sample scores at least -2, as a mean log probability per
+character, the capture asked for its intent. For a slot, the sample is
+first aligned with a wildcard in its place, which finds where the slot
+was said, and each value is aligned to that part of the utterance. The
+best values then compete with the other samples as whole sentences.
 
 Matching the model's output rather than the transcript finds the intent
 also when the transcript is misspelled, as it often is for short commands
 with the models trained on audiobooks. On synthesized questions for the
-weather in 16 voices, -2 matched 99% of them, 2% of other short commands
+weather in 16 voices, -2 matched 99% of them, 4% of other short commands
 such as "what's the news?", and none of 300 LibriSpeech sentences. Played
 from a laptop's speaker to its microphone, three of four questions
-matched although their transcripts read like "when the winher". The log
-names the closest intent and its score also when it does not match.
+matched although their transcripts read like "when the winher". Asked for
+the weather in one of 16 cities in 6 voices, it found the intent in all
+384 questions and the city in 82%, but missed names the model hears
+badly, such as Leipzig. The log names the closest intent and its score
+also when it does not match.
+
+**From Whisper's transcript.** With Whisper, see below, the service
+compares Whisper's transcript to the samples, allowing small differences
+such as "whether" for "weather", and takes the words where a sample has
+a slot as its value, whatever they are. It matches when the similarity is
+at least 0.8, and `score` is the similarity minus 1. With base.en it
+found the intent in all 384 questions and the city in 93%.
+
+`IntentRecognized` has the intent's `slots`, such as
+`{"city": "hamburg"}`.
 
 | Intent | Answer |
 |---|---|
-| `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com), for the place given with `--weather-location`, by default Berlin. Without internet access, a `NoticeCard` says it cannot answer. |
+| `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, so with Whisper any place works. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. |
+
+`places.tsv` lists the towns of Germany, Austria and Switzerland with
+50,000 people or more, the world's capitals and its cities of 3 million
+or more, with the names people say for them, from
+[GeoNames](https://www.geonames.org) under CC BY 4.0. `speech/backend/places.py`
+regenerates it.
 
 To add an intent, give `speech.intents.Intent` its samples, in the
-model's characters, and pass a handler whose `card(card_id)` returns the
-card to show, see `speech/backend/weather.py` and `backend.py`.
+model's characters, and the values of its slots, and pass a handler whose
+`card(card_id, slots)` returns the card to show, see
+`speech/backend/weather.py` and `backend.py`.
+
+## Whisper
+
+Until a streaming model recognizes as well, the service can run OpenAI's
+Whisper instead, exported to a single `.onnx` file by `export_whisper.py`,
+see `examples/whisper/README.md`:
+
+```
+uv run backend.py examples/whisper/models/whisper-base.en.onnx
+```
+
+The file holds the encoder, the decoder and the search, which ONNX
+Runtime runs, and the vocabulary, so like the streaming models it needs
+neither PyTorch nor other packages. Whisper hears a whole utterance at
+once, so the service keeps a capture's audio, finds the end of speech by
+its loudness, and transcribes it when the capture ends. `TranscriptUpdated`
+is therefore not sent: the card shows that the service is listening until
+`CaptureFinished` has Whisper's transcript, with capitals and punctuation,
+such as "What's the weather in Hamburg?". It hears at most 30 seconds.
+
+On the 384 synthesized questions for the weather in 16 cities, base.en
+found the intent in all of them and the city in 93%, in 0.67 seconds a
+question on an M1 MacBook Air, and tiny.en the city in 83% in 0.38
+seconds. In a Debian arm64 container on the same Mac, tiny.en took 1.5
+seconds; a Pi 4 is slower, so try both there.
 
 ## Audio streaming
 

@@ -18,9 +18,10 @@ from speech.backend import engine
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind, NoticeCard
-from speech.intents import Intent, Match
+from speech.intents import Intent, Match, TextIntentRecognizer
 from speech.models import CTC
 from speech.utils import wave
+from speech.whisper_model import WhisperTranscriber
 
 CHUNK = 1600
 
@@ -43,14 +44,18 @@ def model_path(tmp_path):
 
 
 def make_recognizer(
-    path, audio_input=AudioInputKind.CLIENT, intents=None, handlers=None, **settings
+    path,
+    audio_input=AudioInputKind.CLIENT,
+    intents=None,
+    handlers=None,
+    **settings,
 ):
     model = streaming.load(path)
     new_search = streaming.search_factory(model.blank, model.char_to_int)
     settings = Settings(**({"card_timeout": 0.2, "audio_timeout": 1.0} | settings))
     return Recognizer(
-        model,
-        new_search,
+        lambda: streaming.Transcriber(model, new_search()),
+        model.sample_rate,
         audio_input,
         settings,
         model_name="tiny",
@@ -497,8 +502,8 @@ class FixedIntents:
     def __init__(self, score):
         self.score = score
 
-    def closest(self, probs):
-        assert len(probs) > 0
+    def closest_heard(self, transcriber):
+        assert len(transcriber.probs()) > 0
         return Match(Intent("GetTime", ("what time is it",)), self.score, "")
 
 
@@ -509,7 +514,8 @@ class Clock:
         self.fail = fail
         self.closed = False
 
-    async def card(self, card_id):
+    async def card(self, card_id, slots):
+        assert slots == {}
         if self.fail:
             raise OSError("offline")
         return NoticeCard(id=card_id, title="Time", text="It is noon.")
@@ -563,6 +569,7 @@ def test_intents(model_path, score, fail, title):
             "dialogRequestId": dialog,
             "intent": "GetTime",
             "score": score,
+            "slots": {},
         }
         # Answers stay longer than transcripts.
         times = {e["action"]: e["timestamp"] for e in events}
@@ -572,3 +579,64 @@ def test_intents(model_path, score, fail, title):
     else:
         assert "IntentRecognized" not in after
     assert clock.closed
+
+
+class FakeWhisper:
+    """A WhisperModel that hears the same text in any audio."""
+
+    sample_rate = 16000
+
+    def __init__(self, text):
+        self.text = text
+        self.heard = None
+
+    def transcribe(self, audio):
+        self.heard = len(audio)
+        return self.text
+
+
+class CityClock(Clock):
+    async def card(self, card_id, slots):
+        text = f"It is noon in {slots['city']}."
+        return NoticeCard(id=card_id, title="Time", text=text)
+
+
+def test_whisper():
+    """
+    With Whisper, the end of speech is found by loudness, and the
+    transcript is matched to the intents.
+    """
+    speech_audio, _ = wave.array_from_wave("test0.wav")
+    silence = np.zeros(32000, np.int16)
+    audio = np.concatenate([silence, speech_audio, silence])
+    whisper = FakeWhisper("What's the weather in Hamburg?")
+    intent = Intent(
+        "GetTime", ("what's the weather in {city}",), {"city": ("hamburg",)}
+    )
+    recognizer = Recognizer(
+        lambda: WhisperTranscriber(whisper),
+        16000,
+        AudioInputKind.CLIENT,
+        Settings(card_timeout=0.2, audio_timeout=1.0),
+        intents=TextIntentRecognizer([intent]),
+        handlers={"GetTime": CityClock()},
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            start = await svc.start("TAP_TO_TALK")
+            await stream_audio(svc.address, start, audio)
+            return await svc.events.until("ShowCard") + await svc.events.until(
+                "ShowCard"
+            )
+
+    events = asyncio.run(run())
+    # No transcript before the end, as Whisper hears the whole utterance.
+    assert "TranscriptUpdated" not in actions(events)
+    payloads = {e["action"]: e["payload"] for e in events}
+    assert payloads["CaptureFinished"]["reason"] == "END_OF_SPEECH"
+    assert payloads["CaptureFinished"]["text"] == "What's the weather in Hamburg?"
+    assert payloads["IntentRecognized"]["slots"] == {"city": "hamburg"}
+    assert events[-1]["payload"]["card"]["text"] == "It is noon in hamburg."
+    # It ended a second after the speech, before all the audio was sent.
+    assert len(silence) + len(speech_audio) <= whisper.heard < len(audio)

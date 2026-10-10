@@ -22,8 +22,26 @@ FORMAT_VERSION = 1
 OnnxState = collections.namedtuple("OnnxState", ["frames", "hidden", "terms"])
 
 
+def open_session(path, threads=None):
+    """
+    An ONNX Runtime session of a .onnx file, computing with the threads,
+    by default one per CPU core.
+    """
+    options = onnxruntime.SessionOptions()
+    if threads is not None:
+        options.intra_op_num_threads = threads
+    # Waiting threads sleep instead of spinning. Each chunk is little work,
+    # and spinning kept every core busy between chunks, which slowed the
+    # beam search running alongside and heats a Raspberry Pi until it
+    # throttles.
+    options.add_session_config_entry("session.intra_op.allow_spinning", "0")
+    return onnxruntime.InferenceSession(
+        path, options, providers=["CPUExecutionProvider"]
+    )
+
+
 class OnnxModel:
-    def __init__(self, path, threads=None):
+    def __init__(self, path=None, threads=None, session=None):
         """
         Loads a model exported by speech.export.
 
@@ -31,21 +49,13 @@ class OnnxModel:
             path (str): The .onnx file.
             threads (int, optional): The threads to compute with, by
                 default one per CPU core.
+            session (optional): A session of the file, see open_session,
+                instead of the path.
         """
-        options = onnxruntime.SessionOptions()
-        if threads is not None:
-            options.intra_op_num_threads = threads
-        # Waiting threads sleep instead of spinning. Each chunk is little
-        # work, and spinning kept every core busy between chunks, which
-        # slowed the beam search running alongside and heats a Raspberry
-        # Pi until it throttles.
-        options.add_session_config_entry("session.intra_op.allow_spinning", "0")
-        self.session = onnxruntime.InferenceSession(
-            path, options, providers=["CPUExecutionProvider"]
-        )
+        self.session = session or open_session(path, threads)
         meta = self.session.get_modelmeta().custom_metadata_map
         if int(meta.get("format_version", -1)) != FORMAT_VERSION:
-            raise ValueError(f"{path} is from another version of speech.export.")
+            raise ValueError("The model is from another version of speech.export.")
         self.labels = json.loads(meta["labels"])
         self.char_to_int = {c: i for i, c in enumerate(self.labels)}
         self.start_and_end = json.loads(meta["start_and_end"])

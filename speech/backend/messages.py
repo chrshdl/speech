@@ -164,6 +164,8 @@ class IntentRecognized(Payload):
     # How well the utterance matched the intent's closest sample
     # utterance, a log probability per character, at most 0.
     score: float
+    # The values of the sample's slots, such as {"city": "hamburg"}.
+    slots: dict[str, str]
 
 
 class EndOfSpeechDetected(Payload):

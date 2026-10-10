@@ -6,8 +6,9 @@ import pytest
 
 from speech.backend import weather
 from speech.backend.messages import WeatherCondition
+from speech.intents import IntentRecognizer
 
-PLACE = {"name": "Berlin", "latitude": 52.52, "longitude": 13.41}
+PLACE = {"name": "Berlin", "latitude": 52.52, "longitude": 13.41, "country_code": "DE"}
 FORECAST = {
     "current": {
         "temperature_2m": 15.4,
@@ -42,7 +43,8 @@ def test_card():
     requests = []
 
     async def run():
-        service = weather.Weather("Berlin", client(requests))
+        # A place that is not in PLACES is looked up once.
+        service = weather.Weather("Somewhere", client(requests))
         cards = [await service.card("id1"), await service.card("id2")]
         await service.close()
         return cards
@@ -61,28 +63,74 @@ def test_card():
         (datetime.date(2026, 10, 10), WeatherCondition.RAIN, 16.7, 11.1),
         (datetime.date(2026, 10, 11), WeatherCondition.SNOW, 12.7, 8.4),
     ]
-    # The place is looked up once.
     hosts = [r.url.host for r in requests]
     assert hosts.count("geocoding-api.open-meteo.com") == 1
+    assert requests[0].url.params["name"] == "somewhere"
     assert requests[1].url.params["latitude"] == "52.52"
     assert second.id == "id2"
 
 
 def test_unknown_place():
     async def run():
-        service = weather.Weather("Nowhere", client([], places=()))
-        with pytest.raises(LookupError, match="Nowhere"):
-            await service.card("id")
+        service = weather.Weather("Berlin", client([], places=()))
+        return await service.card("id", {"city": "qwxyz"})
 
-    asyncio.run(run())
+    card = asyncio.run(run())
+    assert card.type == "NoticeCard"
+    assert card.text == "I couldn't find qwxyz."
+
+
+@pytest.mark.parametrize(
+    ("said", "name"),
+    [
+        ("hamburg", "Hamburg"),
+        ("Hamburg today", "Hamburg"),
+        ("breman", "Bremen"),
+        ("München", "Munich"),
+        ("cologne", "Köln"),
+    ],
+)
+def test_place(said, name):
+    async def run():
+        # These are all in PLACES, or close to one, so none is looked up.
+        service = weather.Weather("Berlin", client([], places=()))
+        return await service.place(said)
+
+    assert asyncio.run(run()).name == name
 
 
 def test_unknown_weather_code():
     assert weather.condition(1234) == (WeatherCondition.CLOUDY, "Unknown")
 
 
-def test_intent_samples_fit_the_model_labels():
+def test_intent_fits_the_model_labels():
     # The English models' labels: lowercase letters, apostrophe and space.
-    labels = set("abcdefghijklmnopqrstuvwxyz' ")
-    for sample in weather.INTENT.samples:
-        assert set(sample) <= labels, sample
+    # The recognizer rejects samples and slot values with other characters.
+    labels = "abcdefghijklmnopqrstuvwxyz' "
+    char_to_int = {c: i for i, c in enumerate(labels)}
+    recognizer = IntentRecognizer([weather.INTENT], char_to_int, len(labels), 0.04)
+    assert len(recognizer.samples) == len(weather.INTENT.samples)
+
+
+def test_places():
+    assert weather.PLACES["hamburg"].name == "Hamburg"
+    # Places can be said by other names.
+    assert weather.PLACES["cologne"] == weather.PLACES["koln"]
+    assert weather.PLACES["frankfurt"].name == "Frankfurt am Main"
+    assert len(weather.PLACES) > 500
+
+
+def test_card_for_city():
+    requests = []
+
+    async def run():
+        service = weather.Weather("Berlin", client(requests))
+        card = await service.card("id", {"city": "munchen"})
+        await service.close()
+        return card
+
+    card = asyncio.run(run())
+    assert card.location == "Munich"
+    # The coordinates are known, so the place is not looked up.
+    assert [r.url.host for r in requests] == ["api.open-meteo.com"]
+    assert requests[0].url.params["latitude"] == "48.13743"

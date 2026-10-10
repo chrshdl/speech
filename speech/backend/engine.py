@@ -14,7 +14,6 @@ import uuid
 import numpy as np
 import sounddevice
 
-from speech import streaming
 from speech.backend.messages import (
     AudioInputKind,
     CaptureEndReason,
@@ -131,7 +130,8 @@ class EventBus:
 class Capture:
     id: str
     initiator: Initiator
-    transcriber: streaming.Transcriber
+    # Such as a streaming.Transcriber.
+    transcriber: object
     audio: asyncio.Queue
     # With audio input from the client, the stream to read from and
     # whether a client is streaming it.
@@ -145,8 +145,8 @@ class Capture:
 class Recognizer:
     def __init__(
         self,
-        model,
-        new_search,
+        new_transcriber,
+        sample_rate,
         audio_input,
         settings=None,
         model_name="",
@@ -156,23 +156,29 @@ class Recognizer:
     ):
         """
         Arguments:
-            model: An OnnxModel or TorchModel, see streaming.load.
-            new_search: Creates the decoder of a capture, see
-                streaming.search_factory.
+            new_transcriber: Creates the transcriber of a capture, such as
+                a streaming.Transcriber or a
+                speech.whisper_model.WhisperTranscriber. Its push(audio,
+                final) adds audio, its text(final) is the transcript so
+                far, heard_speech says whether speech was heard and
+                pause_seconds how long ago.
+            sample_rate (int): The sample rate of the audio.
             audio_input (AudioInputKind): Where the audio comes from. From
                 the MICROPHONE, deliver passes it in.
             settings (Settings): The time limits.
             model_name (str): The model's name for Info.
             language_model (str): The language model's name for Info, if
-                new_search uses one.
-            intents (IntentRecognizer, optional): Recognizes what a capture
-                asks for.
+                the transcribers use one.
+            intents (optional): Recognizes what a capture asks for, such as
+                a speech.intents.IntentRecognizer from a streaming model's
+                output or a TextIntentRecognizer from the transcript.
             handlers (dict, optional): Answers each intent by name, with an
-                object whose async card(card_id) returns the card to show
-                and whose async close() releases it.
+                object whose async card(card_id, slots) returns the card to
+                show for the intent's slots and whose async close()
+                releases it.
         """
-        self.model = model
-        self.new_search = new_search
+        self.new_transcriber = new_transcriber
+        self._sample_rate = sample_rate
         self.audio_input = audio_input
         self.settings = settings or Settings()
         self.model_name = model_name
@@ -190,7 +196,7 @@ class Recognizer:
 
     @property
     def sample_rate(self):
-        return self.model.sample_rate
+        return self._sample_rate
 
     def snapshot(self):
         """The events that bring a new subscriber up to date."""
@@ -206,7 +212,7 @@ class Recognizer:
         capture = Capture(
             id=uuid.uuid4().hex,
             initiator=initiator,
-            transcriber=streaming.Transcriber(self.model, self.new_search()),
+            transcriber=self.new_transcriber(),
             audio=asyncio.Queue(),
         )
         if self.audio_input == AudioInputKind.CLIENT:
@@ -360,10 +366,11 @@ class Recognizer:
             if stop:
                 return CaptureEndReason.STOP_CAPTURE
             if capture.initiator == Initiator.TAP_TO_TALK:
-                if text and transcriber.pause_seconds >= settings.end_of_speech:
+                speech = transcriber.heard_speech
+                if speech and transcriber.pause_seconds >= settings.end_of_speech:
                     self.bus.publish(EndOfSpeechDetected(dialog_request_id=capture.id))
                     return CaptureEndReason.END_OF_SPEECH
-                if not text and heard >= settings.no_speech_timeout:
+                if not speech and heard >= settings.no_speech_timeout:
                     return CaptureEndReason.NO_SPEECH
             if heard >= settings.max_capture:
                 return CaptureEndReason.MAX_DURATION
@@ -374,7 +381,7 @@ class Recognizer:
         if capture.stream_id is not None:
             self.bus.publish(StopAudioStream(stream_id=capture.stream_id))
         # Flush the frames held back for the lookahead, and let a language
-        # model score the end of the utterance.
+        # model score the end of the utterance, or transcribe with Whisper.
         await asyncio.to_thread(
             capture.transcriber.push, np.zeros(0, dtype=np.int16), True
         )
@@ -398,7 +405,7 @@ class Recognizer:
         match = None
         if text and self.intents is not None and reason in _ANSWERABLE:
             match = await asyncio.to_thread(
-                self.intents.closest, capture.transcriber.probs()
+                self.intents.closest_heard, capture.transcriber
             )
         if match is None or match.score < self.intents.threshold:
             if match is not None:
@@ -410,15 +417,25 @@ class Recognizer:
                 )
             return self._final_card(capture, text, reason), self.settings.card_timeout
         name = match.intent.name
-        log.info("Capture %s asked for %s, score %.2f", capture.id, name, match.score)
+        log.info(
+            "Capture %s asked for %s %s, score %.2f",
+            capture.id,
+            name,
+            match.slots,
+            match.score,
+        )
         self.bus.publish(
             IntentRecognized(
-                dialog_request_id=capture.id, intent=name, score=match.score
+                dialog_request_id=capture.id,
+                intent=name,
+                score=match.score,
+                slots=match.slots,
             )
         )
         try:
             card = await asyncio.wait_for(
-                self.handlers[name].card(capture.id), self.settings.answer_timeout
+                self.handlers[name].card(capture.id, match.slots),
+                self.settings.answer_timeout,
             )
         except Exception:
             log.exception("Capture %s could not be answered", capture.id)
