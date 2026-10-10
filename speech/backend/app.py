@@ -32,6 +32,19 @@ from speech.backend.messages import (
 WEB_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "web")
 
 
+class RevalidatedFiles(StaticFiles):
+    """
+    Static files that browsers check for changes on every load, so the
+    client's files never mix versions. Without a Cache-Control header
+    Firefox reused an old copy of a script after the page changed.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 def create_app(recognizer, microphone=None):
     """
     Returns the service for the recognizer, an engine.Recognizer, which
@@ -196,7 +209,7 @@ def create_app(recognizer, microphone=None):
     async def home():
         return RedirectResponse("/assistant/")
 
-    app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+    app.mount("/", RevalidatedFiles(directory=WEB_DIR, html=True), name="web")
 
     def openapi():
         # The events are not responses, so add their schemas by hand.

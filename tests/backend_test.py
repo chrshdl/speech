@@ -643,3 +643,22 @@ def test_whisper():
     # It ended a second after the speech, before all the audio was sent.
     assert len(silence) + len(speech_audio) <= whisper.heard[-1] < len(audio)
     assert len(whisper.heard) > 1
+
+
+def test_client_is_revalidated(model_path):
+    async def run():
+        async with service(make_recognizer(model_path)) as svc:
+            page = await svc.client.get("/assistant/")
+            script = await svc.client.get("/assistant/app.js")
+            again = await svc.client.get(
+                "/assistant/app.js", headers={"If-None-Match": script.headers["etag"]}
+            )
+            return page, script, again
+
+    page, script, again = asyncio.run(run())
+    assert page.status_code == script.status_code == 200
+    assert (
+        page.headers["cache-control"] == script.headers["cache-control"] == "no-cache"
+    )
+    # An unchanged file is not sent again.
+    assert again.status_code == 304
