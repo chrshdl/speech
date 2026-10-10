@@ -249,11 +249,16 @@ Client                                     Service
 ## The browser client
 
 `web/assistant`, served at `/`, is a client for a screen such as the
-Pi's: a clock on a landing page and a round microphone button in the
-upper right corner. Tapping it, or pressing Space, starts a `TAP_TO_TALK`
-capture, and tapping it while listening stops it. The button shows the
-dialog state, with a ring that follows the loudness while listening and
-spins while thinking, and the page shows the cards the service sends.
+Pi's, made for a young child: a sunny meadow with a rainbow, drifting
+clouds, a clock, and a unicorn whose speech bubble suggests what to ask,
+with a round rainbow microphone button in the upper right corner.
+Tapping it, or pressing Space, starts a `TAP_TO_TALK` capture, and
+tapping it while listening stops it. The button shows the dialog state,
+glowing with the loudness while listening and its rainbow ring spinning
+while listening and thinking, and the page shows the cards the service
+sends, for which the unicorn steps aside. The rounded Fredoka font is in
+`web/assistant/fonts` under the SIL Open Font License, so the page needs
+no internet.
 
 With audio input from the client the page records from the browser's
 microphone, which browsers only allow on `localhost` or over HTTPS. With

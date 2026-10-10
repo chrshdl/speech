@@ -1,14 +1,15 @@
 // Weather icons as SVG markup, drawn on a 64 by 64 grid.
 
+// Colors that show on the cards' white and pastel backgrounds.
 const ICON_COLORS = {
-  sun: "#ffc94d",
-  moon: "#e3e8f7",
-  cloud: "#dde4f2",
+  sun: "#ffbf2e",
+  moon: "#b9a3dc",
+  cloud: "#bcd3f2",
   darkCloud: "#8d98b4",
-  rain: "#6fb1ff",
-  snow: "#f4f6fb",
-  bolt: "#ffd34d",
-  fog: "#aab4c8",
+  rain: "#4aa3ff",
+  snow: "#7fc4ff",
+  bolt: "#ffbf2e",
+  fog: "#9fb0cc",
 };
 
 function cloud(fill = ICON_COLORS.cloud, transform = "") {

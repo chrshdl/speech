@@ -1,18 +1,31 @@
+@font-face {
+  font-family: "Fredoka";
+  src: url("fonts/fredoka-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
 :root {
-  --bg: #0b1020;
-  --bg-glow: #17244a;
-  --text: #f4f6fb;
-  --muted: #9aa5c0;
-  --faint: #66718c;
-  --surface: rgba(255, 255, 255, 0.06);
-  --surface-strong: rgba(255, 255, 255, 0.1);
-  --border: rgba(255, 255, 255, 0.12);
-  --accent: #4f8cff;
-  --accent-glow: rgba(79, 140, 255, 0.45);
-  --danger: #ff6b6b;
-  --radius: 24px;
-  --mic: 64px;
-  color-scheme: dark;
+  --ink: #4b2c6e;
+  --muted: #8a6aa8;
+  --faint: #b9a3dc;
+  --pink: #ff5fa2;
+  --purple: #8b5cf6;
+  --card: #ffffff;
+  --card-border: #ffd1e8;
+  --rainbow: conic-gradient(
+    #ff6b6b,
+    #ffa94d,
+    #ffd93d,
+    #6bd88f,
+    #5cc0ff,
+    #7c8cff,
+    #b18cff,
+    #ff6b6b
+  );
+  --radius: 32px;
+  --mic: 84px;
+  color-scheme: light;
 }
 
 * {
@@ -26,16 +39,13 @@ body {
 
 body {
   margin: 0;
-  background: radial-gradient(120% 90% at 50% 0%, var(--bg-glow) 0%, var(--bg) 60%) fixed,
-    var(--bg);
-  color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "DejaVu Sans",
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
+  background: #cdeeff;
+  color: var(--ink);
+  font-family: "Fredoka", "Arial Rounded MT Bold", system-ui, sans-serif;
   overflow: hidden;
 }
 
-/* The bar with the status and the microphone button. */
+/* The bar with the status and the magic microphone button. */
 
 .bar {
   position: fixed;
@@ -44,14 +54,22 @@ body {
   align-items: center;
   justify-content: flex-end;
   gap: 16px;
-  padding: 24px;
+  padding: 20px;
   z-index: 2;
 }
 
 .status {
   margin: 0;
-  color: var(--muted);
-  font-size: 15px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.status:empty {
+  display: none;
 }
 
 .mic {
@@ -61,37 +79,41 @@ body {
   width: var(--mic);
   height: var(--mic);
   padding: 0;
-  border: 1px solid var(--border);
+  border: 0;
   border-radius: 50%;
-  background: var(--surface-strong);
-  color: var(--text);
+  background: #ffffff;
+  color: var(--purple);
   cursor: pointer;
+  box-shadow:
+    0 8px 20px rgba(139, 92, 246, 0.3),
+    inset 0 -4px 0 rgba(139, 92, 246, 0.12);
   transition:
+    transform 150ms ease,
     background-color 200ms ease,
-    border-color 200ms ease,
-    transform 120ms ease,
+    color 200ms ease,
     opacity 200ms ease;
 }
 
 .mic:hover {
-  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.05);
 }
 
 .mic:active {
-  transform: scale(0.95);
+  transform: scale(0.94);
 }
 
 .mic:focus-visible {
-  outline: 3px solid var(--accent-glow);
-  outline-offset: 3px;
+  outline: 4px solid var(--pink);
+  outline-offset: 6px;
 }
 
 .mic-icon {
-  width: 28px;
-  height: 28px;
+  position: relative;
+  width: 38px;
+  height: 38px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 2.4;
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -101,44 +123,38 @@ body {
   stroke: none;
 }
 
-/* The ring around the button shows listening and thinking. */
+/* A rainbow ring around the button, which spins while listening. */
 .mic-ring {
   position: absolute;
-  inset: -1px;
+  inset: -7px;
   border-radius: 50%;
+  background: var(--rainbow);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
   pointer-events: none;
 }
 
 body[data-state="LISTENING"] .mic {
-  background: var(--accent);
-  border-color: var(--accent);
-}
-
-body[data-state="LISTENING"] .mic-ring {
+  background: var(--pink);
+  color: #ffffff;
   /* --level, from 0 to 1, follows the loudness of the microphone. */
-  box-shadow: 0 0 0 calc(4px + var(--level, 0) * 12px) var(--accent-glow);
-  animation: pulse 1.6s ease-in-out infinite;
+  box-shadow:
+    0 0 0 calc(4px + var(--level, 0) * 12px) rgba(255, 95, 162, 0.35),
+    0 8px 20px rgba(255, 95, 162, 0.4);
   transition: box-shadow 80ms linear;
 }
 
+body[data-state="LISTENING"] .mic-ring {
+  animation: spin 2.4s linear infinite;
+}
+
 body[data-state="THINKING"] .mic-ring {
-  inset: -6px;
-  border: 3px solid transparent;
-  border-top-color: var(--accent);
-  border-right-color: var(--accent);
-  animation: spin 0.9s linear infinite;
+  animation: spin 0.7s linear infinite;
 }
 
 body[data-connection="connecting"] .mic,
 body[data-connection="offline"] .mic {
-  opacity: 0.4;
+  opacity: 0.5;
   cursor: not-allowed;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.55;
-  }
 }
 
 @keyframes spin {
@@ -154,55 +170,119 @@ main {
   height: 100%;
 }
 
-.home {
+.scene {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  text-align: center;
-  transition:
-    opacity 300ms ease,
-    transform 300ms ease;
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
-body.has-card .home {
-  opacity: 0;
-  transform: scale(0.97);
+.scene text {
+  font-family: "Fredoka", "Arial Rounded MT Bold", system-ui, sans-serif;
 }
 
 .greeting {
-  margin: 0;
-  color: var(--muted);
-  font-size: 22px;
-  font-weight: 500;
+  fill: var(--pink);
+  font-size: 54px;
+  font-weight: 600;
 }
 
 .clock {
-  margin: 4px 0 0;
-  font-size: clamp(72px, 16vw, 132px);
-  font-weight: 200;
-  letter-spacing: -0.03em;
-  line-height: 1;
+  fill: var(--ink);
+  font-size: 104px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
 .date {
-  margin: 12px 0 0;
-  color: var(--muted);
-  font-size: 20px;
+  fill: var(--muted);
+  font-size: 34px;
+  font-weight: 500;
 }
 
-.hint {
-  margin: 56px 0 0;
-  color: var(--faint);
-  font-size: 17px;
+.bubble-line {
+  fill: var(--ink);
+  font-size: 34px;
+  font-weight: 500;
 }
 
-.hint q {
-  color: var(--muted);
+.bubble-ask {
+  fill: var(--pink);
+  font-weight: 600;
+}
+
+.greeting-text,
+.bubble {
+  transition: opacity 300ms ease;
+}
+
+body.has-card .greeting-text,
+body.has-card .bubble {
+  opacity: 0;
+}
+
+/* Gentle motion: clouds drift, stars twinkle, the unicorn bobs. */
+
+.drift {
+  animation: drift 14s ease-in-out infinite alternate;
+}
+
+.drift-slow {
+  animation-duration: 18s;
+}
+
+.drift-slower {
+  animation-duration: 24s;
+}
+
+@keyframes drift {
+  to {
+    translate: 60px 0;
+  }
+}
+
+.sparkles use {
+  animation: twinkle 2.6s ease-in-out infinite;
+}
+
+.sparkles use:nth-child(2n) {
+  animation-delay: -1.3s;
+}
+
+.sparkles use:nth-child(3n) {
+  animation-delay: -0.7s;
+}
+
+@keyframes twinkle {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.bob {
+  animation: bob 3s ease-in-out infinite;
+}
+
+/* The unicorn trots aside to make room for a card. */
+.step-aside {
+  transition: translate 600ms cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+body.has-card .step-aside {
+  translate: 300px 0;
+}
+
+@keyframes bob {
+  50% {
+    translate: 0 -10px;
+  }
+}
+
+.sun-rays {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spin 40s linear infinite;
 }
 
 /* Cards. */
@@ -212,21 +292,19 @@ body.has-card .home {
   inset: 0;
   display: grid;
   place-items: center;
-  padding: 112px 24px 24px;
+  padding: 124px 24px 24px;
   pointer-events: none;
 }
 
 .card {
-  width: min(600px, 100%);
-  padding: 24px 28px 28px;
-  border: 1px solid var(--border);
+  width: min(620px, 100%);
+  padding: 22px 28px 28px;
+  border: 4px solid var(--card-border);
   border-radius: var(--radius);
-  background: var(--surface);
-  backdrop-filter: blur(24px);
-  -webkit-backdrop-filter: blur(24px);
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.35);
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(139, 92, 246, 0.25);
   pointer-events: auto;
-  animation: card-in 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .card.leaving {
@@ -236,14 +314,14 @@ body.has-card .home {
 @keyframes card-in {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.98);
+    transform: translateY(24px) scale(0.9);
   }
 }
 
 @keyframes card-out {
   to {
     opacity: 0;
-    transform: translateY(8px) scale(0.98);
+    transform: translateY(12px) scale(0.95);
   }
 }
 
@@ -252,52 +330,49 @@ body.has-card .home {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .card-title {
   margin: 0;
-  color: var(--muted);
-  font-size: 15px;
+  color: var(--purple);
+  font-size: 22px;
   font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .card-close {
   display: grid;
   place-items: center;
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   margin: -6px -10px -6px 0;
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: transparent;
-  color: var(--muted);
+  background: #fff0f7;
+  color: var(--pink);
   cursor: pointer;
 }
 
 .card-close:hover {
-  background: var(--surface-strong);
-  color: var(--text);
+  background: #ffe0ef;
 }
 
 .card-close svg {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 2;
+  stroke-width: 3;
   stroke-linecap: round;
 }
 
 .transcript {
   margin: 0;
-  font-size: 30px;
+  font-size: 34px;
   font-weight: 500;
-  line-height: 1.3;
+  line-height: 1.25;
   overflow-wrap: anywhere;
 }
 
@@ -305,19 +380,19 @@ body.has-card .home {
   color: var(--muted);
 }
 
-/* Three dots while nothing has been heard yet. */
+/* Twinkling dots while nothing has been heard yet. */
 .transcript:empty::before {
   content: "• • •";
   color: var(--faint);
-  letter-spacing: 0.1em;
-  animation: pulse 1.2s ease-in-out infinite;
+  letter-spacing: 0.15em;
+  animation: twinkle 1.2s ease-in-out infinite;
 }
 
 .notice {
   margin: 0;
   color: var(--muted);
-  font-size: 20px;
-  line-height: 1.4;
+  font-size: 24px;
+  line-height: 1.35;
 }
 
 /* The weather card. */
@@ -330,67 +405,93 @@ body.has-card .home {
 }
 
 .weather-icon {
-  width: 104px;
-  height: 104px;
+  width: 110px;
+  height: 110px;
 }
 
 .weather-temperature {
   margin: 0;
-  font-size: 72px;
-  font-weight: 300;
+  color: var(--ink);
+  font-size: 76px;
+  font-weight: 600;
   line-height: 1;
-  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 
 .weather-description {
-  margin: 8px 0 0;
-  font-size: 22px;
-  font-weight: 500;
+  margin: 6px 0 0;
+  color: var(--pink);
+  font-size: 26px;
+  font-weight: 600;
 }
 
 .weather-details {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 20px 0 0;
+  gap: 8px 12px;
+  margin: 18px 0 0;
   padding: 0;
   list-style: none;
+  font-size: 17px;
+}
+
+.weather-details li {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #f3edff;
   color: var(--muted);
-  font-size: 16px;
 }
 
 .weather-details strong {
-  color: var(--text);
+  color: var(--ink);
   font-weight: 600;
 }
 
 .weather-days {
   display: grid;
   grid-template-columns: repeat(var(--days, 4), 1fr);
-  gap: 8px;
-  margin: 24px 0 0;
-  padding: 20px 0 0;
-  border-top: 1px solid var(--border);
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
   list-style: none;
   text-align: center;
 }
 
+.weather-day {
+  padding: 10px 4px 12px;
+  border-radius: 22px;
+  background: #eef8ff;
+}
+
+.weather-day:nth-child(2) {
+  background: #fff4e6;
+}
+
+.weather-day:nth-child(3) {
+  background: #f0fbf2;
+}
+
+.weather-day:nth-child(4) {
+  background: #fdf0fb;
+}
+
 .weather-day-name {
-  color: var(--muted);
-  font-size: 15px;
+  color: var(--ink);
+  font-size: 18px;
   font-weight: 600;
 }
 
 .weather-day .weather-icon {
   display: block;
-  width: 48px;
-  height: 48px;
-  margin: 8px auto;
+  width: 52px;
+  height: 52px;
+  margin: 4px auto;
 }
 
 .weather-day-range {
-  font-size: 16px;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -399,84 +500,69 @@ body.has-card .home {
   color: var(--faint);
 }
 
-@media (max-width: 480px) {
-  .bar {
-    padding: 16px;
-  }
-
-  .stage {
-    padding: 96px 16px 16px;
-  }
-
-  .card {
-    padding: 20px;
-  }
-
-  .weather-icon {
-    width: 80px;
-    height: 80px;
-  }
-
-  .weather-temperature {
-    font-size: 56px;
-  }
-}
-
 /* Short screens, such as the Raspberry Pi touchscreen at 800 by 480: the
    card sits beside the microphone button rather than below it. */
 @media (max-height: 600px) {
+  :root {
+    --mic: 72px;
+  }
+
   .stage {
-    padding: 16px 104px;
+    padding: 14px 112px;
   }
 
   .card {
-    padding: 16px 24px 20px;
+    padding: 14px 22px 18px;
   }
 
   .card-header {
-    margin-bottom: 4px;
+    margin-bottom: 2px;
   }
 
   .transcript {
-    font-size: 26px;
+    font-size: 28px;
   }
 
   .weather-icon {
-    width: 72px;
-    height: 72px;
+    width: 76px;
+    height: 76px;
   }
 
   .weather-temperature {
-    font-size: 52px;
+    font-size: 54px;
   }
 
   .weather-description {
-    margin-top: 4px;
-    font-size: 19px;
+    margin-top: 2px;
+    font-size: 21px;
   }
 
   .weather-details {
-    margin-top: 12px;
+    margin-top: 10px;
     font-size: 15px;
   }
 
+  .weather-details li {
+    padding: 4px 12px;
+  }
+
   .weather-days {
-    margin-top: 14px;
-    padding-top: 12px;
+    margin-top: 12px;
+  }
+
+  .weather-day {
+    padding: 6px 4px 8px;
   }
 
   .weather-day .weather-icon {
-    width: 36px;
-    height: 36px;
-    margin: 4px auto;
+    width: 38px;
+    height: 38px;
+    margin: 2px auto;
   }
 
-  .clock {
-    font-size: 96px;
-  }
-
-  .hint {
-    margin-top: 32px;
+  .weather-day-name,
+  .weather-day-range {
+    font-size: 16px;
   }
 }
 
