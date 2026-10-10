@@ -1,16 +1,19 @@
 import argparse
 import json
 
-import torch
 import tqdm
 
 import speech
-from speech import loader
-from speech.models.ctc_decoder import BEAM_SIZE, PRUNE
+from speech.features import log_specgram
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, decode
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
+from speech.utils import wave
+from speech.utils.dataset import read_data_json
 
 
 def eval_loop(model, ldr, decoder_args):
+    import torch
+
     all_preds = []
     all_labels = []
     with torch.no_grad():
@@ -19,6 +22,28 @@ def eval_loop(model, ldr, decoder_args):
             all_preds.extend(preds)
             all_labels.extend(batch[1])
     return list(zip(all_labels, all_preds))
+
+
+def eval_onnx(model, dataset_json, decoder_args):
+    """
+    Decodes each example with an OnnxModel as CTC.infer does, and returns
+    (label, prediction) pairs of character lists.
+    """
+    beam_size = decoder_args.get("beam_size", 1)
+    lm = decoder_args.get("lm")
+    prune = decoder_args.get("prune")
+    results = []
+    for datum in tqdm.tqdm(read_data_json(dataset_json)):
+        audio, sample_rate = wave.array_from_wave(datum["audio"])
+        if sample_rate != model.sample_rate:
+            raise ValueError(
+                f"{datum['audio']} is {sample_rate} Hz, the model needs "
+                f"{model.sample_rate} Hz."
+            )
+        probs = model.probs(log_specgram(audio, sample_rate))
+        labels = decode(probs, beam_size, model.blank, lm, prune)[0]
+        results.append((list(datum["text"]), list(model.decode(labels))))
+    return results
 
 
 def run(
@@ -34,24 +59,34 @@ def run(
     unk_penalty=UNK_PENALTY,
 ):
 
-    device = speech.best_device()
-
-    model, preproc = speech.load(model_path, tag=tag)
-    ldr = loader.make_loader(dataset_json, preproc, batch_size)
-
-    model.to(device)
-    model.set_eval()
-
     # The beam search and LM options only apply to CTC models.
     decoder_args = dict(decoder_args or {})
-    if lm_path is not None:
-        lm = WordLM.load(lm_path)
-        decoder_args["lm"] = lm.scorer(
-            preproc.char_to_int, lm_weight, word_bonus, unk_penalty
-        )
 
-    results = eval_loop(model, ldr, decoder_args)
-    results = [(preproc.decode(label), preproc.decode(pred)) for label, pred in results]
+    def scorer(char_to_int):
+        lm = WordLM.load(lm_path)
+        return lm.scorer(char_to_int, lm_weight, word_bonus, unk_penalty)
+
+    if model_path.endswith(".onnx"):
+        from speech.onnx_model import OnnxModel
+
+        model = OnnxModel(model_path)
+        if lm_path is not None:
+            decoder_args["lm"] = scorer(model.char_to_int)
+        results = eval_onnx(model, dataset_json, decoder_args)
+    else:
+        from speech import loader
+
+        device = speech.best_device()
+        model, preproc = speech.load(model_path, tag=tag)
+        ldr = loader.make_loader(dataset_json, preproc, batch_size)
+        model.to(device)
+        model.set_eval()
+        if lm_path is not None:
+            decoder_args["lm"] = scorer(preproc.char_to_int)
+        results = eval_loop(model, ldr, decoder_args)
+        results = [
+            (preproc.decode(label), preproc.decode(pred)) for label, pred in results
+        ]
     cer = speech.compute_cer(results)
     wer = speech.compute_wer(results)
     print(f"CER {cer:.3f} WER {wer:.3f}")
@@ -67,7 +102,10 @@ def run(
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Eval a speech model.")
 
-    parser.add_argument("model", help="A path to a stored model.")
+    parser.add_argument(
+        "model",
+        help="A path to a stored model, or a CTC model exported to .onnx by export.py.",
+    )
     parser.add_argument("dataset", help="A json file with the dataset to evaluate.")
     parser.add_argument(
         "--last",

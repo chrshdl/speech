@@ -10,7 +10,7 @@ from websockets.asyncio.client import connect
 
 import serve
 import speech
-from speech import loader, streaming
+from speech import export, loader, streaming
 from speech.models import CTC
 from speech.models.word_lm import WordLM
 from speech.utils import wave
@@ -20,25 +20,28 @@ CHUNK = 1600
 
 @pytest.fixture
 def root(tmp_path):
-    """A directory with a tiny saved CTC model and a tiny LM."""
+    """
+    A directory with a tiny saved CTC model, the model exported to ONNX and
+    a tiny LM.
+    """
     torch.manual_seed(0)
     preproc = loader.Preprocessor("test.json", start_and_end=False)
     model = CTC(preproc.input_dim, preproc.vocab_size, shared.model_config)
     model_dir = tmp_path / "models" / "tiny"
     model_dir.mkdir(parents=True)
     speech.save(model, preproc, str(model_dir), tag="best")
+    export.export(model, preproc, str(tmp_path / "models" / "tiny.onnx"))
     WordLM(["hello world", "hello hi", "world"]).save(
         str(tmp_path / "models" / "lm.npz")
     )
     return tmp_path
 
 
-def expected_lines(model_dir, lm_path, audio, sample_rate):
+def expected_lines(model_path, lm_path, audio):
     """The lines a Transcriber gives on the audio in the server's chunks."""
-    model, preproc = speech.load(model_dir, tag="best")
-    model.set_eval()
-    search = streaming.search_factory(model.blank, preproc.char_to_int, lm_path)()
-    transcriber = streaming.Transcriber(model, preproc, sample_rate, search)
+    model = streaming.load(model_path)
+    search = streaming.search_factory(model.blank, model.char_to_int, lm_path)()
+    transcriber = streaming.Transcriber(model, search)
     lines = []
     for start in range(0, len(audio), CHUNK):
         transcriber.push(audio[start : start + CHUNK])
@@ -90,8 +93,9 @@ def get(url):
 
 def test_serve(root, monkeypatch):
     model_dir = str(root / "models" / "tiny")
+    onnx_path = str(root / "models" / "tiny.onnx")
     lm_path = str(root / "models" / "lm.npz")
-    audio, sample_rate = wave.array_from_wave("test0.wav")
+    audio, _ = wave.array_from_wave("test0.wav")
     # The random model rarely pauses, so end a line after every chunk with
     # text to cover lines before the stop.
     monkeypatch.setattr(serve, "PAUSE", 0.0)
@@ -110,12 +114,16 @@ def test_serve(root, monkeypatch):
             status, _, _ = await asyncio.to_thread(get, f"{http}/missing")
             assert status == 404
             _, _, body = await asyncio.to_thread(get, f"{http}/models")
-            assert json.loads(body) == {"models": [model_dir], "lms": [lm_path]}
+            assert json.loads(body) == {
+                "models": [model_dir, onnx_path],
+                "lms": [lm_path],
+            }
 
-            for lm in [None, lm_path]:
-                lines = await transcribe(ws, model_dir, lm, audio)
-                assert len(lines) > 1
-                assert lines == expected_lines(model_dir, lm, audio, sample_rate)
+            for model in [model_dir, onnx_path]:
+                for lm in [None, lm_path]:
+                    lines = await transcribe(ws, model, lm, audio)
+                    assert len(lines) > 1
+                    assert lines == expected_lines(model, lm, audio)
 
             async with connect(ws) as socket:
                 # Audio before start.

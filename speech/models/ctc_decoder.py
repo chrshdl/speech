@@ -155,6 +155,20 @@ class BeamSearch:
         return logaddexp(p_b, p_nb) + lm_score
 
 
+def best_path(labels, blank):
+    """
+    Greedy CTC decoding of the most likely label of each frame: merges
+    repeats, then drops blanks.
+    """
+    seq = []
+    prev = blank
+    for p in labels:
+        if p != blank and p != prev:
+            seq.append(p)
+        prev = p
+    return seq
+
+
 def decode(probs, beam_size=10, blank=0, lm=None, prune=None):
     """
     Performs inference for the given output probabilities.

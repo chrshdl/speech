@@ -6,14 +6,15 @@ import time
 
 import numpy as np
 import sounddevice
-import torch
 
 import speech
-from speech import loader, streaming
-from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, decode
+from speech import streaming
+from speech.features import log_specgram
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, best_path, decode
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
-from speech.streaming import Transcriber, model_sample_rate
+from speech.streaming import Transcriber
 from speech.utils import wave
+from speech.utils.dataset import read_data_json
 
 
 def show(prefix, text, done=False):
@@ -37,21 +38,21 @@ def read_inputs(inputs, num):
     examples = []
     for i in inputs:
         if i.endswith(".json"):
-            data = loader.read_data_json(i)[:num]
+            data = read_data_json(i)[:num]
             examples.extend((d["audio"], d["text"]) for d in data)
         else:
             examples.append((i, None))
     return examples
 
 
-def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime, new_search):
+def transcribe_files(model, inputs, num, chunk_ms, realtime, new_search):
     """
-    Feeds each audio file to the model in chunks of chunk_ms
-    milliseconds, as a microphone would, and compares the result with
-    decoding the whole file at once. new_search() returns the beam search
-    for a file, or None to decode greedily.
+    Feeds each audio file to the model, see streaming.load, in chunks of
+    chunk_ms milliseconds, as a microphone would, and compares the result
+    with decoding the whole file at once. new_search() returns the beam
+    search for a file, or None to decode greedily.
     """
-    sample_rate = model_sample_rate(preproc)
+    sample_rate = model.sample_rate
     for audio_file, reference in read_inputs(inputs, num):
         print(audio_file)
         audio, file_rate = wave.array_from_wave(audio_file)
@@ -61,7 +62,7 @@ def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime, new_search
             )
 
         search = new_search()
-        transcriber = Transcriber(model, preproc, sample_rate, search)
+        transcriber = Transcriber(model, search)
         chunk = int(sample_rate * chunk_ms / 1e3)
         compute = 0.0
         for start in range(0, len(audio), chunk):
@@ -76,18 +77,15 @@ def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime, new_search
                 time.sleep(max(chunk_ms / 1e3 - (time.time() - begin), 0))
 
         # Decoding the whole file at once must give the same result.
-        features = preproc.preprocess(audio_file, "")[0]
-        features = torch.from_numpy(features).unsqueeze(0)
-        with torch.no_grad():
-            probs = model.forward_impl(features, softmax=True)[0].numpy()
+        probs = model.probs(log_specgram(audio, sample_rate))
         if search is None:
-            offline = model.max_decode(probs.argmax(axis=1).tolist(), model.blank)
+            offline = best_path(probs.argmax(axis=1).tolist(), model.blank)
         else:
             offline = decode(
                 probs, search.beam_size, search.blank, search.lm, search.prune
             )[0]
 
-        print(f"  offline:   {''.join(preproc.decode(offline))}")
+        print(f"  offline:   {model.decode(offline)}")
         if reference is not None:
             result = [(list(reference), list(transcriber.text(final=True)))]
             cer = speech.compute_cer(result)
@@ -99,13 +97,13 @@ def transcribe_files(model, preproc, inputs, num, chunk_ms, realtime, new_search
         print()
 
 
-def listen(model, preproc, chunk_ms, mic_device, pause, new_search):
+def listen(model, chunk_ms, mic_device, pause, new_search):
     """
     Transcribes speech from the microphone as it arrives until Ctrl+C.
     A pause of the given seconds ends the current line. new_search()
     returns the beam search, or None to decode greedily.
     """
-    sample_rate = model_sample_rate(preproc)
+    sample_rate = model.sample_rate
     chunks = queue.Queue()
 
     def callback(indata, frames, time_info, status):
@@ -113,7 +111,7 @@ def listen(model, preproc, chunk_ms, mic_device, pause, new_search):
             print(f"\n{status}", file=sys.stderr)
         chunks.put(indata[:, 0].copy())
 
-    transcriber = Transcriber(model, preproc, sample_rate, new_search())
+    transcriber = Transcriber(model, new_search())
     heard = 0
     silent = True
     stream = sounddevice.InputStream(
@@ -165,12 +163,12 @@ def listen(model, preproc, chunk_ms, mic_device, pause, new_search):
 
 
 def run(args):
-    model, preproc = speech.load(args.model, tag=None if args.last else "best")
-    model.to(args.device)
-    model.set_eval()
+    model = streaming.load(
+        args.model, None if args.last else "best", args.device, args.threads
+    )
     new_search = streaming.search_factory(
         model.blank,
-        preproc.char_to_int,
+        model.char_to_int,
         args.lm,
         args.beam_size,
         args.prune,
@@ -180,11 +178,10 @@ def run(args):
     )
 
     if args.mic:
-        listen(model, preproc, args.chunk_ms, args.mic_device, args.pause, new_search)
+        listen(model, args.chunk_ms, args.mic_device, args.pause, new_search)
     else:
         transcribe_files(
             model,
-            preproc,
             args.inputs,
             args.num,
             args.chunk_ms,
@@ -198,7 +195,11 @@ if __name__ == "__main__":
         description="Transcribe speech chunk by chunk with a streaming CTC model, "
         "from audio files or live from the microphone."
     )
-    parser.add_argument("model", help="A path to a stored model.")
+    parser.add_argument(
+        "model",
+        help="A path to a stored model, or a model exported to .onnx by export.py, "
+        "which runs without PyTorch.",
+    )
     parser.add_argument(
         "inputs",
         nargs="*",
@@ -231,10 +232,15 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--device",
-        type=torch.device,
         default="cpu",
-        help="The device to run the model on. Streaming does little work per "
-        "chunk, so the CPU is usually fastest.",
+        help="The device to run a PyTorch model on. Streaming does little work "
+        "per chunk, so the CPU is usually fastest.",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        help="The CPU threads to run the model with. By default an exported "
+        "model uses one per core and a PyTorch model PyTorch's default.",
     )
     parser.add_argument(
         "--last",

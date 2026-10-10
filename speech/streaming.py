@@ -1,29 +1,51 @@
 """
 Streaming transcription: feeds audio to a CTC model chunk by chunk, as it
 arrives from a microphone, and decodes greedily or with a beam search and
-a language model.
+a language model. The model is a PyTorch model or one exported to ONNX,
+which runs without PyTorch.
 """
 
-import math
-
 import numpy as np
-import torch
-from torch import nn
 
-from speech import loader
+from speech.features import SpecgramStream
 from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, BeamSearch
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
 
-# The window of the training features in milliseconds, see log_specgram.
-WINDOW_MS = 20
 
+def load(path, tag="best", device="cpu", threads=None):
+    """
+    Loads a streaming CTC model: a .onnx file from speech.export, run
+    with ONNX Runtime, or a directory saved by train.py, run with
+    PyTorch.
 
-def model_sample_rate(preproc):
+    Arguments:
+        path (str): The .onnx file or model directory.
+        tag (str): For a directory, "best" for the model with the lowest
+            dev CER, or None for the last one.
+        device (str): For a directory, the device to run the model on.
+        threads (int, optional): The CPU threads to compute with.
+
+    Returns an OnnxModel or TorchModel.
     """
-    The sample rate the model was trained on, from the number of
-    frequency bins in each feature frame.
-    """
-    return round((preproc.input_dim - 1) * 2 * 1000 / WINDOW_MS)
+    if path.endswith(".onnx"):
+        from speech.onnx_model import OnnxModel
+
+        return OnnxModel(path, threads)
+
+    import torch
+
+    import speech
+    from speech.models import CTC
+    from speech.torch_model import TorchModel
+
+    if threads is not None:
+        torch.set_num_threads(threads)
+    model, preproc = speech.load(path, tag=tag)
+    if not isinstance(model, CTC) or model.rnn.bidirectional:
+        raise ValueError(f"{path} is not a unidirectional CTC model, which can stream")
+    model.to(device)
+    model.set_eval()
+    return TorchModel(model, preproc)
 
 
 def search_factory(
@@ -53,26 +75,21 @@ def search_factory(
 
 
 class Transcriber:
-    def __init__(self, model, preproc, sample_rate, search=None):
+    def __init__(self, model, search=None):
         """
-        Transcribes a stream of audio chunk by chunk. Decodes greedily,
-        or with the given ctc_decoder.BeamSearch, which can include a
-        language model.
+        Transcribes a stream of audio chunk by chunk with an OnnxModel or
+        TorchModel, see load. Decodes greedily, or with the given
+        ctc_decoder.BeamSearch, which can include a language model.
         """
         self.model = model
-        self.preproc = preproc
         self.search = search
-        self.specgram = loader.SpecgramStream(sample_rate, window_size=WINDOW_MS)
+        self.specgram = SpecgramStream(model.sample_rate)
         self.state = None
         self.greedy = []
         self.prev = model.blank
         # The number of blank frames since the last label.
         self.blanks = 0
-
-        # Each encoded frame covers the feature hop times the time stride
-        # of the convolutions.
-        stride = math.prod(c.stride[0] for c in model.conv if isinstance(c, nn.Conv2d))
-        self.frame_seconds = stride * self.specgram.hop / sample_rate
+        self.frame_seconds = model.frame_seconds
 
     def push(self, audio, final=False):
         """
@@ -80,10 +97,7 @@ class Transcriber:
         chunk to flush the frames held back for the lookahead.
         """
         frames = self.specgram.push(audio)
-        frames = (frames - self.preproc.mean) / self.preproc.std
-        frames = torch.from_numpy(frames).float().unsqueeze(0)
         probs, self.state = self.model.stream(frames, self.state, final)
-        probs = probs[0].cpu().numpy()
 
         # Greedy CTC decoding: merge repeats, then drop blanks. It also
         # tracks pauses for the beam search.
@@ -109,7 +123,7 @@ class Transcriber:
         return list(self.search.best(final)[0])
 
     def text(self, final=False):
-        return "".join(self.preproc.decode(self.labels(final)))
+        return self.model.decode(self.labels(final))
 
     @property
     def pause_seconds(self):

@@ -1,4 +1,4 @@
-import editdistance
+from rapidfuzz.distance import Levenshtein
 
 
 def compute_cer(results):
@@ -9,7 +9,7 @@ def compute_cer(results):
 
     Returns the CER for the full set.
     """
-    dist = sum(editdistance.eval(label, pred) for label, pred in results)
+    dist = sum(Levenshtein.distance(label, pred) for label, pred in results)
     total = sum(len(label) for label, _ in results)
     return dist / total
 

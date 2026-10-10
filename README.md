@@ -23,6 +23,10 @@ installs the `speech` package into it. If you need a PyTorch build for a
 specific CUDA version, see the
 [uv PyTorch guide](https://docs.astral.sh/uv/guides/integration/pytorch/).
 
+PyTorch and the other packages for training are in the `train` dependency
+group, which `uv sync` installs by default. To only stream with exported
+models, such as on a Raspberry Pi, see [Raspberry Pi](#raspberry-pi).
+
 You can verify the install was successful by running the tests.
 
 ```
@@ -224,6 +228,9 @@ To transcribe live from the microphone with a trained CTC model run
 uv run stream.py <path_to_model> --mic
 ```
 
+The model can also be a `.onnx` file from `export.py`, which runs without
+PyTorch and several times faster, see [Raspberry Pi](#raspberry-pi).
+
 The transcript grows as you speak, and a pause starts a new line. Stop with
 Ctrl+C. Use `--mic-device` to pick a microphone from `uv run python -m
 sounddevice`. Given audio files or a dataset json instead of `--mic`,
@@ -239,7 +246,8 @@ uv run serve.py
 ```
 
 and open http://127.0.0.1:8000. The page lists the streaming CTC models
-(directories with a `best_model`) and the LM `.npz` files under `examples`,
+(directories with a `best_model`, and `.onnx` files from `export.py`) and
+the LM `.npz` files under `examples`,
 or under the directory given with `--models`. Click RECORD and speak, or pick
 an audio file, which is streamed at real-time pace. The page sends 16 bit audio
 to the server over a WebSocket and shows the transcript as it grows, with
@@ -369,6 +377,104 @@ For the LibriSpeech LM and the streaming CTC model:
 [Deep Speech 2]: https://arxiv.org/abs/1512.02595
 [DeepSpeech 0.9]: https://github.com/mozilla/DeepSpeech/releases/tag/v0.9.0
 [SpecAugment]: https://arxiv.org/abs/1904.08779
+
+## Raspberry Pi
+
+A streaming CTC model exported to ONNX runs with [ONNX Runtime] and NumPy,
+without PyTorch, which suits small devices such as a Raspberry Pi 4. Export
+the model on the machine it was trained on:
+
+```
+uv run export.py examples/librispeech/models/ctc_streaming_100h
+```
+
+This writes `best_model-int8.onnx` to the model's directory, a single file
+with the weights, the feature normalization and the labels. It then streams
+random input through the file and prints the largest difference of its
+output probabilities from the PyTorch model's. `--last` exports the last
+model instead of the best one.
+
+The GRU weights, nearly all of the model and of the memory read for each
+frame, are stored as 8 bit integers, which makes the file four times
+smaller and the model faster where memory is slow, as on a Pi. `--fp32`
+keeps them in float32, which gives the PyTorch model's output: on the
+LibriSpeech dev-clean set every transcript was the same. int8 hardly
+changes the accuracy there, and the LM settings tuned with `tune_lm.py`
+apply unchanged:
+
+| 100 hour model | CER | WER | CER with LM | WER with LM |
+|---|---|---|---|---|
+| PyTorch | 0.208 | 0.577 | 0.190 | 0.480 |
+| ONNX, int8 | 0.208 | 0.579 | 0.190 | 0.481 |
+
+Each frame's input to the GRU is quantized with its own scale, so how the
+audio is split into chunks hardly matters: streaming 100 ms chunks changed
+the CER by less than 0.001 against decoding each file whole.
+
+`stream.py`, `serve.py` and `eval.py` take the `.onnx` file in place of the
+model directory:
+
+```
+uv run stream.py examples/librispeech/models/ctc_streaming_100h/best_model-int8.onnx --mic
+```
+
+On an M1 MacBook Air, the compute per second of audio streamed in 100 ms
+chunks, with 4 threads:
+
+| | 100 hour model, 4×512 | 3,750 hour model, 5×1024 |
+|---|---|---|
+| PyTorch, greedy | 0.040 s | 0.118 s |
+| ONNX int8, greedy | 0.012 s | 0.022 s |
+| ONNX int8, LibriSpeech LM | 0.026 s | 0.045 s |
+
+PyTorch was fastest with one thread, the numbers above. These were not
+measured on a Pi. A Pi 4's cores are several times slower than the M1's
+and its memory far slower, so expect several times these numbers there.
+To measure on the Pi, stream a few files of a dataset and read the compute
+per second of audio:
+
+```
+uv run --no-default-groups stream.py model.onnx dev.json --num 5
+```
+
+### Setting up the Pi
+
+1. Install the 64-bit Raspberry Pi OS, Bookworm or later. The 32-bit one
+   has no ONNX Runtime packages.
+2. Install PortAudio for the microphone, and uv:
+   ```
+   sudo apt install libportaudio2
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+3. Clone this repository, and install only what streaming needs, without
+   PyTorch:
+   ```
+   uv sync --no-default-groups
+   ```
+4. Copy the exported model, and an LM if you want one, from the training
+   machine, such as with `scp`.
+5. Run the scripts with `--no-default-groups`, or uv installs the training
+   packages for them:
+   ```
+   uv run --no-default-groups stream.py best_model-int8.onnx --mic --lm lm.npz
+   ```
+
+Tips:
+
+- **Threads.** The model uses one thread per core by default, which sleep
+  between chunks rather than spin, so the beam search keeps a core and the
+  Pi stays cooler. `--threads` sets the number.
+- **Memory.** Streaming takes about 140 MB, 290 MB with the 200,000 word
+  LibriSpeech LM. The LM from the training transcripts did as well on
+  LibriSpeech, see [Language model](#language-model), and is 100 times
+  smaller.
+- **Cooling.** A Pi 4 slows down when it gets hot, so use a heatsink or a
+  fan for long sessions.
+- **Browser demo.** `serve.py --host 0.0.0.0 --models <dir>` serves the
+  page to other devices, but browsers only allow the microphone on
+  `localhost` or over HTTPS, so from another device only audio files work.
+
+[ONNX Runtime]: https://onnxruntime.ai
 
 ## Examples
 

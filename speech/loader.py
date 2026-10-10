@@ -1,5 +1,4 @@
 import glob
-import json
 import math
 import os
 import random
@@ -11,7 +10,9 @@ import soundfile
 import torch
 import torch.utils.data as tud
 
+from speech.features import log_specgram
 from speech.utils import wave
+from speech.utils.dataset import read_data_json
 
 # The training augmentations a config's data can set, in the order they
 # are applied: noise, reverb and volume on the audio, pitch and tempo on
@@ -464,59 +465,3 @@ def make_loader(
 def log_specgram_from_file(audio_file):
     audio, sr = wave.array_from_wave(audio_file)
     return log_specgram(audio, sr)
-
-
-def log_specgram(audio, sample_rate, window_size=20, step_size=10, eps=1e-10):
-    nperseg = int(window_size * sample_rate / 1e3)
-    noverlap = int(step_size * sample_rate / 1e3)
-    _, _, spec = scipy.signal.spectrogram(
-        audio,
-        fs=sample_rate,
-        window="hann",
-        nperseg=nperseg,
-        noverlap=noverlap,
-        detrend=False,
-    )
-    return np.log(spec.T.astype(np.float32) + eps)
-
-
-def read_data_json(data_json):
-    """
-    Reads a dataset json file, one example per line, or a list of them,
-    which are concatenated.
-    """
-    paths = [data_json] if isinstance(data_json, str) else data_json
-    data = []
-    for path in paths:
-        with open(path) as fid:
-            data.extend(json.loads(l) for l in fid)
-    return data
-
-
-class SpecgramStream:
-    def __init__(self, sample_rate, window_size=20, step_size=10):
-        """
-        Computes log_specgram incrementally as audio arrives. The frames
-        returned for consecutive chunks are the frames log_specgram
-        returns for the whole audio.
-        """
-        self.sample_rate = sample_rate
-        self.window_size = window_size
-        self.step_size = step_size
-        self.nperseg = int(window_size * sample_rate / 1e3)
-        self.hop = self.nperseg - int(step_size * sample_rate / 1e3)
-        self.buffer = None
-
-    def push(self, audio):
-        """
-        Adds the next chunk of audio samples and returns the new frames
-        with shape (time, freq).
-        """
-        if self.buffer is not None:
-            audio = np.concatenate([self.buffer, audio])
-        n = max((len(audio) - self.nperseg) // self.hop + 1, 0)
-        self.buffer = audio[n * self.hop :]
-        if n == 0:
-            return np.zeros((0, self.nperseg // 2 + 1), dtype=np.float32)
-        audio = audio[: (n - 1) * self.hop + self.nperseg]
-        return log_specgram(audio, self.sample_rate, self.window_size, self.step_size)

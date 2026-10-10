@@ -7,7 +7,7 @@ import pytest
 import soundfile
 import torch
 
-from speech import loader
+from speech import features, loader
 from speech.utils import wave
 
 
@@ -46,11 +46,11 @@ def test_loader():
 
 def test_specgram_stream():
     audio, sample_rate = wave.array_from_wave("test0.wav")
-    full = loader.log_specgram(audio, sample_rate)
+    full = features.log_specgram(audio, sample_rate)
 
     # Push random chunk sizes, including empty and tiny ones.
     rng = np.random.RandomState(0)
-    stream = loader.SpecgramStream(sample_rate)
+    stream = features.SpecgramStream(sample_rate)
     frames = []
     start = 0
     while start < len(audio):
