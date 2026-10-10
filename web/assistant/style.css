@@ -25,6 +25,8 @@
   );
   --radius: 32px;
   --mic: 84px;
+  --toggle: 60px;
+  --theme-fade: 900ms ease;
   color-scheme: light;
 }
 
@@ -40,6 +42,7 @@ body {
 body {
   margin: 0;
   background: #cdeeff;
+  transition: background-color var(--theme-fade);
   color: var(--ink);
   font-family: "Fredoka", "Arial Rounded MT Bold", system-ui, sans-serif;
   overflow: hidden;
@@ -70,6 +73,76 @@ body {
 
 .status:empty {
   display: none;
+}
+
+/* The day and night button, in the upper left corner. It shows the theme
+   it switches to. */
+.theme-toggle {
+  margin-right: auto;
+  display: grid;
+  place-items: center;
+  width: var(--toggle);
+  height: var(--toggle);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow:
+    0 6px 16px rgba(139, 92, 246, 0.25),
+    inset 0 -3px 0 rgba(139, 92, 246, 0.12);
+  transition:
+    transform 150ms ease,
+    background-color var(--theme-fade);
+}
+
+.theme-toggle:hover {
+  transform: scale(1.06) rotate(-8deg);
+}
+
+.theme-toggle:active {
+  transform: scale(0.94);
+}
+
+.theme-toggle:focus-visible {
+  outline: 4px solid var(--pink);
+  outline-offset: 5px;
+}
+
+.theme-icon {
+  grid-area: 1 / 1;
+  width: 30px;
+  height: 30px;
+  transition:
+    opacity 400ms ease,
+    transform 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.to-night {
+  fill: #7c6cf0;
+}
+
+.to-day {
+  fill: #ffbf2e;
+  stroke: #ffbf2e;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.5);
+}
+
+:root[data-theme="night"] .theme-toggle {
+  background: #2d2a6e;
+}
+
+:root[data-theme="night"] .to-night {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.5);
+}
+
+:root[data-theme="night"] .to-day {
+  opacity: 1;
+  transform: none;
 }
 
 .mic {
@@ -215,6 +288,160 @@ main {
 .greeting-text,
 .bubble {
   transition: opacity 300ms ease;
+}
+
+.clock,
+.date {
+  transition: fill var(--theme-fade);
+}
+
+/* Day and night. */
+
+.night-only,
+.day-only {
+  transition: opacity var(--theme-fade);
+}
+
+.night-only {
+  opacity: 0;
+}
+
+:root[data-theme="night"] .night-only {
+  opacity: 1;
+}
+
+:root[data-theme="night"] .day-only {
+  opacity: 0;
+}
+
+:root[data-theme="night"] body {
+  background: #141a46;
+}
+
+.clouds {
+  fill: #ffffff;
+  transition:
+    fill var(--theme-fade),
+    opacity var(--theme-fade);
+}
+
+:root[data-theme="night"] .clouds {
+  fill: #b9bdf0;
+  opacity: 0.5;
+}
+
+.rainbow,
+.flowers {
+  transition: opacity var(--theme-fade);
+}
+
+/* By moonlight, a faint moonbow. */
+:root[data-theme="night"] .rainbow {
+  opacity: 0.32;
+}
+
+:root[data-theme="night"] .flowers {
+  opacity: 0.6;
+}
+
+.hill-back,
+.hill-front {
+  transition: fill var(--theme-fade);
+}
+
+.hill-back {
+  fill: #a4ecb0;
+}
+
+.hill-front {
+  fill: #82dd93;
+}
+
+:root[data-theme="night"] .hill-back {
+  fill: #3f6f86;
+}
+
+:root[data-theme="night"] .hill-front {
+  fill: #2c5970;
+}
+
+:root[data-theme="night"] .clock {
+  fill: #ffffff;
+}
+
+:root[data-theme="night"] .date {
+  fill: #c8c0f2;
+}
+
+:root[data-theme="night"] .greeting {
+  fill: #ff9ccf;
+}
+
+.stars circle {
+  animation: twinkle 2.2s ease-in-out infinite;
+}
+
+.stars circle:nth-child(3n) {
+  animation-delay: -0.8s;
+}
+
+.stars circle:nth-child(3n + 1) {
+  animation-delay: -1.6s;
+}
+
+/* Every few seconds a star shoots across the sky. */
+.shooting-star {
+  opacity: 0;
+  animation: shoot 9s ease-in 3s infinite;
+}
+
+@keyframes shoot {
+  0% {
+    opacity: 0;
+    translate: 620px 40px;
+    rotate: 18deg;
+  }
+  2% {
+    opacity: 1;
+  }
+  9% {
+    opacity: 0;
+    translate: 1080px 190px;
+    rotate: 18deg;
+  }
+  100% {
+    opacity: 0;
+    translate: 1080px 190px;
+    rotate: 18deg;
+  }
+}
+
+.fireflies circle {
+  animation: glow 3.2s ease-in-out infinite alternate;
+}
+
+.fireflies circle:nth-child(2n) {
+  animation-duration: 4.1s;
+  animation-delay: -1.5s;
+}
+
+.fireflies circle:nth-child(3n) {
+  animation-delay: -2.4s;
+}
+
+@keyframes glow {
+  0% {
+    opacity: 0.25;
+    translate: 0 0;
+  }
+  100% {
+    opacity: 1;
+    translate: 14px -22px;
+  }
+}
+
+.horn-glow {
+  animation: twinkle 2.8s ease-in-out infinite;
 }
 
 body.has-card .greeting-text,
@@ -540,6 +767,7 @@ body.has-card .step-aside {
 @media (max-height: 600px) {
   :root {
     --mic: 72px;
+    --toggle: 54px;
   }
 
   .stage {

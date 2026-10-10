@@ -5,6 +5,7 @@
 const $ = (id) => document.getElementById(id);
 const ui = {
   mic: $("mic"),
+  themeToggle: $("theme-toggle"),
   status: $("status"),
   stage: $("stage"),
   greeting: $("greeting"),
@@ -37,6 +38,30 @@ function updateClock() {
 
 function setStatus(text) {
   ui.status.textContent = text;
+}
+
+// Day and night.
+
+function setTheme(theme) {
+  const night = theme === "night";
+  if (night) {
+    document.documentElement.dataset.theme = "night";
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+  ui.themeToggle.setAttribute("aria-pressed", String(night));
+  const label = night ? "Switch to day" : "Switch to night";
+  ui.themeToggle.setAttribute("aria-label", label);
+  ui.themeToggle.title = label;
+  try {
+    localStorage.setItem("theme", theme);
+  } catch {
+    // Remembering the theme is only a convenience.
+  }
+}
+
+function toggleTheme() {
+  setTheme(document.documentElement.dataset.theme === "night" ? "day" : "night");
 }
 
 // Requests.
@@ -328,6 +353,8 @@ async function openMicrophone(rate) {
 async function start() {
   updateClock();
   setInterval(updateClock, 1000);
+  setTheme(document.documentElement.dataset.theme === "night" ? "night" : "day");
+  ui.themeToggle.addEventListener("click", toggleTheme);
   ui.mic.addEventListener("click", toggleCapture);
   document.addEventListener("keydown", (event) => {
     if (event.code === "Space" && !event.repeat && event.target === document.body) {

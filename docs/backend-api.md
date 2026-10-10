@@ -311,7 +311,9 @@ Tapping it, or pressing Space, starts a `TAP_TO_TALK` capture, and
 tapping it while listening stops it. The button shows the dialog state,
 glowing with the loudness while listening and its rainbow ring spinning
 while listening and thinking, and the page shows the cards the service
-sends, for which the unicorn steps aside. Above an answer, such as the
+sends, for which the unicorn steps aside. The button in the upper left
+corner switches to a night sky, with a sleepy moon, stars and fireflies,
+and the page remembers the choice. Above an answer, such as the
 weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka font is in
 `web/assistant/fonts` under the SIL Open Font License, so the page needs
 no internet.

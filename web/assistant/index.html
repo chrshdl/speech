@@ -4,10 +4,28 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Unicorn Helper</title>
+    <script>
+      // The theme chosen last, set before the page is drawn so it does not
+      // flash in the other one.
+      try {
+        if (localStorage.getItem("theme") === "night") {
+          document.documentElement.dataset.theme = "night";
+        }
+      } catch {}
+    </script>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body data-state="IDLE" data-connection="connecting">
     <header class="bar">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
+        <svg class="theme-icon to-night" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" />
+        </svg>
+        <svg class="theme-icon to-day" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.6" />
+          <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" />
+        </svg>
+      </button>
       <p class="status" id="status" role="status"></p>
       <button class="mic" id="mic" type="button" aria-label="Talk" title="Talk (Space)">
         <span class="mic-ring" aria-hidden="true"></span>
@@ -20,13 +38,35 @@
 
     <main>
       <!-- The landing page: a meadow with a rainbow and a unicorn, drawn on a
-           1600 by 900 grid that fills the screen. -->
+           1600 by 900 grid that fills the screen, by day or by night. -->
       <svg class="scene" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
         <defs>
           <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
             <stop offset="0" stop-color="#8fd3ff" />
             <stop offset="0.55" stop-color="#cdeeff" />
             <stop offset="1" stop-color="#ffe3f3" />
+          </linearGradient>
+          <linearGradient id="night-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#141a46" />
+            <stop offset="0.55" stop-color="#2d2a6e" />
+            <stop offset="1" stop-color="#5a4690" />
+          </linearGradient>
+          <radialGradient id="moon-glow">
+            <stop offset="0.45" stop-color="#fff4c9" stop-opacity="0.45" />
+            <stop offset="1" stop-color="#fff4c9" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="horn-glow">
+            <stop offset="0" stop-color="#fff6b0" stop-opacity="0.9" />
+            <stop offset="1" stop-color="#fff6b0" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="firefly">
+            <stop offset="0" stop-color="#fffbd1" />
+            <stop offset="0.35" stop-color="#e9ff7a" stop-opacity="0.9" />
+            <stop offset="1" stop-color="#e9ff7a" stop-opacity="0" />
+          </radialGradient>
+          <linearGradient id="shooting-tail" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#ffffff" stop-opacity="0" />
+            <stop offset="1" stop-color="#ffffff" stop-opacity="0.95" />
           </linearGradient>
           <g id="cloud">
             <circle cx="0" cy="0" r="46" />
@@ -44,8 +84,27 @@
         </defs>
 
         <rect width="1600" height="900" fill="url(#sky)" />
+        <rect class="night-only" width="1600" height="900" fill="url(#night-sky)" />
 
-        <g class="sun" transform="translate(170 150)">
+        <!-- Stars and a shooting star at night. -->
+        <g class="night-only stars" fill="#ffffff">
+          <circle cx="420" cy="90" r="3" /><circle cx="560" cy="210" r="2.5" />
+          <circle cx="1110" cy="40" r="2" /><circle cx="1300" cy="250" r="3" />
+          <circle cx="1060" cy="250" r="2.5" /><circle cx="1240" cy="110" r="2" />
+          <circle cx="1390" cy="60" r="3" /><circle cx="1530" cy="200" r="2.5" />
+          <circle cx="90" cy="320" r="2.5" /><circle cx="330" cy="420" r="2" />
+          <circle cx="1460" cy="420" r="2" /><circle cx="760" cy="370" r="2" />
+          <circle cx="480" cy="40" r="1.6" /><circle cx="1180" cy="330" r="1.8" />
+          <circle cx="40" cy="80" r="2" /><circle cx="1570" cy="330" r="1.6" />
+        </g>
+        <g class="night-only">
+          <g class="shooting-star">
+            <line x1="-160" y1="0" x2="0" y2="0" stroke="url(#shooting-tail)" stroke-width="4" stroke-linecap="round" />
+            <circle r="4" fill="#ffffff" />
+          </g>
+        </g>
+
+        <g class="day-only sun" transform="translate(300 190)">
           <g class="sun-rays" stroke="#ffc94d" stroke-width="12" stroke-linecap="round">
             <line x1="0" y1="-78" x2="0" y2="-100" /><line x1="0" y1="78" x2="0" y2="100" />
             <line x1="-78" y1="0" x2="-100" y2="0" /><line x1="78" y1="0" x2="100" y2="0" />
@@ -60,6 +119,22 @@
           <path d="M-20 18 Q0 36 20 18" fill="none" stroke="#7a4a1e" stroke-width="6" stroke-linecap="round" />
         </g>
 
+        <!-- Luna, sleepy, with a nightcap. -->
+        <g class="night-only moon" transform="translate(300 190)">
+          <circle r="120" fill="url(#moon-glow)" />
+          <circle r="62" fill="#fff1c1" />
+          <circle cx="-30" cy="-30" r="11" fill="#f6dd96" />
+          <circle cx="28" cy="34" r="8" fill="#f6dd96" />
+          <circle cx="38" cy="-18" r="6" fill="#f6dd96" />
+          <path d="M-32 -2 Q-22 8 -12 -2 M12 -2 Q22 8 32 -2" fill="none" stroke="#7a5a2e" stroke-width="5" stroke-linecap="round" />
+          <circle cx="-34" cy="16" r="9" fill="#ffb3c7" opacity="0.7" />
+          <circle cx="34" cy="16" r="9" fill="#ffb3c7" opacity="0.7" />
+          <path d="M-12 22 Q0 32 12 22" fill="none" stroke="#7a5a2e" stroke-width="5" stroke-linecap="round" />
+          <path d="M-48 -38 Q-10 -98 54 -60 Q62 -40 70 -24 L42 -46 Q8 -66 -48 -38 Z" fill="#8b7cf6" />
+          <path d="M-52 -40 Q0 -64 46 -46" fill="none" stroke="#ffffff" stroke-width="12" stroke-linecap="round" />
+          <circle cx="72" cy="-20" r="11" fill="#ffffff" />
+        </g>
+
         <g class="rainbow" fill="none" stroke-width="37">
           <path d="M218 960 A582 582 0 0 1 1382 960" stroke="#ff6b6b" />
           <path d="M254 960 A546 546 0 0 1 1346 960" stroke="#ffa94d" />
@@ -70,7 +145,7 @@
           <path d="M434 960 A366 366 0 0 1 1166 960" stroke="#b18cff" />
         </g>
 
-        <g fill="#ffffff">
+        <g class="clouds">
           <use href="#cloud" class="drift drift-slow" transform="translate(300 280) scale(0.9)" />
           <use href="#cloud" class="drift" transform="translate(1180 210) scale(1.1)" />
           <use href="#cloud" class="drift drift-slower" transform="translate(40 560) scale(0.6)" />
@@ -85,8 +160,8 @@
           <use href="#sparkle" fill="#ff9ecf" transform="translate(1300 520) scale(1.1)" />
         </g>
 
-        <ellipse cx="380" cy="940" rx="640" ry="210" fill="#a4ecb0" />
-        <ellipse cx="1150" cy="975" rx="780" ry="245" fill="#82dd93" />
+        <ellipse class="hill-back" cx="380" cy="940" rx="640" ry="210" />
+        <ellipse class="hill-front" cx="1150" cy="975" rx="780" ry="245" />
 
         <g class="flowers">
           <use href="#flower" fill="#ff7ab8" transform="translate(140 820)" />
@@ -96,6 +171,15 @@
           <use href="#flower" fill="#ffa94d" transform="translate(1420 812)" />
           <use href="#flower" fill="#ff7ab8" transform="translate(1530 862) scale(0.8)" />
           <use href="#flower" fill="#ffffff" transform="translate(1320 870) scale(0.7)" />
+        </g>
+
+        <g class="night-only fireflies">
+          <circle cx="210" cy="760" r="14" fill="url(#firefly)" />
+          <circle cx="470" cy="720" r="12" fill="url(#firefly)" />
+          <circle cx="690" cy="780" r="14" fill="url(#firefly)" />
+          <circle cx="1010" cy="740" r="12" fill="url(#firefly)" />
+          <circle cx="1480" cy="740" r="14" fill="url(#firefly)" />
+          <circle cx="1350" cy="800" r="11" fill="url(#firefly)" />
         </g>
 
         <g class="step-aside"><g class="unicorn" transform="translate(877 341) scale(1.2)"><g class="bob">
@@ -143,6 +227,9 @@
               <circle cx="208" cy="146" r="23" fill="#6bd88f"/>
               <circle cx="216" cy="176" r="22" fill="#5cc0ff"/>
               <circle cx="234" cy="198" r="20" fill="#a98bff"/>
+            </g>
+            <g class="night-only">
+              <circle class="horn-glow" cx="118" cy="30" r="52" fill="url(#horn-glow)" />
             </g>
             <g class="u-horn">
               <path d="M114 62 L106 2 L142 58 Z" fill="#ffd166" stroke="#f0a83c" stroke-width="5" stroke-linejoin="round"/>
