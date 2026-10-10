@@ -16,6 +16,7 @@ For more details checkout either of these references:
 
 """
 
+import heapq
 import math
 
 import numpy as np
@@ -29,15 +30,16 @@ BEAM_SIZE = 32
 PRUNE = math.log(1e-3)
 
 
-def logsumexp(*args):
+def logaddexp(a, b):
     """
-    Stable log sum exp.
+    Stable log(exp(a) + exp(b)). The search calls this millions of times,
+    so it takes two numbers rather than any number of them.
     """
-    if all(a == NEG_INF for a in args):
-        return NEG_INF
-    a_max = max(args)
-    lsp = math.log(sum(math.exp(a - a_max) for a in args))
-    return a_max + lsp
+    if a < b:
+        a, b = b, a
+    if b == NEG_INF:
+        return a
+    return a + math.log1p(math.exp(b - a))
 
 
 class BeamSearch:
@@ -80,30 +82,34 @@ class BeamSearch:
         next_beam = {}
 
         def entry(prefix, lm_state, lm_score):
-            if prefix not in next_beam:
-                next_beam[prefix] = [NEG_INF, NEG_INF, lm_state, lm_score]
-            return next_beam[prefix]
+            n = next_beam.get(prefix)
+            if n is None:
+                n = next_beam[prefix] = [NEG_INF, NEG_INF, lm_state, lm_score]
+            return n
 
-        for s, p in enumerate(log_probs):
-            if self.prune is not None and p < self.prune:
-                continue
-
+        labels = [
+            (s, p)
+            for s, p in enumerate(log_probs)
+            if self.prune is None or p >= self.prune
+        ]
+        for prefix, (p_b, p_nb, lm_state, lm_score) in self.beam.items():
             # The variables p_b and p_nb are respectively the
             # probabilities for the prefix given that it ends in a
             # blank and does not end in a blank at this time step.
-            for prefix, (p_b, p_nb, lm_state, lm_score) in self.beam.items():
+            p_total = logaddexp(p_b, p_nb)
+            end_t = prefix[-1] if prefix else None
+            for s, p in labels:
                 # If we propose a blank the prefix doesn't change.
                 # Only the probability of ending in blank gets updated.
                 if s == self.blank:
                     n = entry(prefix, lm_state, lm_score)
-                    n[0] = logsumexp(n[0], p_b + p, p_nb + p)
+                    n[0] = logaddexp(n[0], p_total + p)
                     continue
 
                 # Extend the prefix by the new character s and add it to
                 # the beam. Only the probability of not ending in blank
                 # gets updated. The LM scores the extension once, when the
                 # prefix is first created.
-                end_t = prefix[-1] if prefix else None
                 n_prefix = prefix + (s,)
                 if n_prefix not in next_beam and self.lm is not None:
                     n_state, delta = self.lm.extend(lm_state, s)
@@ -111,22 +117,22 @@ class BeamSearch:
                 else:
                     n = entry(n_prefix, None, lm_score)
                 if s != end_t:
-                    n[1] = logsumexp(n[1], p_b + p, p_nb + p)
+                    n[1] = logaddexp(n[1], p_total + p)
                 else:
                     # We don't include the previous probability of not ending
                     # in blank (p_nb) if s is repeated at the end. The CTC
                     # algorithm merges characters not separated by a blank.
-                    n[1] = logsumexp(n[1], p_b + p)
+                    n[1] = logaddexp(n[1], p_b + p)
 
-                # If s is repeated at the end we also update the unchanged
-                # prefix. This is the merging case.
-                if s == end_t:
+                    # If s is repeated at the end we also update the
+                    # unchanged prefix. This is the merging case.
                     n = entry(prefix, lm_state, lm_score)
-                    n[1] = logsumexp(n[1], p_nb + p)
+                    n[1] = logaddexp(n[1], p_nb + p)
 
-        # Sort and trim the beam before moving on to the next time-step.
-        best = sorted(next_beam.items(), key=lambda x: self._score(x[1]), reverse=True)
-        self.beam = dict(best[: self.beam_size])
+        # Keep the best prefixes before moving on to the next time-step.
+        score = self._score
+        best = heapq.nlargest(self.beam_size, next_beam.items(), lambda x: score(x[1]))
+        self.beam = dict(best)
 
     def best(self, final=False):
         """
@@ -146,7 +152,7 @@ class BeamSearch:
     @staticmethod
     def _score(value):
         p_b, p_nb, _, lm_score = value
-        return logsumexp(p_b, p_nb) + lm_score
+        return logaddexp(p_b, p_nb) + lm_score
 
 
 def decode(probs, beam_size=10, blank=0, lm=None, prune=None):
