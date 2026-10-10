@@ -4,6 +4,7 @@ the forecast, from Open-Meteo (https://open-meteo.com), which needs no
 API key.
 """
 
+import dataclasses
 import datetime
 import re
 
@@ -102,6 +103,78 @@ def condition(code):
     return CONDITIONS.get(code, (WeatherCondition.CLOUDY, "Unknown"))
 
 
+# The daylight hours with this much rain or snow, in mm, are wet, and a day
+# with WET_HOURS of them and WET_DAY mm in all is rainy or snowy, light
+# below LIGHT mm.
+WET = 0.1
+WET_HOURS = 2
+WET_DAY = 0.5
+LIGHT = 1.0
+# The share of daylight with sunshine of a clear and a partly cloudy day.
+SUNNY = 0.75
+PARTLY_SUNNY = 0.3
+
+# Conditions with rain or snow, the most severe last.
+PRECIPITATION = [
+    WeatherCondition.DRIZZLE,
+    WeatherCondition.RAIN,
+    WeatherCondition.SNOW,
+    WeatherCondition.THUNDERSTORM,
+]
+
+
+@dataclasses.dataclass
+class Hour:
+    weather_code: int
+    precipitation: float
+    # Seconds of sunshine in the hour.
+    sunshine: float
+
+
+def _hours_by_day(hourly):
+    """The daylight hours of each day of Open-Meteo's hourly forecast."""
+    days = {}
+    for time, code, rain, sun, day in zip(
+        hourly["time"],
+        hourly["weather_code"],
+        hourly["precipitation"],
+        hourly["sunshine_duration"],
+        hourly["is_day"],
+        strict=True,
+    ):
+        if day:
+            days.setdefault(time[:10], []).append(Hour(code, rain or 0.0, sun or 0.0))
+    return days
+
+
+def day_condition(hours):
+    """
+    The condition of a day as people see it, from its daylight hours.
+
+    Open-Meteo's daily weather code is the day's most severe, so a shower
+    at night makes a sunny day rainy. Rather, a day is rainy or snowy when
+    it rains or snows WET_DAY mm in at least WET_HOURS of daylight, and else as
+    sunny as its share of daylight with sunshine. A few drops are no rain.
+    """
+    if not hours:
+        return WeatherCondition.CLOUDY
+    wet = [h for h in hours if h.precipitation >= WET]
+    if len(wet) >= WET_HOURS and sum(h.precipitation for h in wet) >= WET_DAY:
+        kinds = [condition(h.weather_code)[0] for h in wet]
+        kinds = [k for k in kinds if k in PRECIPITATION] or [WeatherCondition.RAIN]
+        kind = max(set(kinds), key=lambda k: (kinds.count(k), PRECIPITATION.index(k)))
+        if kind == WeatherCondition.RAIN and sum(h.precipitation for h in wet) < LIGHT:
+            return WeatherCondition.DRIZZLE
+        return kind
+    sunshine = sum(h.sunshine for h in hours) / (3600 * len(hours))
+    if sunshine >= SUNNY:
+        return WeatherCondition.CLEAR
+    if sunshine >= PARTLY_SUNNY:
+        return WeatherCondition.PARTLY_CLOUDY
+    fog = sum(condition(h.weather_code)[0] == WeatherCondition.FOG for h in hours)
+    return WeatherCondition.FOG if fog > len(hours) / 2 else WeatherCondition.CLOUDY
+
+
 class Weather:
     def __init__(self, location, client=None):
         """
@@ -175,7 +248,8 @@ class Weather:
                 "longitude": place.longitude,
                 "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
                 "weather_code,wind_speed_10m,is_day",
-                "daily": "weather_code,temperature_2m_max,temperature_2m_min",
+                "hourly": "weather_code,precipitation,sunshine_duration,is_day",
+                "daily": "temperature_2m_max,temperature_2m_min",
                 "timezone": "auto",
                 "forecast_days": DAYS,
             },
@@ -185,16 +259,16 @@ class Weather:
         current = forecast["current"]
         daily = forecast["daily"]
         now, description = condition(current["weather_code"])
+        hours = _hours_by_day(forecast["hourly"])
         days = [
             WeatherDay(
                 date=datetime.date.fromisoformat(date),
-                condition=condition(code)[0],
+                condition=day_condition(hours.get(date, [])),
                 high=high,
                 low=low,
             )
-            for date, code, high, low in zip(
+            for date, high, low in zip(
                 daily["time"],
-                daily["weather_code"],
                 daily["temperature_2m_max"],
                 daily["temperature_2m_min"],
                 strict=True,
