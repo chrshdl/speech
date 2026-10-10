@@ -274,14 +274,22 @@ def alignment_score(relative, labels, blank):
 TEXT_THRESHOLD = -0.2
 
 
+# Words before a sample that TextIntentRecognizer passes over, such as
+# "hello unicorn" in "hello unicorn, what's the weather?", at most this
+# many, each lowering the similarity by the penalty.
+LEADING_WORDS = 3
+LEADING_PENALTY = 0.02
+
+
 class TextIntentRecognizer:
     def __init__(self, intents, threshold=TEXT_THRESHOLD):
         """
         Recognizes intents in transcripts, such as from Whisper, rather
         than in a model's output. A transcript matches a sample when they
         are similar, which allows for small mistakes such as "whether"
-        for "weather". The words where a sample has a slot are its value,
-        whatever they are.
+        for "weather", also after a few other words, such as a greeting.
+        The words where a sample has a slot are its value, whatever they
+        are.
         """
         self.intents = intents
         self.threshold = threshold
@@ -304,11 +312,13 @@ class TextIntentRecognizer:
         if not words:
             return None
         best = None
-        for intent in self.intents:
-            for sample in intent.samples:
-                similarity, slots = _similarity(words, sample)
-                if best is None or similarity > best[0]:
-                    best = (similarity, intent, sample, slots)
+        for skip in range(min(LEADING_WORDS, len(words) - 1) + 1):
+            for intent in self.intents:
+                for sample in intent.samples:
+                    similarity, slots = _similarity(words[skip:], sample)
+                    similarity -= skip * LEADING_PENALTY
+                    if best is None or similarity > best[0]:
+                        best = (similarity, intent, sample, slots)
         similarity, intent, sample, slots = best
         return Match(intent, similarity - 1, sample, slots)
 

@@ -588,10 +588,10 @@ class FakeWhisper:
 
     def __init__(self, text):
         self.text = text
-        self.heard = None
+        self.heard = []
 
-    def transcribe(self, audio):
-        self.heard = len(audio)
+    def transcribe(self, audio, run_options=None):
+        self.heard.append(len(audio))
         return self.text
 
 
@@ -626,17 +626,20 @@ def test_whisper():
         async with service(recognizer) as svc:
             start = await svc.start("TAP_TO_TALK")
             await stream_audio(svc.address, start, audio)
-            return await svc.events.until("ShowCard") + await svc.events.until(
-                "ShowCard"
-            )
+            events = await svc.events.until("CaptureFinished")
+            return events + await svc.events.until("ShowCard")
 
     events = asyncio.run(run())
-    # No transcript before the end, as Whisper hears the whole utterance.
-    assert "TranscriptUpdated" not in actions(events)
+    # The audio so far is transcribed in the background as it arrives.
+    updates = [
+        e["payload"]["text"] for e in events if e["action"] == "TranscriptUpdated"
+    ]
+    assert updates == ["What's the weather in Hamburg?"]
     payloads = {e["action"]: e["payload"] for e in events}
     assert payloads["CaptureFinished"]["reason"] == "END_OF_SPEECH"
     assert payloads["CaptureFinished"]["text"] == "What's the weather in Hamburg?"
     assert payloads["IntentRecognized"]["slots"] == {"city": "hamburg"}
     assert events[-1]["payload"]["card"]["text"] == "It is noon in hamburg."
     # It ended a second after the speech, before all the audio was sent.
-    assert len(silence) + len(speech_audio) <= whisper.heard < len(audio)
+    assert len(silence) + len(speech_audio) <= whisper.heard[-1] < len(audio)
+    assert len(whisper.heard) > 1

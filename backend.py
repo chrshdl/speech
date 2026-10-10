@@ -68,7 +68,7 @@ def load(args):
             raise SystemExit("--lm only applies to streaming CTC models.")
         whisper = whisper_model.WhisperModel(session)
         return (
-            lambda: whisper_model.WhisperTranscriber(whisper),
+            lambda: whisper_model.WhisperTranscriber(whisper, args.partial_seconds),
             whisper.sample_rate,
             TextIntentRecognizer([weather.INTENT]),
         )
@@ -138,6 +138,14 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument(
         "--threads", type=int, help="The CPU threads to run the model with."
+    )
+    parser.add_argument(
+        "--partial-seconds",
+        type=float,
+        default=1.0,
+        help="With Whisper, transcribe the audio so far after each this many "
+        "seconds of it, for a transcript while speaking. 0 for none, which saves "
+        "work on a slow computer.",
     )
     parser.add_argument(
         "--weather-location",

@@ -104,6 +104,12 @@ def test_slot_needs_values():
         ("What's the weather in Hamburg?", "Weather", {"city": "hamburg"}),
         ("Whether in New York.", "Weather", {"city": "new york"}),
         ("How is the weather?", "Weather", {}),
+        (
+            "Hello Unicorn, what's the weather in Hamburg?",
+            "Weather",
+            {"city": "hamburg"},
+        ),
+        ("Hey, how is the weather?", "Weather", {}),
         ("Turn on the radio.", None, None),
         ("What's the news?", None, None),
         ("", None, None),

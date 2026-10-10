@@ -11,6 +11,8 @@ const ui = {
   clock: $("clock"),
   date: $("date"),
   cardTemplate: $("card-template"),
+  asked: $("asked"),
+  askedText: $("asked-text"),
 };
 
 // Audio is sent in chunks of 100 ms.
@@ -21,6 +23,7 @@ let dialogState = "IDLE";
 let card = null; // The card shown: its data and element.
 let audio = null; // The microphone stream of the browser, while capturing.
 let starting = false;
+let heard = null; // The final transcript of the last capture, by its id.
 
 // The landing page.
 
@@ -67,6 +70,9 @@ function connectEvents() {
     dialogState = state;
     document.body.dataset.state = state;
     ui.mic.setAttribute("aria-label", state === "LISTENING" ? "Stop" : "Talk");
+  });
+  on("Recognition.CaptureFinished", ({ dialogRequestId, text }) => {
+    heard = { id: dialogRequestId, text };
   });
   on("Display.ShowCard", ({ card: data }) => showCard(data));
   on("Display.ClearCard", ({ cardId }) => {
@@ -154,7 +160,16 @@ function showCard(data) {
   const body = card.element.querySelector(".card-body");
   body.replaceChildren();
   render(data, body);
+  showAsked(data);
   document.body.classList.add("has-card");
+}
+
+// Above an answer, such as the weather, what was asked for it. A
+// transcript card shows it already.
+function showAsked(data) {
+  const asked = data.type !== "TranscriptCard" && heard && heard.id === data.id && heard.text;
+  ui.askedText.textContent = asked ? `“${heard.text}”` : "";
+  ui.asked.hidden = !asked;
 }
 
 function hideCard() {
@@ -163,6 +178,7 @@ function hideCard() {
   }
   const { element } = card;
   card = null;
+  ui.asked.hidden = true;
   document.body.classList.remove("has-card");
   element.classList.add("leaving");
   element.addEventListener("animationend", () => element.remove(), { once: true });

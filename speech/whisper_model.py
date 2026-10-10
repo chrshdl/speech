@@ -6,13 +6,18 @@ so it needs only NumPy and ONNX Runtime, as on a Raspberry Pi.
 
 Whisper transcribes a whole utterance at once, so WhisperTranscriber
 keeps the audio of a capture, finds the end of speech by the loudness of
-the audio, and transcribes it when the capture ends.
+the audio, and transcribes it when the capture ends. While the capture
+goes on, it transcribes the audio so far in the background, for a
+partial transcript.
 """
 
 import functools
 import json
+import logging
+import threading
 
 import numpy as np
+import onnxruntime
 
 # The version of the metadata export_whisper.py writes.
 FORMAT_VERSION = 1
@@ -49,8 +54,12 @@ class WhisperModel:
         self.filters = mel_filters(int(meta["n_mels"]))
         self.sample_rate = SAMPLE_RATE
 
-    def transcribe(self, audio):
-        """The text of 16 bit mono audio at 16 kHz, its first 30 seconds."""
+    def transcribe(self, audio, run_options=None):
+        """
+        The text of 16 bit mono audio at 16 kHz, its first 30 seconds.
+        Setting run_options.terminate from another thread stops it with an
+        onnxruntime error.
+        """
         features = log_mel(audio.astype(np.float32) / 32768, self.filters)
         sequences = self.session.run(
             ["sequences"],
@@ -64,6 +73,7 @@ class WhisperModel:
                 "repetition_penalty": np.array([1.0], np.float32),
                 "decoder_input_ids": self.prefix,
             },
+            run_options,
         )[0]
         tokens = sequences[0, 0, self.prefix.shape[1] :]
         return self.decode(tokens).strip()
@@ -150,6 +160,9 @@ def log_mel(audio, filters):
     return ((log + 4.0) / 4.0).astype(np.float32)
 
 
+log = logging.getLogger(__name__)
+
+
 class WhisperTranscriber:
     # The loudness of the audio is measured in frames of this many seconds.
     FRAME = 0.03
@@ -161,30 +174,86 @@ class WhisperTranscriber:
     # click or a cough.
     SPEECH_SECONDS = 0.25
 
-    def __init__(self, model):
+    def __init__(self, model, partial_seconds=1.0):
         """
         Transcribes one capture with a WhisperModel, with the interface of
         streaming.Transcriber that speech.backend.engine uses.
+
+        Arguments:
+            model (WhisperModel): Transcribes the audio.
+            partial_seconds (float): Transcribes the audio so far in the
+                background after each this much more audio, once speech
+                was heard, for a partial transcript. 0 for none.
         """
         self.model = model
+        self.partial_seconds = partial_seconds
         self.frame = int(self.FRAME * model.sample_rate)
         self.audio = []
+        self.samples = 0
         self.leftover = np.zeros(0, np.int16)
         self.noise = None
         self.speech_frames = 0
         self.quiet_frames = 0
         self.transcript = ""
+        # The latest partial transcript, and the background transcription
+        # with the options that stop it.
+        self.partial = ""
+        self.partial_at = 0
+        self.worker = None
+        self.run_options = None
 
     def push(self, audio, final=False):
-        """Adds audio, and with final transcribes all of it."""
+        """
+        Adds audio, and with final transcribes all of it, stopping a partial
+        transcription still running.
+        """
         self.audio.append(audio)
+        self.samples += len(audio)
         samples = np.concatenate([self.leftover, audio])
         n = len(samples) // self.frame
         self.leftover = samples[n * self.frame :]
         for frame in samples[: n * self.frame].reshape(n, self.frame):
             self._measure(frame)
-        if final and self.heard_speech:
-            self.transcript = self.model.transcribe(np.concatenate(self.audio))
+        if final:
+            self._stop_partial()
+            if self.heard_speech:
+                self.transcript = self.model.transcribe(np.concatenate(self.audio))
+        elif self._partial_due():
+            self._start_partial()
+
+    def _partial_due(self):
+        interval = self.partial_seconds * self.model.sample_rate
+        return (
+            self.partial_seconds > 0
+            and self.heard_speech
+            and self.samples - self.partial_at >= interval
+            and (self.worker is None or not self.worker.is_alive())
+        )
+
+    def _start_partial(self):
+        audio = np.concatenate(self.audio)
+        self.partial_at = self.samples
+        run_options = onnxruntime.RunOptions()
+
+        def transcribe():
+            try:
+                text = self.model.transcribe(audio, run_options)
+            except Exception:
+                if not run_options.terminate:
+                    log.exception("A partial transcription failed")
+                return
+            if not run_options.terminate:
+                self.partial = text
+
+        self.run_options = run_options
+        self.worker = threading.Thread(target=transcribe, daemon=True)
+        self.worker.start()
+
+    def _stop_partial(self):
+        if self.worker is not None:
+            self.run_options.terminate = True
+            self.worker.join()
+            self.worker = None
 
     def _measure(self, frame):
         power = np.mean(np.square(frame, dtype=np.float64))
@@ -207,5 +276,8 @@ class WhisperTranscriber:
         return self.quiet_frames * self.FRAME
 
     def text(self, final=False):
-        """Whisper's transcript, empty until the final push."""
-        return self.transcript
+        """
+        Whisper's transcript after the final push, else the latest partial
+        transcript.
+        """
+        return self.transcript if final else self.partial

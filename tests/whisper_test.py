@@ -1,3 +1,5 @@
+import time
+
 import numpy as np
 import pytest
 
@@ -41,7 +43,7 @@ class FakeSession:
     def get_modelmeta(self):
         return FakeMeta(self.metadata)
 
-    def run(self, outputs, feeds):
+    def run(self, outputs, feeds, run_options=None):
         assert feeds["input_features"].shape == (1, 80, 3000)
         prefix = feeds["decoder_input_ids"][0].tolist()
         return [np.array([[prefix + self.tokens]], np.int32)]
@@ -74,12 +76,12 @@ def test_other_version():
 class Silent:
     sample_rate = 16000
 
-    def transcribe(self, audio):
+    def transcribe(self, audio, run_options=None):
         raise AssertionError("Nothing was said.")
 
 
 def test_transcriber_finds_speech_by_loudness():
-    transcriber = WhisperTranscriber(Silent())
+    transcriber = WhisperTranscriber(Silent(), partial_seconds=0)
     rng = np.random.default_rng(0)
     noise = (rng.standard_normal(16000) * 30).astype(np.int16)
     transcriber.push(noise)
@@ -95,3 +97,66 @@ def test_transcriber_finds_speech_by_loudness():
     assert transcriber.pause_seconds < 0.1
     transcriber.push(noise)
     assert transcriber.pause_seconds == pytest.approx(0.99, abs=0.05)
+
+
+class Counting:
+    """Hears how many samples it was given, slowly unless stopped."""
+
+    sample_rate = 16000
+
+    def __init__(self, delay=0.0):
+        self.delay = delay
+        self.stopped = 0
+
+    def transcribe(self, audio, run_options=None):
+        end = time.monotonic() + self.delay
+        while time.monotonic() < end:
+            if run_options is not None and run_options.terminate:
+                self.stopped += 1
+                raise RuntimeError("stopped")
+            time.sleep(0.001)
+        return f"{len(audio)} samples"
+
+
+def tone(seconds):
+    t = np.arange(int(16000 * seconds)) / 16000
+    return (8000 * np.sin(2 * np.pi * 300 * t)).astype(np.int16)
+
+
+def quiet(seconds=0.5):
+    """Background noise, as before someone speaks."""
+    rng = np.random.default_rng(0)
+    return (rng.standard_normal(int(16000 * seconds)) * 30).astype(np.int16)
+
+
+def test_partial_transcripts():
+    transcriber = WhisperTranscriber(Counting(), partial_seconds=0.5)
+    transcriber.push(quiet())
+    # Nothing is transcribed before speech is heard.
+    assert transcriber.worker is None
+    transcriber.push(tone(0.5))
+    transcriber.worker.join()
+    # The audio so far, transcribed in the background.
+    assert transcriber.text() == "16000 samples"
+    transcriber.push(tone(0.25))
+    assert not transcriber.worker.is_alive()
+    assert transcriber.text() == "16000 samples"
+    transcriber.push(tone(0.25))
+    transcriber.worker.join()
+    assert transcriber.text() == "24000 samples"
+    transcriber.push(np.zeros(0, np.int16), final=True)
+    assert transcriber.text(final=True) == "24000 samples"
+
+
+def test_final_stops_partial():
+    model = Counting(delay=5)
+    transcriber = WhisperTranscriber(model, partial_seconds=0.5)
+    transcriber.push(quiet())
+    transcriber.push(tone(0.5))
+    assert transcriber.worker.is_alive()
+    model.delay = 0
+    start = time.monotonic()
+    transcriber.push(np.zeros(0, np.int16), final=True)
+    assert time.monotonic() - start < 1
+    assert model.stopped == 1
+    assert transcriber.text(final=True) == "16000 samples"

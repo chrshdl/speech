@@ -93,7 +93,7 @@ when there are no events for a while.
 | Event | Payload | When |
 |---|---|---|
 | `Recognition.DialogStateChanged` | `state`, `dialogRequestId` (null when `IDLE`) | The dialog state changes |
-| `Recognition.TranscriptUpdated` | `dialogRequestId`, `text` | The transcript so far changes. It can still change, also earlier words with a language model. Not sent with Whisper. |
+| `Recognition.TranscriptUpdated` | `dialogRequestId`, `text` | The transcript so far changes. It can still change, also earlier words with a language model or Whisper. |
 | `Recognition.EndOfSpeechDetected` | `dialogRequestId` | A `TAP_TO_TALK` capture heard the end of speech |
 | `Recognition.CaptureFinished` | `dialogRequestId`, `text`, `reason` | The final transcript. `text` is empty if no speech was recognized. |
 | `Recognition.IntentRecognized` | `dialogRequestId`, `intent`, `score`, `slots` | The capture asked for an intent, such as `GetWeather` with `{"city": "hamburg"}`. The card with the answer follows. |
@@ -187,8 +187,9 @@ also when it does not match.
 
 **From Whisper's transcript.** With Whisper, see below, the service
 compares Whisper's transcript to the samples, allowing small differences
-such as "whether" for "weather", and takes the words where a sample has
-a slot as its value, whatever they are. It matches when the similarity is
+such as "whether" for "weather" and up to three words before a sample,
+such as "hello unicorn", and takes the words where a sample has a slot as
+its value, whatever they are. It matches when the similarity is
 at least 0.8, and `score` is the similarity minus 1. With base.en it
 found the intent in all 384 questions and the city in 93%.
 
@@ -224,10 +225,13 @@ The file holds the encoder, the decoder and the search, which ONNX
 Runtime runs, and the vocabulary, so like the streaming models it needs
 neither PyTorch nor other packages. Whisper hears a whole utterance at
 once, so the service keeps a capture's audio, finds the end of speech by
-its loudness, and transcribes it when the capture ends. `TranscriptUpdated`
-is therefore not sent: the card shows that the service is listening until
-`CaptureFinished` has Whisper's transcript, with capitals and punctuation,
-such as "What's the weather in Hamburg?". It hears at most 30 seconds.
+its loudness, and transcribes it when the capture ends, with capitals and
+punctuation, such as "What's the weather in Hamburg?". It hears at most
+30 seconds. For a transcript while the user speaks, it transcribes the
+audio so far in the background after each second of it, `--partial-seconds`,
+and publishes it with `TranscriptUpdated`; at the end of speech an
+unfinished one is stopped, so it never delays the final transcript. Set
+`--partial-seconds 0` to save the work on a slow computer.
 
 On the 384 synthesized questions for the weather in 16 cities, base.en
 found the intent in all of them and the city in 93%, in 0.67 seconds a
@@ -307,7 +311,8 @@ Tapping it, or pressing Space, starts a `TAP_TO_TALK` capture, and
 tapping it while listening stops it. The button shows the dialog state,
 glowing with the loudness while listening and its rainbow ring spinning
 while listening and thinking, and the page shows the cards the service
-sends, for which the unicorn steps aside. The rounded Fredoka font is in
+sends, for which the unicorn steps aside. Above an answer, such as the
+weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka font is in
 `web/assistant/fonts` under the SIL Open Font License, so the page needs
 no internet.
 
