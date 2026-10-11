@@ -510,6 +510,9 @@ in each example's `README.md`.
 - `examples/commonvoice`: [Mozilla Common Voice], crowd-sourced read speech
   with many speakers, accents and microphones, for training with LibriSpeech
   on a GPU.
+- `examples/speech_commands`: Speech Commands, single words such as "left"
+  and "right" said alone, which the Common Voice configs also train on, and
+  an evaluation of how a model recognizes them.
 - `examples/timit` and `examples/wsj`: the original examples of this
   repository.
 

@@ -114,6 +114,28 @@ def test_resume(tmp_path, precision, accumulate, capsys):
     assert all(torch.isfinite(v).all() for v in resumed.values())
 
 
+def test_resume_with_more_data(tmp_path, capsys):
+    # A resumed run can train on more data than it started with, such as
+    # clips of single words, in the characters its preprocessor knows.
+    words = tmp_path / "words.json"
+    words.write_text('{"text": "hello", "duration": 1.101, "audio": "test0.wav"}\n' * 3)
+    config = make_config(tmp_path / "run", 1)
+    train_run(config, seed=0)
+    config["optimizer"]["epochs"] = 2
+    config["data"]["train_set"] = ["test.json", str(words)]
+    capsys.readouterr()
+    train_run(config, seed=0, resume=True)
+    assert "Resuming after epoch 0" in capsys.readouterr().out
+    state = torch.load(tmp_path / "run" / train.STATE)
+    assert state["epoch"] == 2
+    # Each epoch is a step per example: those of test.json, then also the
+    # word clips.
+    with open("test.json") as fid:
+        examples = sum(1 for _ in fid)
+    assert state["it"] == 2 * examples + 3
+    assert all(torch.isfinite(v).all() for v in weights(tmp_path / "run").values())
+
+
 def test_lr_anneal(tmp_path, capsys):
     # The learning rate is divided by the factor after every epoch.
     config = make_config(tmp_path / "anneal", 3)
