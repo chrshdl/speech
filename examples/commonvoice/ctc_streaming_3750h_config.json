@@ -8,7 +8,8 @@
             "examples/librispeech/data/LibriSpeech/train-clean-100.json",
             "examples/librispeech/data/LibriSpeech/train-clean-360.json",
             "examples/librispeech/data/LibriSpeech/train-other-500.json",
-            "examples/commonvoice/data/train.json"
+            "examples/commonvoice/data/train.json",
+            "examples/speech_commands/data/train.json"
         ],
         "dev_set" : [
             "examples/librispeech/data/LibriSpeech/dev-clean.json",

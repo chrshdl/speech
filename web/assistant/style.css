@@ -1,0 +1,1184 @@
+@font-face {
+  font-family: "Fredoka";
+  src: url("fonts/fredoka-latin.woff2") format("woff2");
+  font-weight: 400 700;
+  font-display: swap;
+}
+
+:root {
+  --ink: #4b2c6e;
+  --muted: #8a6aa8;
+  --faint: #b9a3dc;
+  --pink: #ff5fa2;
+  --purple: #8b5cf6;
+  --card: #ffffff;
+  --card-border: #ffd1e8;
+  --rainbow: conic-gradient(
+    #ff6b6b,
+    #ffa94d,
+    #ffd93d,
+    #6bd88f,
+    #5cc0ff,
+    #7c8cff,
+    #b18cff,
+    #ff6b6b
+  );
+  --radius: 32px;
+  --mic: 84px;
+  --toggle: 60px;
+  --theme-fade: 900ms ease;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #cdeeff;
+  transition: background-color var(--theme-fade);
+  color: var(--ink);
+  font-family: "Fredoka", "Arial Rounded MT Bold", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+/* The bar with the status and the magic microphone button. */
+
+.bar {
+  position: fixed;
+  inset: 0 0 auto 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 20px;
+  z-index: 2;
+}
+
+.status {
+  margin: 0;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.status:empty {
+  display: none;
+}
+
+/* The day and night button, in the upper left corner. It shows the theme
+   it switches to. */
+.theme-toggle {
+  margin-right: auto;
+  display: grid;
+  place-items: center;
+  width: var(--toggle);
+  height: var(--toggle);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  cursor: pointer;
+  box-shadow:
+    0 6px 16px rgba(139, 92, 246, 0.25),
+    inset 0 -3px 0 rgba(139, 92, 246, 0.12);
+  transition:
+    transform 150ms ease,
+    background-color var(--theme-fade);
+}
+
+.theme-toggle:hover {
+  transform: scale(1.06) rotate(-8deg);
+}
+
+.theme-toggle:active {
+  transform: scale(0.94);
+}
+
+.theme-toggle:focus-visible {
+  outline: 4px solid var(--pink);
+  outline-offset: 5px;
+}
+
+.theme-icon {
+  grid-area: 1 / 1;
+  width: 30px;
+  height: 30px;
+  transition:
+    opacity 400ms ease,
+    transform 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.to-night {
+  fill: #7c6cf0;
+}
+
+.to-day {
+  fill: #ffbf2e;
+  stroke: #ffbf2e;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  opacity: 0;
+  transform: rotate(-90deg) scale(0.5);
+}
+
+:root[data-theme="night"] .theme-toggle {
+  background: #2d2a6e;
+}
+
+:root[data-theme="night"] .to-night {
+  opacity: 0;
+  transform: rotate(90deg) scale(0.5);
+}
+
+:root[data-theme="night"] .to-day {
+  opacity: 1;
+  transform: none;
+}
+
+.mic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--mic);
+  height: var(--mic);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--purple);
+  cursor: pointer;
+  box-shadow:
+    0 8px 20px rgba(139, 92, 246, 0.3),
+    inset 0 -4px 0 rgba(139, 92, 246, 0.12);
+  transition:
+    transform 150ms ease,
+    background-color 200ms ease,
+    color 200ms ease,
+    opacity 200ms ease;
+}
+
+.mic:hover {
+  transform: scale(1.05);
+}
+
+.mic:active {
+  transform: scale(0.94);
+}
+
+.mic:focus-visible {
+  outline: 4px solid var(--pink);
+  outline-offset: 6px;
+}
+
+.mic-icon {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mic-icon rect {
+  fill: currentColor;
+  stroke: none;
+}
+
+/* A rainbow ring around the button, which spins while listening. */
+.mic-ring {
+  position: absolute;
+  inset: -7px;
+  border-radius: 50%;
+  background: var(--rainbow);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 7px), #000 calc(100% - 6px));
+  pointer-events: none;
+}
+
+body[data-state="LISTENING"] .mic {
+  background: var(--pink);
+  color: #ffffff;
+  /* --level, from 0 to 1, follows the loudness of the microphone. */
+  box-shadow:
+    0 0 0 calc(4px + var(--level, 0) * 12px) rgba(255, 95, 162, 0.35),
+    0 8px 20px rgba(255, 95, 162, 0.4);
+  transition: box-shadow 80ms linear;
+}
+
+body[data-state="LISTENING"] .mic-ring {
+  animation: spin 2.4s linear infinite;
+}
+
+body[data-state="THINKING"] .mic-ring {
+  animation: spin 0.7s linear infinite;
+}
+
+body[data-connection="connecting"] .mic,
+body[data-connection="offline"] .mic {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* The landing page. */
+
+main {
+  position: relative;
+  height: 100%;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.scene text {
+  font-family: "Fredoka", "Arial Rounded MT Bold", system-ui, sans-serif;
+}
+
+.greeting {
+  fill: var(--pink);
+  font-size: 54px;
+  font-weight: 600;
+}
+
+.clock {
+  fill: var(--ink);
+  font-size: 104px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.date {
+  fill: var(--muted);
+  font-size: 34px;
+  font-weight: 500;
+}
+
+.bubble-line {
+  fill: var(--ink);
+  font-size: 34px;
+  font-weight: 500;
+}
+
+.bubble-ask {
+  fill: var(--pink);
+  font-weight: 600;
+}
+
+.greeting-text,
+.bubble {
+  transition: opacity 300ms ease;
+}
+
+.clock,
+.date {
+  transition: fill var(--theme-fade);
+}
+
+/* Day and night. */
+
+.night-only,
+.day-only {
+  transition: opacity var(--theme-fade);
+}
+
+.night-only {
+  opacity: 0;
+}
+
+:root[data-theme="night"] .night-only {
+  opacity: 1;
+}
+
+:root[data-theme="night"] .day-only {
+  opacity: 0;
+}
+
+:root[data-theme="night"] body {
+  background: #141a46;
+}
+
+.clouds {
+  fill: #ffffff;
+  transition: opacity var(--theme-fade);
+}
+
+/* A clear night sky. */
+:root[data-theme="night"] .clouds {
+  opacity: 0;
+}
+
+.rainbow,
+.flowers {
+  transition: opacity var(--theme-fade);
+}
+
+/* By moonlight, a faint moonbow. */
+:root[data-theme="night"] .rainbow {
+  opacity: 0.32;
+}
+
+:root[data-theme="night"] .flowers {
+  opacity: 0.6;
+}
+
+.hill-back,
+.hill-front {
+  transition: fill var(--theme-fade);
+}
+
+.hill-back {
+  fill: #a4ecb0;
+}
+
+.hill-front {
+  fill: #82dd93;
+}
+
+:root[data-theme="night"] .hill-back {
+  fill: #3f6f86;
+}
+
+:root[data-theme="night"] .hill-front {
+  fill: #2c5970;
+}
+
+:root[data-theme="night"] .clock {
+  fill: #ffffff;
+}
+
+:root[data-theme="night"] .date {
+  fill: #c8c0f2;
+}
+
+:root[data-theme="night"] .greeting {
+  fill: #ff9ccf;
+}
+
+.stars circle {
+  animation: twinkle 2.2s ease-in-out infinite;
+}
+
+.stars circle:nth-child(3n) {
+  animation-delay: -0.8s;
+}
+
+.stars circle:nth-child(3n + 1) {
+  animation-delay: -1.6s;
+}
+
+/* Every few seconds a star shoots across the sky. */
+.shooting-star {
+  opacity: 0;
+  animation: shoot 9s ease-in 3s infinite;
+}
+
+@keyframes shoot {
+  0% {
+    opacity: 0;
+    translate: 620px 40px;
+    rotate: 18deg;
+  }
+  2% {
+    opacity: 1;
+  }
+  9% {
+    opacity: 0;
+    translate: 1080px 190px;
+    rotate: 18deg;
+  }
+  100% {
+    opacity: 0;
+    translate: 1080px 190px;
+    rotate: 18deg;
+  }
+}
+
+.fireflies circle {
+  animation: glow 3.2s ease-in-out infinite alternate;
+}
+
+.fireflies circle:nth-child(2n) {
+  animation-duration: 4.1s;
+  animation-delay: -1.5s;
+}
+
+.fireflies circle:nth-child(3n) {
+  animation-delay: -2.4s;
+}
+
+@keyframes glow {
+  0% {
+    opacity: 0.25;
+    translate: 0 0;
+  }
+  100% {
+    opacity: 1;
+    translate: 14px -22px;
+  }
+}
+
+.horn-glow {
+  animation: twinkle 2.8s ease-in-out infinite;
+}
+
+body.has-card .greeting-text,
+body.has-card .bubble {
+  opacity: 0;
+}
+
+/* Gentle motion: clouds drift, stars twinkle, the unicorn bobs. */
+
+.drift {
+  animation: drift 14s ease-in-out infinite alternate;
+}
+
+.drift-slow {
+  animation-duration: 18s;
+}
+
+.drift-slower {
+  animation-duration: 24s;
+}
+
+@keyframes drift {
+  to {
+    translate: 60px 0;
+  }
+}
+
+.sparkles use {
+  animation: twinkle 2.6s ease-in-out infinite;
+}
+
+.sparkles use:nth-child(2n) {
+  animation-delay: -1.3s;
+}
+
+.sparkles use:nth-child(3n) {
+  animation-delay: -0.7s;
+}
+
+@keyframes twinkle {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.bob {
+  animation: bob 3s ease-in-out infinite;
+}
+
+/* The unicorn trots aside to make room for a card. */
+.step-aside {
+  transition: translate 600ms cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+body.has-card .step-aside {
+  translate: 300px 0;
+}
+
+@keyframes bob {
+  50% {
+    translate: 0 -10px;
+  }
+}
+
+.sun-rays {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: spin 40s linear infinite;
+}
+
+/* Cards. */
+
+.stage {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 124px 24px 24px;
+  pointer-events: none;
+}
+
+/* What was asked, above the answer. */
+.asked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px 10px;
+  max-width: min(620px, 100%);
+  margin: 0;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.18);
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.asked[hidden] {
+  display: none;
+}
+
+.asked-label {
+  color: var(--muted);
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.asked-text {
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.card {
+  width: min(620px, 100%);
+  padding: 22px 28px 28px;
+  border: 4px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(139, 92, 246, 0.25);
+  pointer-events: auto;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.card.leaving {
+  animation: card-out 200ms ease forwards;
+}
+
+@keyframes card-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.9);
+  }
+}
+
+@keyframes card-out {
+  to {
+    opacity: 0;
+    transform: translateY(12px) scale(0.95);
+  }
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 10px;
+}
+
+.card-title {
+  margin: 0;
+  color: var(--purple);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.card-close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin: -6px -10px -6px 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #fff0f7;
+  color: var(--pink);
+  cursor: pointer;
+}
+
+.card-close:hover {
+  background: #ffe0ef;
+}
+
+.card-close svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+}
+
+.transcript {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 500;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.transcript.partial {
+  color: var(--muted);
+}
+
+/* Twinkling dots while nothing has been heard yet. */
+.transcript:empty::before {
+  content: "• • •";
+  color: var(--faint);
+  letter-spacing: 0.15em;
+  animation: twinkle 1.2s ease-in-out infinite;
+}
+
+.notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: 24px;
+  line-height: 1.35;
+}
+
+/* The weather card. */
+
+.weather-now {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 20px;
+}
+
+.weather-icon {
+  width: 110px;
+  height: 110px;
+}
+
+.weather-temperature {
+  margin: 0;
+  color: var(--ink);
+  font-size: 76px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-description {
+  margin: 6px 0 0;
+  color: var(--pink);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.weather-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 17px;
+}
+
+.weather-details li {
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: #f3edff;
+  color: var(--muted);
+}
+
+.weather-details strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.weather-days {
+  display: grid;
+  grid-template-columns: repeat(var(--days, 4), 1fr);
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  text-align: center;
+}
+
+.weather-day {
+  padding: 10px 4px 12px;
+  border-radius: 22px;
+  background: #eef8ff;
+}
+
+.weather-day:nth-child(2) {
+  background: #fff4e6;
+}
+
+.weather-day:nth-child(3) {
+  background: #f0fbf2;
+}
+
+.weather-day:nth-child(4) {
+  background: #fdf0fb;
+}
+
+.weather-day-name {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.weather-day .weather-icon {
+  display: block;
+  width: 52px;
+  height: 52px;
+  margin: 4px auto;
+}
+
+.weather-day-range {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.weather-day-range .low {
+  margin-left: 8px;
+  color: var(--faint);
+}
+
+/* Superball. */
+
+/* While playing, the clock makes room for the falling flowers. */
+body.playing .greeting-text,
+body.playing .bubble {
+  opacity: 0;
+}
+
+.game {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.game[hidden] {
+  display: none;
+}
+
+/* The level, the flowers dodged and the hearts left, between the buttons
+   of the bar. */
+.game-hud {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 56px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.2);
+  white-space: nowrap;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-level {
+  color: var(--purple);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.game-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-score svg {
+  width: 30px;
+  height: 30px;
+}
+
+.game-hearts {
+  display: flex;
+  gap: 4px;
+}
+
+.game-heart {
+  width: 28px;
+  height: 28px;
+  fill: var(--pink);
+  transition:
+    fill 300ms ease,
+    scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-heart.lost {
+  fill: #e6dcf5;
+  scale: 0.8;
+}
+
+/* Big round buttons at the sides, which show what to say and light up
+   when it is heard. */
+.game-steer {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--purple);
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.game-steer.left {
+  left: 20px;
+}
+
+.game-steer.right {
+  right: 20px;
+}
+
+.game-steer svg {
+  width: 84px;
+  height: 84px;
+  padding: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  box-shadow:
+    0 8px 20px rgba(139, 92, 246, 0.3),
+    inset 0 -4px 0 rgba(139, 92, 246, 0.12);
+}
+
+.game-steer-word {
+  padding: 2px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.game-steer:focus-visible {
+  outline: none;
+}
+
+.game-steer:focus-visible svg {
+  outline: 4px solid var(--pink);
+  outline-offset: 5px;
+}
+
+.game-steer.pressed svg {
+  animation: steer 380ms ease;
+}
+
+@keyframes steer {
+  30% {
+    background: var(--pink);
+    color: #ffffff;
+    scale: 1.15;
+  }
+}
+
+/* The countdown, a new level and the score. */
+.game-banner {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  translate: -50% -50%;
+  width: max-content;
+  max-width: calc(100% - 240px);
+  margin: 0;
+  padding: 22px 40px 26px;
+  border: 4px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(139, 92, 246, 0.25);
+  text-align: center;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-banner[hidden] {
+  display: none;
+}
+
+.game-banner-title {
+  margin: 0;
+  color: var(--pink);
+  font-size: 60px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.game-banner-text {
+  margin: 8px 0 0;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.game-banner-text[hidden] {
+  display: none;
+}
+
+/* The countdown's numbers pop up without a card around them. */
+.game-banner.count {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  animation: count 700ms ease forwards;
+}
+
+.game-banner.count .game-banner-title {
+  color: #ffffff;
+  font-size: 160px;
+  -webkit-text-stroke: 10px var(--pink);
+  paint-order: stroke fill;
+}
+
+@keyframes count {
+  from {
+    opacity: 0;
+    scale: 2;
+  }
+  30% {
+    opacity: 1;
+    scale: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.8;
+  }
+}
+
+.falling-flower {
+  stroke: rgba(75, 44, 110, 0.18);
+  stroke-width: 1.5;
+}
+
+/* A flower that hits the unicorn bursts. */
+.falling-flower.pop {
+  animation: pop 450ms ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.falling-flower.fade {
+  animation: fade 500ms ease forwards;
+}
+
+@keyframes fade {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pop {
+  to {
+    opacity: 0;
+    scale: 2;
+  }
+}
+
+.game-point {
+  fill: var(--pink);
+  stroke: #ffffff;
+  stroke-width: 8px;
+  paint-order: stroke fill;
+  font-size: 44px;
+  font-weight: 600;
+  animation: rise 900ms ease-out forwards;
+}
+
+@keyframes rise {
+  to {
+    opacity: 0;
+    translate: 0 -70px;
+  }
+}
+
+/* The unicorn blinks while it cannot be hit again. */
+.step-aside.hurt {
+  animation: hurt 280ms steps(2, jump-none) 5;
+}
+
+@keyframes hurt {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Narrow screens: the score goes below the bar. */
+@media (max-width: 640px) {
+  .game-hud {
+    top: 112px;
+  }
+
+  .game-banner {
+    max-width: calc(100% - 32px);
+  }
+}
+
+/* Short screens, such as the Raspberry Pi touchscreen at 800 by 480: the
+   card sits beside the microphone button rather than below it. */
+@media (max-height: 600px) {
+  :root {
+    --mic: 72px;
+    --toggle: 54px;
+  }
+
+  .stage {
+    gap: 8px;
+    padding: 14px 112px;
+  }
+
+  .asked {
+    padding: 6px 18px;
+  }
+
+  .asked-label {
+    font-size: 15px;
+  }
+
+  .asked-text {
+    font-size: 18px;
+  }
+
+  .card {
+    padding: 14px 22px 18px;
+  }
+
+  .card-header {
+    margin-bottom: 2px;
+  }
+
+  .transcript {
+    font-size: 28px;
+  }
+
+  .weather-icon {
+    width: 76px;
+    height: 76px;
+  }
+
+  .weather-temperature {
+    font-size: 54px;
+  }
+
+  .weather-description {
+    margin-top: 2px;
+    font-size: 21px;
+  }
+
+  .weather-details {
+    margin-top: 10px;
+    font-size: 15px;
+  }
+
+  .weather-details li {
+    padding: 4px 12px;
+  }
+
+  .weather-days {
+    margin-top: 12px;
+  }
+
+  .weather-day {
+    padding: 6px 4px 8px;
+  }
+
+  .weather-day .weather-icon {
+    width: 38px;
+    height: 38px;
+    margin: 2px auto;
+  }
+
+  .weather-day-name,
+  .weather-day-range {
+    font-size: 16px;
+  }
+
+  .game-hud {
+    top: 26px;
+    height: 48px;
+    gap: 14px;
+    padding: 0 18px;
+  }
+
+  .game-level {
+    font-size: 19px;
+  }
+
+  .game-score {
+    font-size: 22px;
+  }
+
+  .game-steer svg {
+    width: 68px;
+    height: 68px;
+    padding: 16px;
+  }
+
+  .game-steer-word {
+    font-size: 18px;
+  }
+
+  .game-banner {
+    max-width: calc(100% - 200px);
+    padding: 14px 28px 18px;
+  }
+
+  .game-banner-title {
+    font-size: 44px;
+  }
+
+  .game-banner-text {
+    font-size: 21px;
+  }
+
+  .game-banner.count .game-banner-title {
+    font-size: 120px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}

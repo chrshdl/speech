@@ -1,0 +1,489 @@
+// A client of the speech recognizer service: shows the cards the service
+// sends, and starts a capture when the microphone button is tapped. See
+// docs/backend-api.md.
+
+const $ = (id) => document.getElementById(id);
+const ui = {
+  mic: $("mic"),
+  themeToggle: $("theme-toggle"),
+  status: $("status"),
+  stage: $("stage"),
+  greeting: $("greeting"),
+  clock: $("clock"),
+  date: $("date"),
+  cardTemplate: $("card-template"),
+  asked: $("asked"),
+  askedText: $("asked-text"),
+  scene: document.querySelector(".scene"),
+  unicorn: document.querySelector(".step-aside"),
+  gameLayer: $("game-layer"),
+  game: $("game"),
+  steerLeft: $("steer-left"),
+  steerRight: $("steer-right"),
+};
+
+// Audio is sent in chunks of 100 ms.
+const CHUNK_SECONDS = 0.1;
+
+let info = null; // From /v1/info: the sample rate and where audio comes from.
+let dialogState = "IDLE";
+let card = null; // The card shown: its data and element.
+let audio = null; // The microphone stream of the browser, while capturing.
+let starting = false;
+let heard = null; // The final transcript of the last capture, by its id.
+let game = null; // The Superball being played, and the id of its card.
+let commands = null; // The id of the capture that hears the game's commands.
+let restarts = []; // When listening for commands restarted by itself.
+
+// The landing page.
+
+function updateClock() {
+  const now = new Date();
+  const hour = now.getHours();
+  ui.greeting.textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  ui.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  ui.date.textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+}
+
+function setStatus(text) {
+  ui.status.textContent = text;
+}
+
+// Day and night.
+
+function setTheme(theme) {
+  const night = theme === "night";
+  if (night) {
+    document.documentElement.dataset.theme = "night";
+  } else {
+    delete document.documentElement.dataset.theme;
+  }
+  ui.themeToggle.setAttribute("aria-pressed", String(night));
+  const label = night ? "Switch to day" : "Switch to night";
+  ui.themeToggle.setAttribute("aria-label", label);
+  ui.themeToggle.title = label;
+  try {
+    localStorage.setItem("theme", theme);
+  } catch {
+    // Remembering the theme is only a convenience.
+  }
+}
+
+function toggleTheme() {
+  setTheme(document.documentElement.dataset.theme === "night" ? "day" : "night");
+}
+
+// Requests.
+
+async function post(path, body) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  return response;
+}
+
+// Events.
+
+function connectEvents() {
+  const events = new EventSource("/v1/events");
+  events.onopen = () => {
+    document.body.dataset.connection = "online";
+    setStatus("");
+  };
+  events.onerror = () => {
+    // EventSource reconnects by itself.
+    document.body.dataset.connection = "offline";
+    setStatus("Reconnecting…");
+  };
+  const on = (name, handle) =>
+    events.addEventListener(name, (event) => handle(JSON.parse(event.data).payload));
+
+  on("Recognition.DialogStateChanged", ({ state }) => {
+    dialogState = state;
+    document.body.dataset.state = state;
+    ui.mic.setAttribute("aria-label", state === "LISTENING" ? "Stop" : "Talk");
+    listenForCommands();
+  });
+  on("Recognition.CaptureFinished", ({ dialogRequestId, text }) => {
+    if (dialogRequestId === commands) {
+      commands = null;
+    } else {
+      heard = { id: dialogRequestId, text };
+    }
+  });
+  on("Recognition.CommandRecognized", ({ command }) => {
+    if (game) {
+      game.superball.command(command);
+    }
+  });
+  on("Display.ShowCard", ({ card: data }) => showCard(data));
+  on("Display.ClearCard", ({ cardId }) => {
+    if (card && card.data.id === cardId) {
+      hideCard();
+    }
+  });
+  on("Audio.StopAudioStream", () => stopAudio());
+}
+
+// Cards.
+
+const RENDERERS = {
+  TranscriptCard(data, body) {
+    const text = document.createElement("p");
+    text.className = "transcript" + (data.isFinal ? "" : " partial");
+    text.textContent = data.text;
+    body.append(text);
+  },
+
+  NoticeCard(data, body) {
+    const text = document.createElement("p");
+    text.className = "notice";
+    text.textContent = data.text;
+    body.append(text);
+  },
+
+  WeatherCard(data, body) {
+    const degrees = (value) => `${Math.round(value)}°`;
+    body.innerHTML = `
+      <div class="weather-now">
+        ${weatherIcon(data.condition, data.isDay)}
+        <div>
+          <p class="weather-temperature">${degrees(data.temperature)}</p>
+          <p class="weather-description"></p>
+        </div>
+      </div>
+      <ul class="weather-details">
+        <li>Feels like <strong>${degrees(data.feelsLike)}</strong></li>
+        <li>Humidity <strong>${data.humidity}%</strong></li>
+        <li>Wind <strong>${Math.round(data.windSpeed)} ${data.windSpeedUnit}</strong></li>
+      </ul>
+      <ol class="weather-days" style="--days: ${data.days.length}">
+        ${data.days
+          .map(
+            (day, i) => `
+          <li class="weather-day">
+            <div class="weather-day-name">${i === 0 ? "Today" : weekday(day.date)}</div>
+            ${weatherIcon(day.condition)}
+            <div class="weather-day-range">${degrees(day.high)}<span class="low">${degrees(day.low)}</span></div>
+          </li>`,
+          )
+          .join("")}
+      </ol>`;
+    body.querySelector(".weather-description").textContent = data.description;
+  },
+};
+
+const TITLES = {
+  WeatherCard: (data) => `Weather in ${data.location}`,
+};
+
+function weekday(isoDate) {
+  // A date of the forecast's place, so read it as a local date.
+  const [year, month, day] = isoDate.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString([], { weekday: "short" });
+}
+
+function showCard(data) {
+  if (data.type === "GameCard") {
+    startGame(data);
+    return;
+  }
+  const render = RENDERERS[data.type];
+  if (!render) {
+    return; // A card type this client does not know.
+  }
+  // Another card, such as the answer to a question, ends the game.
+  endGame();
+  // A card with the id of the card shown updates it in place.
+  if (!card || card.data.id !== data.id || card.data.type !== data.type) {
+    hideCard();
+    const element = ui.cardTemplate.content.firstElementChild.cloneNode(true);
+    element.querySelector(".card-close").addEventListener("click", () => dismissCard());
+    ui.stage.append(element);
+    card = { data, element };
+  }
+  card.data = data;
+  const title = TITLES[data.type] ? TITLES[data.type](data) : data.title;
+  card.element.querySelector(".card-title").textContent = title;
+  const body = card.element.querySelector(".card-body");
+  body.replaceChildren();
+  render(data, body);
+  showAsked(data);
+  document.body.classList.add("has-card");
+}
+
+// Above an answer, such as the weather, what was asked for it. A
+// transcript card shows it already.
+function showAsked(data) {
+  const asked = data.type !== "TranscriptCard" && heard && heard.id === data.id && heard.text;
+  ui.askedText.textContent = asked ? `“${heard.text}”` : "";
+  ui.asked.hidden = !asked;
+}
+
+function hideCard() {
+  if (!card) {
+    return;
+  }
+  const { data, element } = card;
+  card = null;
+  if (data.type === "GameCard") {
+    endGame();
+    return;
+  }
+  ui.asked.hidden = true;
+  document.body.classList.remove("has-card");
+  element.classList.add("leaving");
+  element.addEventListener("animationend", () => element.remove(), { once: true });
+  // Without animations, as with reduced motion, remove it at once.
+  setTimeout(() => element.remove(), 400);
+}
+
+function dismissCard() {
+  if (!card) {
+    return;
+  }
+  const { id } = card.data;
+  hideCard();
+  post("/v1/display/card-dismissed", { cardId: id });
+}
+
+// Superball, see game.js. The game's card starts it, and while it is played
+// a COMMANDS capture listens for "left" and "right".
+
+function startGame(data) {
+  if (game && game.id === data.id) {
+    return;
+  }
+  hideCard();
+  card = { data, element: null };
+  const superball = new Superball({
+    scene: ui.scene,
+    unicorn: ui.unicorn,
+    layer: ui.gameLayer,
+    overlay: ui.game,
+    onOver: () => {
+      if (commands) {
+        stopCapture();
+      }
+    },
+    // Once the score was shown, the game's card goes.
+    onEnd: () => dismissCard(),
+  });
+  game = { id: data.id, superball };
+  restarts = [];
+  superball.start(data.level);
+  listenForCommands();
+}
+
+function endGame() {
+  if (!game) {
+    return;
+  }
+  game.superball.destroy();
+  game = null;
+  if (commands) {
+    stopCapture();
+  }
+}
+
+// Listens for the game's commands while it needs them, also again when the
+// capture ended by itself, unless that keeps happening.
+async function listenForCommands() {
+  if (!game || !game.superball.listening || commands || dialogState !== "IDLE" || starting) {
+    return;
+  }
+  const now = Date.now();
+  restarts = restarts.filter((time) => now - time < 10000);
+  if (restarts.length >= 3) {
+    setStatus("I can't hear you. Is the microphone on?");
+    game.superball.quit();
+    return;
+  }
+  restarts.push(now);
+  await startCapture("COMMANDS");
+}
+
+function steer(command) {
+  if (game) {
+    game.superball.command(command);
+  }
+}
+
+// Capturing.
+
+async function toggleCapture() {
+  if (document.body.dataset.connection !== "online" || starting) {
+    return;
+  }
+  if (game) {
+    // The button stops the game, which then shows the score.
+    const { superball } = game;
+    if (superball.listening) {
+      superball.quit();
+      return;
+    }
+    dismissCard();
+  }
+  if (dialogState === "LISTENING") {
+    stopCapture();
+  } else if (dialogState === "IDLE") {
+    await startCapture("TAP_TO_TALK");
+  }
+}
+
+async function startCapture(initiator) {
+  starting = true;
+  try {
+    // Open the microphone before starting, so no speech is lost while the
+    // capture starts. Its audio waits until the stream is open.
+    if (info.audioInput === "CLIENT") {
+      audio = await openMicrophone(info.sampleRate);
+    }
+    const response = await post("/v1/recognition/start-capture", { initiator });
+    if (!response.ok) {
+      stopAudio();
+      if (response.status !== 409) {
+        setStatus("Could not start listening.");
+      }
+      return;
+    }
+    const { dialogRequestId, audioStream } = await response.json();
+    if (audioStream && audio) {
+      audio.stream(audioStream.url);
+    }
+    if (initiator === "COMMANDS") {
+      commands = dialogRequestId;
+      // The game can end while listening starts.
+      if (!game || !game.superball.listening) {
+        stopCapture();
+      }
+    }
+  } catch (error) {
+    stopAudio();
+    setStatus(error.name === "NotAllowedError" ? "Allow the microphone to talk." : "Could not start listening.");
+  } finally {
+    starting = false;
+  }
+}
+
+function stopCapture() {
+  if (audio) {
+    // Closing the audio stream ends the capture after all the audio sent.
+    audio.end();
+  } else {
+    post("/v1/recognition/stop-capture");
+  }
+}
+
+function stopAudio() {
+  if (audio) {
+    audio.close();
+    audio = null;
+  }
+}
+
+async function openMicrophone(rate) {
+  const media = await navigator.mediaDevices.getUserMedia({
+    // The models were trained on unprocessed recordings.
+    audio: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+  });
+  let context = new AudioContext({ sampleRate: rate });
+  let source;
+  try {
+    source = context.createMediaStreamSource(media);
+  } catch {
+    // Firefox only captures at the device's rate, so the worklet resamples.
+    await context.close();
+    context = new AudioContext();
+    source = context.createMediaStreamSource(media);
+  }
+  await context.audioWorklet.addModule("/recorder.js");
+  const recorder = new AudioWorkletNode(context, "recorder", {
+    processorOptions: { targetRate: rate, chunk: Math.round(rate * CHUNK_SECONDS) },
+  });
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  source.connect(recorder);
+  // The worklet outputs silence, but it only runs while connected.
+  recorder.connect(context.destination);
+
+  let socket = null;
+  const waiting = []; // Chunks recorded before the stream opened.
+  recorder.port.onmessage = (event) => {
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(event.data);
+    } else if (!socket) {
+      waiting.push(event.data);
+    }
+  };
+
+  // Show the loudness on the button.
+  const samples = new Float32Array(analyser.fftSize);
+  let frame = requestAnimationFrame(function level() {
+    analyser.getFloatTimeDomainData(samples);
+    const rms = Math.sqrt(samples.reduce((sum, x) => sum + x * x, 0) / samples.length);
+    ui.mic.style.setProperty("--level", Math.min(1, rms * 8).toFixed(3));
+    frame = requestAnimationFrame(level);
+  });
+
+  return {
+    stream(url) {
+      const scheme = location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(`${scheme}//${location.host}${url}`);
+      socket.binaryType = "arraybuffer";
+      socket.onopen = () => waiting.splice(0).forEach((chunk) => socket.send(chunk));
+      // The service closes the stream when the capture ends.
+      socket.onclose = () => stopAudio();
+    },
+    end() {
+      if (socket) {
+        socket.close();
+      }
+    },
+    close() {
+      cancelAnimationFrame(frame);
+      ui.mic.style.removeProperty("--level");
+      media.getTracks().forEach((track) => track.stop());
+      context.close();
+      if (socket && socket.readyState <= WebSocket.OPEN) {
+        socket.close();
+      }
+    },
+  };
+}
+
+// Start.
+
+async function start() {
+  updateClock();
+  setInterval(updateClock, 1000);
+  setTheme(document.documentElement.dataset.theme === "night" ? "night" : "day");
+  ui.themeToggle.addEventListener("click", toggleTheme);
+  ui.mic.addEventListener("click", toggleCapture);
+  ui.steerLeft.addEventListener("click", () => steer("LEFT"));
+  ui.steerRight.addEventListener("click", () => steer("RIGHT"));
+  document.addEventListener("keydown", (event) => {
+    if (event.code === "Space" && !event.repeat && event.target === document.body) {
+      event.preventDefault();
+      toggleCapture();
+    } else if (event.code === "Escape") {
+      dismissCard();
+    } else if (game && (event.code === "ArrowLeft" || event.code === "ArrowRight")) {
+      event.preventDefault();
+      steer(event.code === "ArrowLeft" ? "LEFT" : "RIGHT");
+    }
+  });
+  try {
+    info = await (await fetch("/v1/info")).json();
+  } catch {
+    setStatus("The service is not reachable.");
+    document.body.dataset.connection = "offline";
+    return;
+  }
+  connectEvents();
+}
+
+start();

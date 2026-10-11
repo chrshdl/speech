@@ -83,7 +83,17 @@ The script
   official train split without leaking dev or test material into training.
   `--train-from train` uses the official train split instead.
 
-### 5. Benchmark
+### 5. Speech Commands
+
+Download the clips of single words, such as "left" and "right", which the
+configs also train on, see `examples/speech_commands/README.md`. It takes
+about 2.5 GB and a few minutes:
+
+```
+uv run examples/speech_commands/prepare.py examples/speech_commands/data
+```
+
+### 6. Benchmark
 
 Before a run that takes days, measure the speed on the machine with
 `benchmark.py`. It times training steps on real batches for each batch size
@@ -138,6 +148,31 @@ to five days for the run, and check it with `benchmark.py`. Training saves the
 model after every epoch and continues after a stop with `--resume`. Each
 epoch sees 37 times the audio of an epoch on `train-clean-100`, so a few
 epochs go a long way.
+
+### Speech Commands
+
+Besides sentences, the configs train on the 85,000 clips of single words
+of Speech Commands, 23 hours, so the model also learns words said on
+their own, such as the commands of the backend's game. They are 5% of
+the clips and 0.6% of the audio, so they add about 2,650 batches, 5%, to
+each epoch. The dev set leaves them out, so the dev CER stays comparable
+from epoch to epoch; `examples/speech_commands/evaluate.py` measures the
+words.
+
+A run that started without them can add them after any epoch, such as
+after epoch 1, to train on them from epoch 2:
+
+1. Let the epoch finish. Once the log shows `Epoch 2, augmentations: …`,
+   the model and the training state of epoch 1 are saved.
+2. Stop the run with Ctrl+C. Its progress into epoch 2 is lost.
+3. Update the repository and download Speech Commands, see setup step 5.
+4. Resume with the same config, which now lists Speech Commands:
+
+   ```
+   caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_config.json --resume
+   ```
+
+From then on, an epoch has 53,171 batches rather than 50,520.
 
 To check early that the model learns, watch `avg_loss` in the progress bar,
 a running average of the loss per batch. In random order it does not depend

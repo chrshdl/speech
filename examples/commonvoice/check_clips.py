@@ -11,9 +11,9 @@ import argparse
 import json
 import random
 
-import editdistance
 import numpy as np
 import torch
+from rapidfuzz.distance import Levenshtein
 
 import speech
 from speech import loader
@@ -62,7 +62,7 @@ def score(model, preproc, data):
             "hyp": hyp,
             "duration": d["duration"],
             "chars/s": len(d["text"]) / d["duration"],
-            "CER": editdistance.eval(hyp, d["text"]) / len(d["text"]),
+            "CER": Levenshtein.distance(hyp, d["text"]) / len(d["text"]),
             "loss/char": loss / len(d["text"]),
         }
         row.update(audio_stats(d["audio"]))

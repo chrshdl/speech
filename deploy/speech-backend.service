@@ -1,0 +1,34 @@
+# Runs the speech recognition service when the Raspberry Pi starts, see
+# docs/backend-api.md.
+#
+# It assumes the repository in /home/pi/speech, installed with
+# `uv sync --no-default-groups`, the exported model and the LM in its
+# models directory, and the user pi. Change these to yours, then install
+# and start it with
+#
+#   sudo cp deploy/speech-backend.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now speech-backend
+#
+# and follow its log with `journalctl -u speech-backend -f`.
+#
+# A system service may not reach a desktop session's sound server, so if
+# the microphone gives no audio, name it with --mic-device, as listed by
+# `.venv/bin/python -m sounddevice`.
+
+[Unit]
+Description=Speech recognition service
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+User=pi
+SupplementaryGroups=audio
+WorkingDirectory=/home/pi/speech
+ExecStart=/home/pi/speech/.venv/bin/python backend.py models/best_model-int8.onnx --lm models/lm-train.npz --host 0.0.0.0
+Restart=on-failure
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

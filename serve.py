@@ -12,13 +12,11 @@ import os
 import time
 
 import numpy as np
-import torch
 from websockets.asyncio.server import serve
 from websockets.datastructures import Headers
 from websockets.http11 import Response
 
-import speech
-from speech import models, streaming
+from speech import streaming
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 STATIC = {
@@ -33,15 +31,20 @@ PAUSE = 1.0
 
 
 class Models:
-    def __init__(self, root, device):
+    def __init__(self, root, device, threads=None):
         """
         The models and LMs found under root, loaded when first used: model
-        directories hold a best_model, and LMs are .npz files.
+        directories hold a best_model, exported models are .onnx files and
+        LMs are .npz files.
         """
         self.device = device
+        self.threads = threads
+
+        def find(pattern):
+            return glob.glob(os.path.join(root, "**", pattern), recursive=True)
+
         self.models = sorted(
-            os.path.dirname(p)
-            for p in glob.glob(os.path.join(root, "**", "best_model"), recursive=True)
+            [os.path.dirname(p) for p in find("best_model")] + find("*.onnx")
         )
         self.lms = sorted(glob.glob(os.path.join(root, "**", "*.npz"), recursive=True))
         self.loaded = {}
@@ -49,8 +52,8 @@ class Models:
 
     def load(self, model_path, lm_path=None):
         """
-        Returns the model, its preprocessor and a function that creates a
-        decoder for one stream. Only the models and LMs found can be
+        Returns the model, see streaming.load, and a function that creates
+        a decoder for one stream. Only the models and LMs found can be
         loaded.
         """
         if model_path not in self.models:
@@ -58,21 +61,16 @@ class Models:
         if lm_path is not None and lm_path not in self.lms:
             raise ValueError(f"Unknown language model {lm_path}")
         if model_path not in self.loaded:
-            model, preproc = speech.load(model_path, tag="best")
-            if not isinstance(model, models.CTC):
-                raise ValueError(f"{model_path} is not a CTC model, which can stream")
-            if model.rnn.bidirectional:
-                raise ValueError(f"{model_path} is bidirectional, so it cannot stream")
-            model.to(self.device)
-            model.set_eval()
-            self.loaded[model_path] = (model, preproc)
-        model, preproc = self.loaded[model_path]
+            self.loaded[model_path] = streaming.load(
+                model_path, "best", self.device, self.threads
+            )
+        model = self.loaded[model_path]
         key = (model_path, lm_path)
         if key not in self.searches:
             self.searches[key] = streaming.search_factory(
-                model.blank, preproc.char_to_int, lm_path
+                model.blank, model.char_to_int, lm_path
             )
-        return model, preproc, self.searches[key]
+        return model, self.searches[key]
 
 
 def respond(content_type, body, status=200, reason="OK"):
@@ -139,16 +137,14 @@ async def stream(available, connection):
         request = json.loads(message)
         if request["type"] == "start":
             try:
-                model, preproc, new_search = await asyncio.to_thread(
+                model, new_search = await asyncio.to_thread(
                     available.load, request["model"], request.get("lm")
                 )
             except (ValueError, OSError) as error:
                 await send(type="error", message=str(error))
                 continue
-            sample_rate = streaming.model_sample_rate(preproc)
-            transcriber = streaming.Transcriber(
-                model, preproc, sample_rate, new_search()
-            )
+            sample_rate = model.sample_rate
+            transcriber = streaming.Transcriber(model, new_search())
             compute = heard = 0.0
             await send(type="ready", sample_rate=sample_rate)
         elif request["type"] == "stop" and transcriber is not None:
@@ -163,9 +159,9 @@ async def stream(available, connection):
             transcriber = None
 
 
-def start_server(root, host, port, device):
+def start_server(root, host, port, device, threads=None):
     """Returns the server, to use as an async context manager."""
-    available = Models(root, device)
+    available = Models(root, device, threads)
     return serve(
         lambda connection: stream(available, connection),
         host,
@@ -177,7 +173,9 @@ def start_server(root, host, port, device):
 
 
 async def main(args):
-    async with start_server(args.models, args.host, args.port, args.device) as server:
+    async with start_server(
+        args.models, args.host, args.port, args.device, args.threads
+    ) as server:
         print(f"Open http://{args.host}:{args.port} in a browser. Ctrl+C stops.")
         await server.serve_forever()
 
@@ -189,16 +187,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--models",
         default="examples",
-        help="Where to look for model directories and LM .npz files.",
+        help="Where to look for model directories, exported .onnx models and LM "
+        ".npz files.",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument(
         "--device",
-        type=torch.device,
         default="cpu",
-        help="The device to run the models on. Streaming does little work per "
-        "chunk, so the CPU is usually fastest.",
+        help="The device to run PyTorch models on. Streaming does little work "
+        "per chunk, so the CPU is usually fastest.",
+    )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        help="The CPU threads to run a model with. By default an exported model "
+        "uses one per core and a PyTorch model PyTorch's default.",
     )
     args = parser.parse_args()
     try:

@@ -1,0 +1,321 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Unicorn Helper</title>
+    <script>
+      // The theme chosen last, set before the page is drawn so it does not
+      // flash in the other one.
+      try {
+        if (localStorage.getItem("theme") === "night") {
+          document.documentElement.dataset.theme = "night";
+        }
+      } catch {}
+    </script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body data-state="IDLE" data-connection="connecting">
+    <header class="bar">
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
+        <svg class="theme-icon to-night" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" />
+        </svg>
+        <svg class="theme-icon to-day" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="4.6" />
+          <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" />
+        </svg>
+      </button>
+      <p class="status" id="status" role="status"></p>
+      <button class="mic" id="mic" type="button" aria-label="Talk" title="Talk (Space)">
+        <span class="mic-ring" aria-hidden="true"></span>
+        <svg class="mic-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21" />
+        </svg>
+      </button>
+    </header>
+
+    <main>
+      <!-- The landing page: a meadow with a rainbow and a unicorn, drawn on a
+           1600 by 900 grid that fills the screen, by day or by night. -->
+      <svg class="scene" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
+        <defs>
+          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#8fd3ff" />
+            <stop offset="0.55" stop-color="#cdeeff" />
+            <stop offset="1" stop-color="#ffe3f3" />
+          </linearGradient>
+          <linearGradient id="night-sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#141a46" />
+            <stop offset="0.55" stop-color="#2d2a6e" />
+            <stop offset="1" stop-color="#5a4690" />
+          </linearGradient>
+          <radialGradient id="moon-glow">
+            <stop offset="0.45" stop-color="#fff4c9" stop-opacity="0.18" />
+            <stop offset="1" stop-color="#fff4c9" stop-opacity="0" />
+          </radialGradient>
+          <mask id="crescent">
+            <rect x="-150" y="-150" width="300" height="300" fill="#fff" />
+            <circle cx="34" cy="-20" r="58" fill="#000" />
+          </mask>
+          <radialGradient id="horn-glow">
+            <stop offset="0" stop-color="#fff6b0" stop-opacity="0.9" />
+            <stop offset="1" stop-color="#fff6b0" stop-opacity="0" />
+          </radialGradient>
+          <radialGradient id="firefly">
+            <stop offset="0" stop-color="#fffbd1" />
+            <stop offset="0.35" stop-color="#e9ff7a" stop-opacity="0.9" />
+            <stop offset="1" stop-color="#e9ff7a" stop-opacity="0" />
+          </radialGradient>
+          <linearGradient id="shooting-tail" x1="0" y1="0" x2="1" y2="0">
+            <stop offset="0" stop-color="#ffffff" stop-opacity="0" />
+            <stop offset="1" stop-color="#ffffff" stop-opacity="0.95" />
+          </linearGradient>
+          <g id="cloud">
+            <circle cx="0" cy="0" r="46" />
+            <circle cx="52" cy="-22" r="58" />
+            <circle cx="112" cy="0" r="44" />
+            <rect x="0" y="-10" width="112" height="54" rx="27" />
+          </g>
+          <path id="sparkle" d="M0 -18 C3 -4 4 -3 18 0 C4 3 3 4 0 18 C-3 4 -4 3 -18 0 C-4 -3 -3 -4 0 -18 Z" />
+          <g id="flower">
+            <circle cx="0" cy="-11" r="9" /><circle cx="10.5" cy="-3.4" r="9" />
+            <circle cx="6.5" cy="9" r="9" /><circle cx="-6.5" cy="9" r="9" />
+            <circle cx="-10.5" cy="-3.4" r="9" />
+            <circle r="7" fill="#ffd93d" />
+          </g>
+        </defs>
+
+        <rect width="1600" height="900" fill="url(#sky)" />
+        <rect class="night-only" width="1600" height="900" fill="url(#night-sky)" />
+
+        <!-- Stars and a shooting star at night. -->
+        <g class="night-only stars" fill="#ffffff">
+          <circle cx="420" cy="90" r="3" /><circle cx="560" cy="210" r="2.5" />
+          <circle cx="1110" cy="40" r="2" /><circle cx="1300" cy="250" r="3" />
+          <circle cx="1060" cy="250" r="2.5" /><circle cx="1240" cy="110" r="2" />
+          <circle cx="1390" cy="60" r="3" /><circle cx="1530" cy="200" r="2.5" />
+          <circle cx="90" cy="320" r="2.5" /><circle cx="330" cy="420" r="2" />
+          <circle cx="1460" cy="420" r="2" /><circle cx="760" cy="370" r="2" />
+          <circle cx="480" cy="40" r="1.6" /><circle cx="1180" cy="330" r="1.8" />
+          <circle cx="40" cy="80" r="2" /><circle cx="1570" cy="330" r="1.6" />
+        </g>
+        <g class="night-only">
+          <g class="shooting-star">
+            <line x1="-160" y1="0" x2="0" y2="0" stroke="url(#shooting-tail)" stroke-width="4" stroke-linecap="round" />
+            <circle r="4" fill="#ffffff" />
+          </g>
+        </g>
+
+        <g class="day-only sun" transform="translate(300 190)">
+          <g class="sun-rays" stroke="#ffc94d" stroke-width="12" stroke-linecap="round">
+            <line x1="0" y1="-78" x2="0" y2="-100" /><line x1="0" y1="78" x2="0" y2="100" />
+            <line x1="-78" y1="0" x2="-100" y2="0" /><line x1="78" y1="0" x2="100" y2="0" />
+            <line x1="55" y1="55" x2="71" y2="71" /><line x1="-55" y1="55" x2="-71" y2="71" />
+            <line x1="55" y1="-55" x2="71" y2="-71" /><line x1="-55" y1="-55" x2="-71" y2="-71" />
+          </g>
+          <circle r="62" fill="#ffd93d" />
+          <circle cx="-22" cy="-6" r="7" fill="#7a4a1e" />
+          <circle cx="22" cy="-6" r="7" fill="#7a4a1e" />
+          <circle cx="-36" cy="14" r="10" fill="#ff9e7a" opacity="0.7" />
+          <circle cx="36" cy="14" r="10" fill="#ff9e7a" opacity="0.7" />
+          <path d="M-20 18 Q0 36 20 18" fill="none" stroke="#7a4a1e" stroke-width="6" stroke-linecap="round" />
+        </g>
+
+        <!-- Luna, a sleepy crescent moon with a nightcap. -->
+        <g class="night-only moon" transform="translate(300 190)">
+          <circle r="125" fill="url(#moon-glow)" />
+          <g mask="url(#crescent)">
+            <circle r="72" fill="#fff3c4" />
+            <circle cx="-26" cy="56" r="7" fill="#f5e19a" />
+            <circle cx="-62" cy="-18" r="5" fill="#f5e19a" />
+          </g>
+          <path d="M-56 4 Q-46 14 -36 4" fill="none" stroke="#7a5a2e" stroke-width="5" stroke-linecap="round" />
+          <circle cx="-54" cy="24" r="8" fill="#ffb3c7" opacity="0.75" />
+          <path d="M-41 35 Q-36 39 -31 35" fill="none" stroke="#7a5a2e" stroke-width="4" stroke-linecap="round" />
+          <path d="M-40 -54 Q-30 -104 30 -96 Q52 -86 58 -60 L36 -76 Q2 -80 -40 -54 Z" fill="#8b7cf6" />
+          <path d="M-44 -52 Q-14 -76 22 -72" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" />
+          <circle cx="60" cy="-56" r="10" fill="#ffffff" />
+        </g>
+
+        <g class="rainbow" fill="none" stroke-width="37">
+          <path d="M218 960 A582 582 0 0 1 1382 960" stroke="#ff6b6b" />
+          <path d="M254 960 A546 546 0 0 1 1346 960" stroke="#ffa94d" />
+          <path d="M290 960 A510 510 0 0 1 1310 960" stroke="#ffd93d" />
+          <path d="M326 960 A474 474 0 0 1 1274 960" stroke="#6bd88f" />
+          <path d="M362 960 A438 438 0 0 1 1238 960" stroke="#5cc0ff" />
+          <path d="M398 960 A402 402 0 0 1 1202 960" stroke="#7c8cff" />
+          <path d="M434 960 A366 366 0 0 1 1166 960" stroke="#b18cff" />
+        </g>
+
+        <g class="clouds">
+          <use href="#cloud" class="drift drift-slow" transform="translate(300 280) scale(0.9)" />
+          <use href="#cloud" class="drift" transform="translate(1180 210) scale(1.1)" />
+          <use href="#cloud" class="drift drift-slower" transform="translate(40 560) scale(0.6)" />
+        </g>
+
+        <g class="sparkles">
+          <use href="#sparkle" fill="#ffffff" transform="translate(470 180)" />
+          <use href="#sparkle" fill="#ffe066" transform="translate(1110 120) scale(1.3)" />
+          <use href="#sparkle" fill="#ffffff" transform="translate(1460 330) scale(0.9)" />
+          <use href="#sparkle" fill="#ffe066" transform="translate(110 420) scale(1.1)" />
+          <use href="#sparkle" fill="#ffffff" transform="translate(860 330) scale(0.8)" />
+          <use href="#sparkle" fill="#ff9ecf" transform="translate(1300 520) scale(1.1)" />
+        </g>
+
+        <ellipse class="hill-back" cx="380" cy="940" rx="640" ry="210" />
+        <ellipse class="hill-front" cx="1150" cy="975" rx="780" ry="245" />
+
+        <g class="flowers">
+          <use href="#flower" fill="#ff7ab8" transform="translate(140 820)" />
+          <use href="#flower" fill="#b18cff" transform="translate(330 790) scale(0.8)" />
+          <use href="#flower" fill="#ffffff" transform="translate(560 850) scale(0.9)" />
+          <use href="#flower" fill="#5cc0ff" transform="translate(760 812) scale(0.75)" />
+          <use href="#flower" fill="#ffa94d" transform="translate(1420 812)" />
+          <use href="#flower" fill="#ff7ab8" transform="translate(1530 862) scale(0.8)" />
+          <use href="#flower" fill="#ffffff" transform="translate(1320 870) scale(0.7)" />
+        </g>
+
+        <g class="night-only fireflies">
+          <circle cx="210" cy="760" r="14" fill="url(#firefly)" />
+          <circle cx="470" cy="720" r="12" fill="url(#firefly)" />
+          <circle cx="690" cy="780" r="14" fill="url(#firefly)" />
+          <circle cx="1010" cy="740" r="12" fill="url(#firefly)" />
+          <circle cx="1480" cy="740" r="14" fill="url(#firefly)" />
+          <circle cx="1350" cy="800" r="11" fill="url(#firefly)" />
+        </g>
+
+        <g class="step-aside"><g class="unicorn" transform="translate(877 341) scale(1.2)"><g class="bob">
+            <defs>
+              <rect id="u-leg-1" x="146" y="250" width="32" height="82" rx="16"/>
+              <rect id="u-leg-2" x="258" y="250" width="32" height="82" rx="16"/>
+              <rect id="u-leg-3" x="180" y="246" width="30" height="80" rx="15"/>
+              <rect id="u-leg-4" x="290" y="246" width="30" height="80" rx="15"/>
+              <clipPath id="u-clip-1"><use href="#u-leg-1"/></clipPath>
+              <clipPath id="u-clip-2"><use href="#u-leg-2"/></clipPath>
+              <clipPath id="u-clip-3"><use href="#u-leg-3"/></clipPath>
+              <clipPath id="u-clip-4"><use href="#u-leg-4"/></clipPath>
+              <g id="u-far-legs"><use href="#u-leg-3"/><use href="#u-leg-4"/></g>
+              <g id="u-shape">
+                <use href="#u-leg-1"/>
+                <use href="#u-leg-2"/>
+                <ellipse cx="236" cy="232" rx="94" ry="58"/>
+                <path d="M144 240 C138 210 142 176 150 150 L204 146 C204 172 210 194 228 210 Z"/>
+                <ellipse cx="138" cy="110" rx="62" ry="56"/>
+                <ellipse cx="94" cy="142" rx="44" ry="33"/>
+                <path d="M156 66 L176 20 L194 74 Z"/>
+              </g>
+            </defs>
+            <g class="u-tail">
+              <circle cx="326" cy="204" r="22" fill="#a98bff"/>
+              <circle cx="344" cy="226" r="21" fill="#5cc0ff"/>
+              <circle cx="354" cy="252" r="20" fill="#6bd88f"/>
+              <circle cx="354" cy="278" r="18" fill="#ffd93d"/>
+              <circle cx="346" cy="300" r="16" fill="#ffa94d"/>
+              <circle cx="334" cy="317" r="13" fill="#ff7ab8"/>
+            </g>
+            <use href="#u-far-legs" fill="#b9a3dc" stroke="#b9a3dc" stroke-width="12" stroke-linejoin="round"/>
+            <use href="#u-far-legs" fill="#efe6fa"/>
+            <rect x="180" y="306" width="30" height="20" fill="#ff9ecf" clip-path="url(#u-clip-3)"/>
+            <rect x="290" y="306" width="30" height="20" fill="#ff9ecf" clip-path="url(#u-clip-4)"/>
+            <use href="#u-shape" fill="#b9a3dc" stroke="#b9a3dc" stroke-width="12" stroke-linejoin="round"/>
+            <use href="#u-shape" fill="#ffffff"/>
+            <rect x="146" y="312" width="32" height="20" fill="#ff9ecf" clip-path="url(#u-clip-1)"/>
+            <rect x="258" y="312" width="32" height="20" fill="#ff9ecf" clip-path="url(#u-clip-2)"/>
+            <path d="M166 64 L176 38 L185 68 Z" fill="#ffc2dd" stroke="#ffc2dd" stroke-width="4" stroke-linejoin="round"/>
+            <g class="u-mane">
+              <circle cx="170" cy="62" r="21" fill="#ff7ab8"/>
+              <circle cx="194" cy="84" r="24" fill="#ffa94d"/>
+              <circle cx="204" cy="114" r="24" fill="#ffd93d"/>
+              <circle cx="208" cy="146" r="23" fill="#6bd88f"/>
+              <circle cx="216" cy="176" r="22" fill="#5cc0ff"/>
+              <circle cx="234" cy="198" r="20" fill="#a98bff"/>
+            </g>
+            <g class="night-only">
+              <circle class="horn-glow" cx="118" cy="30" r="52" fill="url(#horn-glow)" />
+            </g>
+            <g class="u-horn">
+              <path d="M114 62 L106 2 L142 58 Z" fill="#ffd166" stroke="#f0a83c" stroke-width="5" stroke-linejoin="round"/>
+              <path d="M113 44 L130 38 M110 26 L120 22" stroke="#f0a83c" stroke-width="4" stroke-linecap="round"/>
+            </g>
+            <ellipse cx="132" cy="106" rx="11" ry="14" fill="#3b2a4d"/>
+            <circle cx="136" cy="100" r="4" fill="#fff"/>
+            <circle cx="128" cy="113" r="2" fill="#fff"/>
+            <path d="M126 92 L121 84 M133 90 L133 80 M140 93 L145 85" stroke="#3b2a4d" stroke-width="3" stroke-linecap="round"/>
+            <circle cx="112" cy="136" r="11" fill="#ffb3d1" opacity="0.8"/>
+            <ellipse cx="68" cy="136" rx="4" ry="3" fill="#c9a6d9"/>
+            <path d="M74 158 Q90 168 106 157" fill="none" stroke="#b9a3dc" stroke-width="4" stroke-linecap="round"/>
+          </g></g></g>
+
+        <!-- Superball's falling flowers, drawn by game.js. -->
+        <g class="game-layer" id="game-layer"></g>
+
+        <g class="greeting-text" text-anchor="middle">
+          <text id="greeting" x="800" y="118" class="greeting"></text>
+          <text id="clock" x="800" y="222" class="clock"></text>
+          <text id="date" x="800" y="276" class="date"></text>
+        </g>
+
+        <g class="bubble">
+          <path d="M424 404 H896 A44 44 0 0 1 940 448 V468 L976 510 L940 494 V496 A44 44 0 0 1 896 540 H424 A44 44 0 0 1 380 496 V448 A44 44 0 0 1 424 404 Z"
+            fill="#ffffff" stroke="#ff9ecf" stroke-width="6" stroke-linejoin="round" />
+          <text x="660" y="460" text-anchor="middle" class="bubble-line">Tap the magic button</text>
+          <text x="660" y="510" text-anchor="middle" class="bubble-line">and ask: <tspan class="bubble-ask">What’s the weather?</tspan></text>
+        </g>
+      </svg>
+
+      <section class="stage" id="stage" aria-live="polite">
+        <p class="asked" id="asked" hidden>
+          <span class="asked-label">You asked</span>
+          <span class="asked-text" id="asked-text"></span>
+        </p>
+      </section>
+
+      <!-- Superball's score, the buttons that steer the unicorn, and the
+           banners that count down and show the score. -->
+      <section class="game" id="game" hidden>
+        <div class="game-hud" role="status">
+          <span class="game-level">Level 1</span>
+          <span class="game-score" aria-label="Flowers dodged">
+            <svg viewBox="-22 -22 44 44" aria-hidden="true"><use href="#flower" fill="#ff7ab8" /></svg>
+            <span class="game-score-value">0</span>
+          </span>
+          <span class="game-hearts" aria-label="Hearts">
+            <svg class="game-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.6-4.7-9.7-9.4C.8 8.2 2.9 4.2 6.7 4.2c2.2 0 3.7 1.2 5.3 3.2 1.6-2 3.1-3.2 5.3-3.2 3.8 0 5.9 4 4.4 7.4C19.6 16.3 12 21 12 21z" /></svg>
+            <svg class="game-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.6-4.7-9.7-9.4C.8 8.2 2.9 4.2 6.7 4.2c2.2 0 3.7 1.2 5.3 3.2 1.6-2 3.1-3.2 5.3-3.2 3.8 0 5.9 4 4.4 7.4C19.6 16.3 12 21 12 21z" /></svg>
+            <svg class="game-heart" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.6-4.7-9.7-9.4C.8 8.2 2.9 4.2 6.7 4.2c2.2 0 3.7 1.2 5.3 3.2 1.6-2 3.1-3.2 5.3-3.2 3.8 0 5.9 4 4.4 7.4C19.6 16.3 12 21 12 21z" /></svg>
+          </span>
+        </div>
+        <button class="game-steer left" id="steer-left" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          <span class="game-steer-word">left</span>
+        </button>
+        <button class="game-steer right" id="steer-right" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+          <span class="game-steer-word">right</span>
+        </button>
+        <div class="game-banner" aria-live="polite" hidden>
+          <p class="game-banner-title"></p>
+          <p class="game-banner-text"></p>
+        </div>
+      </section>
+    </main>
+
+    <template id="card-template">
+      <article class="card">
+        <header class="card-header">
+          <h2 class="card-title"></h2>
+          <button class="card-close" type="button" aria-label="Dismiss">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+        <div class="card-body"></div>
+      </article>
+    </template>
+
+    <script src="icons.js"></script>
+    <script src="game.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

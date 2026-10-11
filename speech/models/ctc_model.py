@@ -3,7 +3,7 @@ from torch import nn
 from torch.nn import functional as F
 
 from . import model
-from .ctc_decoder import decode
+from .ctc_decoder import best_path, decode
 
 
 class CTC(model.Model):
@@ -81,10 +81,4 @@ class CTC(model.Model):
 
     @staticmethod
     def max_decode(pred, blank):
-        prev = pred[0]
-        seq = [prev] if prev != blank else []
-        for p in pred[1:]:
-            if p != blank and p != prev:
-                seq.append(p)
-            prev = p
-        return seq
+        return best_path(pred, blank)

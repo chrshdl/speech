@@ -6,6 +6,7 @@ from speech import loader, streaming
 from speech.models import CTC
 from speech.models.ctc_decoder import PRUNE, BeamSearch, decode
 from speech.models.word_lm import WordLM
+from speech.torch_model import TorchModel
 from speech.utils import wave
 
 
@@ -21,10 +22,10 @@ def test_transcriber():
     model.set_eval()
 
     audio, sample_rate = wave.array_from_wave("test0.wav")
-    assert streaming.model_sample_rate(preproc) == sample_rate
+    assert TorchModel(model, preproc).sample_rate == sample_rate
 
     # Feed 100 ms chunks, then flush.
-    transcriber = streaming.Transcriber(model, preproc, sample_rate)
+    transcriber = streaming.Transcriber(TorchModel(model, preproc))
     for start in range(0, len(audio), 1600):
         transcriber.push(audio[start : start + 1600])
     transcriber.push(audio[:0], final=True)
@@ -55,9 +56,9 @@ def test_transcriber_with_lm():
     lm = WordLM(["hello world", "hello hi", "world"])
     scorer = lm.scorer(preproc.char_to_int)
 
-    audio, sample_rate = wave.array_from_wave("test1.wav")
+    audio, _ = wave.array_from_wave("test1.wav")
     search = BeamSearch(model.blank, 8, scorer, PRUNE)
-    transcriber = streaming.Transcriber(model, preproc, sample_rate, search)
+    transcriber = streaming.Transcriber(TorchModel(model, preproc), search)
     for start in range(0, len(audio), 1600):
         transcriber.push(audio[start : start + 1600])
     transcriber.push(audio[:0], final=True)
@@ -79,8 +80,8 @@ def test_take_line():
     preproc = loader.Preprocessor("test.json", start_and_end=False)
     model = CTC(preproc.input_dim, preproc.vocab_size, shared.model_config)
     model.set_eval()
-    audio, sample_rate = wave.array_from_wave("test0.wav")
-    transcriber = streaming.Transcriber(model, preproc, sample_rate)
+    audio, _ = wave.array_from_wave("test0.wav")
+    transcriber = streaming.Transcriber(TorchModel(model, preproc))
 
     # No line before any text.
     assert transcriber.take_line(0.0) is None

@@ -1,8 +1,8 @@
 import argparse
 import json
 
-import editdistance
 import preprocess
+from rapidfuzz.distance import Levenshtein
 
 
 def remap(data):
@@ -24,6 +24,6 @@ if __name__ == "__main__":
         data = [json.loads(l) for l in fid]
 
     remap(data)
-    dist = sum(editdistance.eval(d["label"], d["prediction"]) for d in data)
+    dist = sum(Levenshtein.distance(d["label"], d["prediction"]) for d in data)
     total = sum(len(d["label"]) for d in data)
     print(f"CER {dist / total:.3f}")

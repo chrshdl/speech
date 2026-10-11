@@ -8,7 +8,8 @@ def check_install(*args):
     try:
         subprocess.check_output(args, stderr=subprocess.STDOUT)
         return True
-    except OSError:
+    except (OSError, subprocess.CalledProcessError):
+        # Not installed, or installed but broken.
         return False
 
 
