@@ -14,6 +14,12 @@ const ui = {
   cardTemplate: $("card-template"),
   asked: $("asked"),
   askedText: $("asked-text"),
+  scene: document.querySelector(".scene"),
+  unicorn: document.querySelector(".step-aside"),
+  gameLayer: $("game-layer"),
+  game: $("game"),
+  steerLeft: $("steer-left"),
+  steerRight: $("steer-right"),
 };
 
 // Audio is sent in chunks of 100 ms.
@@ -25,6 +31,9 @@ let card = null; // The card shown: its data and element.
 let audio = null; // The microphone stream of the browser, while capturing.
 let starting = false;
 let heard = null; // The final transcript of the last capture, by its id.
+let game = null; // The Superball being played, and the id of its card.
+let commands = null; // The id of the capture that hears the game's commands.
+let restarts = []; // When listening for commands restarted by itself.
 
 // The landing page.
 
@@ -95,9 +104,19 @@ function connectEvents() {
     dialogState = state;
     document.body.dataset.state = state;
     ui.mic.setAttribute("aria-label", state === "LISTENING" ? "Stop" : "Talk");
+    listenForCommands();
   });
   on("Recognition.CaptureFinished", ({ dialogRequestId, text }) => {
-    heard = { id: dialogRequestId, text };
+    if (dialogRequestId === commands) {
+      commands = null;
+    } else {
+      heard = { id: dialogRequestId, text };
+    }
+  });
+  on("Recognition.CommandRecognized", ({ command }) => {
+    if (game) {
+      game.superball.command(command);
+    }
   });
   on("Display.ShowCard", ({ card: data }) => showCard(data));
   on("Display.ClearCard", ({ cardId }) => {
@@ -167,10 +186,16 @@ function weekday(isoDate) {
 }
 
 function showCard(data) {
+  if (data.type === "GameCard") {
+    startGame(data);
+    return;
+  }
   const render = RENDERERS[data.type];
   if (!render) {
     return; // A card type this client does not know.
   }
+  // Another card, such as the answer to a question, ends the game.
+  endGame();
   // A card with the id of the card shown updates it in place.
   if (!card || card.data.id !== data.id || card.data.type !== data.type) {
     hideCard();
@@ -201,8 +226,12 @@ function hideCard() {
   if (!card) {
     return;
   }
-  const { element } = card;
+  const { data, element } = card;
   card = null;
+  if (data.type === "GameCard") {
+    endGame();
+    return;
+  }
   ui.asked.hidden = true;
   document.body.classList.remove("has-card");
   element.classList.add("leaving");
@@ -220,20 +249,91 @@ function dismissCard() {
   post("/v1/display/card-dismissed", { cardId: id });
 }
 
+// Superball, see game.js. The game's card starts it, and while it is played
+// a COMMANDS capture listens for "left" and "right".
+
+function startGame(data) {
+  if (game && game.id === data.id) {
+    return;
+  }
+  hideCard();
+  card = { data, element: null };
+  const superball = new Superball({
+    scene: ui.scene,
+    unicorn: ui.unicorn,
+    layer: ui.gameLayer,
+    overlay: ui.game,
+    onOver: () => {
+      if (commands) {
+        stopCapture();
+      }
+    },
+    // Once the score was shown, the game's card goes.
+    onEnd: () => dismissCard(),
+  });
+  game = { id: data.id, superball };
+  restarts = [];
+  superball.start(data.level);
+  listenForCommands();
+}
+
+function endGame() {
+  if (!game) {
+    return;
+  }
+  game.superball.destroy();
+  game = null;
+  if (commands) {
+    stopCapture();
+  }
+}
+
+// Listens for the game's commands while it needs them, also again when the
+// capture ended by itself, unless that keeps happening.
+async function listenForCommands() {
+  if (!game || !game.superball.listening || commands || dialogState !== "IDLE" || starting) {
+    return;
+  }
+  const now = Date.now();
+  restarts = restarts.filter((time) => now - time < 10000);
+  if (restarts.length >= 3) {
+    setStatus("I can't hear you. Is the microphone on?");
+    game.superball.quit();
+    return;
+  }
+  restarts.push(now);
+  await startCapture("COMMANDS");
+}
+
+function steer(command) {
+  if (game) {
+    game.superball.command(command);
+  }
+}
+
 // Capturing.
 
 async function toggleCapture() {
   if (document.body.dataset.connection !== "online" || starting) {
     return;
   }
+  if (game) {
+    // The button stops the game, which then shows the score.
+    const { superball } = game;
+    if (superball.listening) {
+      superball.quit();
+      return;
+    }
+    dismissCard();
+  }
   if (dialogState === "LISTENING") {
     stopCapture();
   } else if (dialogState === "IDLE") {
-    await startCapture();
+    await startCapture("TAP_TO_TALK");
   }
 }
 
-async function startCapture() {
+async function startCapture(initiator) {
   starting = true;
   try {
     // Open the microphone before starting, so no speech is lost while the
@@ -241,7 +341,7 @@ async function startCapture() {
     if (info.audioInput === "CLIENT") {
       audio = await openMicrophone(info.sampleRate);
     }
-    const response = await post("/v1/recognition/start-capture", { initiator: "TAP_TO_TALK" });
+    const response = await post("/v1/recognition/start-capture", { initiator });
     if (!response.ok) {
       stopAudio();
       if (response.status !== 409) {
@@ -249,9 +349,16 @@ async function startCapture() {
       }
       return;
     }
-    const { audioStream } = await response.json();
+    const { dialogRequestId, audioStream } = await response.json();
     if (audioStream && audio) {
       audio.stream(audioStream.url);
+    }
+    if (initiator === "COMMANDS") {
+      commands = dialogRequestId;
+      // The game can end while listening starts.
+      if (!game || !game.superball.listening) {
+        stopCapture();
+      }
     }
   } catch (error) {
     stopAudio();
@@ -356,12 +463,17 @@ async function start() {
   setTheme(document.documentElement.dataset.theme === "night" ? "night" : "day");
   ui.themeToggle.addEventListener("click", toggleTheme);
   ui.mic.addEventListener("click", toggleCapture);
+  ui.steerLeft.addEventListener("click", () => steer("LEFT"));
+  ui.steerRight.addEventListener("click", () => steer("RIGHT"));
   document.addEventListener("keydown", (event) => {
     if (event.code === "Space" && !event.repeat && event.target === document.body) {
       event.preventDefault();
       toggleCapture();
     } else if (event.code === "Escape") {
       dismissCard();
+    } else if (game && (event.code === "ArrowLeft" || event.code === "ArrowRight")) {
+      event.preventDefault();
+      steer(event.code === "ArrowLeft" ? "LEFT" : "RIGHT");
     }
   });
   try {

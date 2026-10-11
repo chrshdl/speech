@@ -14,14 +14,13 @@ import uvicorn
 import websockets
 
 from speech import export, loader, streaming
-from speech.backend import engine
+from speech.backend import engine, game
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind, NoticeCard
-from speech.intents import Intent, Match, TextIntentRecognizer
+from speech.intents import Intent, Match
 from speech.models import CTC
 from speech.utils import wave
-from speech.whisper_model import WhisperTranscriber
 
 CHUNK = 1600
 
@@ -581,68 +580,175 @@ def test_intents(model_path, score, fail, title):
     assert clock.closed
 
 
-class FakeWhisper:
-    """A WhisperModel that hears the same text in any audio."""
+class LoudTranscriber:
+    """
+    A transcriber that hears each loud stretch of the audio as the next of
+    the words, and the quiet since as the pause.
+    """
 
-    sample_rate = 16000
-
-    def __init__(self, text):
-        self.text = text
+    def __init__(self, words):
+        self.words = list(words)
+        self.word = ""
+        self.samples = 0
+        self.quiet = 0
+        # The audio of each transcript, when it was cleared.
         self.heard = []
 
-    def transcribe(self, audio, run_options=None):
-        self.heard.append(len(audio))
-        return self.text
+    def push(self, audio, final=False):
+        self.samples += len(audio)
+        if len(audio) and np.abs(audio).max() > 1000:
+            self.word = self.word or self.words.pop(0)
+            self.quiet = 0
+        else:
+            self.quiet += len(audio)
+
+    @property
+    def heard_speech(self):
+        return bool(self.word)
+
+    @property
+    def pause_seconds(self):
+        return self.quiet / 16000
+
+    def text(self, final=False):
+        return self.word
+
+    def clear(self):
+        self.heard.append(self.samples)
+        self.word, self.samples, self.quiet = "", 0, 0
 
 
-class CityClock(Clock):
-    async def card(self, card_id, slots):
-        text = f"It is noon in {slots['city']}."
-        return NoticeCard(id=card_id, title="Time", text=text)
+class WordCommands:
+    """Recognizes the commands whose first sample a transcript has."""
+
+    threshold = -1.0
+
+    def closest_heard(self, transcriber):
+        for intent in game.COMMANDS:
+            if intent.samples[0] in transcriber.text():
+                return Match(intent, 0.0, intent.samples[0])
+        return Match(game.COMMANDS[0], -5.0, "left")
 
 
-def test_whisper():
+def test_commands():
     """
-    With Whisper, the end of speech is found by loudness, and the
-    transcript is matched to the intents.
+    A COMMANDS capture reports each command as soon as it is recognized,
+    starts a new transcript after the pause that ends it, and shows no
+    cards.
     """
-    speech_audio, _ = wave.array_from_wave("test0.wav")
-    silence = np.zeros(32000, np.int16)
-    audio = np.concatenate([silence, speech_audio, silence])
-    whisper = FakeWhisper("What's the weather in Hamburg?")
-    intent = Intent(
-        "GetTime", ("what's the weather in {city}",), {"city": ("hamburg",)}
+    rng = np.random.default_rng(0)
+
+    def said(seconds):
+        return rng.normal(0, 3000, int(seconds * 16000)).astype(np.int16)
+
+    def pause(seconds):
+        return np.zeros(int(seconds * 16000), np.int16)
+
+    audio = np.concatenate(
+        [pause(0.5), said(0.4), pause(0.6), said(0.4), pause(0.6), said(0.4)]
+        + [pause(0.6)]
     )
+    transcriber = LoudTranscriber(["left", "hello", "go right"])
     recognizer = Recognizer(
-        lambda: WhisperTranscriber(whisper),
+        lambda: transcriber,
         16000,
         AudioInputKind.CLIENT,
-        Settings(card_timeout=0.2, audio_timeout=1.0),
-        intents=TextIntentRecognizer([intent]),
-        handlers={"GetTime": CityClock()},
+        Settings(audio_timeout=1.0),
+        commands=WordCommands(),
     )
 
     async def run():
         async with service(recognizer) as svc:
-            start = await svc.start("TAP_TO_TALK")
+            start = await svc.start("COMMANDS")
             await stream_audio(svc.address, start, audio)
-            events = await svc.events.until("CaptureFinished")
-            return events + await svc.events.until("ShowCard")
+            events = await svc.events.until("CommandRecognized")
+            events += await svc.events.until("CommandRecognized")
+            await svc.post(
+                "/v1/recognition/stop-capture",
+                {"dialogRequestId": start["dialogRequestId"]},
+            )
+            events += await svc.events.until("CaptureFinished")
+            return start, events, await svc.get("/v1/state")
 
-    events = asyncio.run(run())
-    # The audio so far is transcribed in the background as it arrives.
-    updates = [
-        e["payload"]["text"] for e in events if e["action"] == "TranscriptUpdated"
+    start, events, state = asyncio.run(run())
+    dialog = start["dialogRequestId"]
+    commands = [e["payload"] for e in events if e["action"] == "CommandRecognized"]
+    assert commands == [
+        {"dialogRequestId": dialog, "command": "LEFT", "score": 0.0, "text": "left"},
+        {
+            "dialogRequestId": dialog,
+            "command": "RIGHT",
+            "score": 0.0,
+            "text": "go right",
+        },
     ]
-    assert updates == ["What's the weather in Hamburg?"]
-    payloads = {e["action"]: e["payload"] for e in events}
-    assert payloads["CaptureFinished"]["reason"] == "END_OF_SPEECH"
-    assert payloads["CaptureFinished"]["text"] == "What's the weather in Hamburg?"
-    assert payloads["IntentRecognized"]["slots"] == {"city": "hamburg"}
-    assert events[-1]["payload"]["card"]["text"] == "It is noon in hamburg."
-    # It ended a second after the speech, before all the audio was sent.
-    assert len(silence) + len(speech_audio) <= whisper.heard[-1] < len(audio)
-    assert len(whisper.heard) > 1
+    assert "ShowCard" not in actions(events)
+    assert events[-1]["payload"] == {
+        "dialogRequestId": dialog,
+        "text": "",
+        "reason": "STOP_CAPTURE",
+    }
+    assert state == {"dialogState": "IDLE", "dialogRequestId": None, "card": None}
+    # Each command had a transcript of its own: 0.4 seconds of it, the
+    # pause after it that ended it, and before it, what was left of the
+    # pause after the one before.
+    assert len(transcriber.heard) == 3
+    assert all(n <= 1.3 * 16000 for n in transcriber.heard)
+
+
+class PlayIntents(FixedIntents):
+    def closest_heard(self, transcriber):
+        return Match(
+            game.INTENT, self.score, "play superball level {level}", {"level": "three"}
+        )
+
+
+def test_game_card_stays(model_path):
+    """A game's card stays until the client dismisses it."""
+    audio, _ = wave.array_from_wave("test0.wav")
+    recognizer = make_recognizer(
+        model_path,
+        intents=PlayIntents(-0.5),
+        handlers={game.INTENT.name: game.Game()},
+        answer_card_timeout=0.1,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            start = await svc.start("HOLD_TO_TALK")
+            socket = await stream_audio(svc.address, start, audio)
+            await socket.close()
+            events = await svc.events.until("CaptureFinished")
+            events += await svc.events.until("DialogStateChanged")
+            await asyncio.sleep(0.4)
+            shown = await svc.get("/v1/state")
+            commands = await svc.post(
+                "/v1/recognition/start-capture", {"initiator": "COMMANDS"}
+            )
+            card_id = shown["card"]["id"]
+            dismissed = await svc.post(
+                "/v1/display/card-dismissed", {"cardId": card_id}
+            )
+            return start, events, shown, commands, dismissed, await svc.get("/v1/state")
+
+    start, events, shown, commands, dismissed, state = asyncio.run(run())
+    after = actions(events)[actions(events).index("CaptureFinished") :]
+    assert after == [
+        "CaptureFinished",
+        "IntentRecognized",
+        "ShowCard",
+        "DialogStateChanged",
+    ]
+    assert shown["card"] == {
+        "type": "GameCard",
+        "id": start["dialogRequestId"],
+        "title": "Superball",
+        "level": 3,
+    }
+    # Without commands to recognize, there is no COMMANDS capture.
+    assert commands.status_code == 422
+    assert dismissed.status_code == 204
+    assert state["card"] is None
 
 
 def test_client_is_revalidated(model_path):

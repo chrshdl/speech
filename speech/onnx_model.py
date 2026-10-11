@@ -41,7 +41,7 @@ def open_session(path, threads=None):
 
 
 class OnnxModel:
-    def __init__(self, path=None, threads=None, session=None):
+    def __init__(self, path, threads=None):
         """
         Loads a model exported by speech.export.
 
@@ -49,10 +49,8 @@ class OnnxModel:
             path (str): The .onnx file.
             threads (int, optional): The threads to compute with, by
                 default one per CPU core.
-            session (optional): A session of the file, see open_session,
-                instead of the path.
         """
-        self.session = session or open_session(path, threads)
+        self.session = open_session(path, threads)
         meta = self.session.get_modelmeta().custom_metadata_map
         if int(meta.get("format_version", -1)) != FORMAT_VERSION:
             raise ValueError("The model is from another version of speech.export.")

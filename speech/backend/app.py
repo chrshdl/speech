@@ -14,7 +14,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from pydantic.json_schema import models_json_schema
 
-from speech.backend.engine import Busy
+from speech.backend.engine import Busy, Unsupported
 from speech.backend.messages import (
     EVENTS,
     CardDismissedRequest,
@@ -110,19 +110,27 @@ def create_app(recognizer, microphone=None):
     @app.post(
         "/v1/recognition/start-capture",
         status_code=status.HTTP_202_ACCEPTED,
-        responses={409: {"description": "Not IDLE"}},
+        responses={
+            409: {"description": "Not IDLE"},
+            422: {"description": "COMMANDS, and the service recognizes none"},
+        },
     )
     async def start_capture(request: StartCaptureRequest) -> StartCaptureResponse:
         """
         Starts capturing and recognizing speech. A HOLD_TO_TALK capture
         ends with stop-capture, a TAP_TO_TALK one also at the end of
         speech. With audio input from the client, stream the audio as
-        audioStream says.
+        audioStream says. A COMMANDS capture listens until stop-capture
+        and reports each command it hears in a CommandRecognized event.
         """
         try:
             capture = recognizer.start_capture(request.initiator)
         except Busy as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
+        except Unsupported as error:
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)
+            ) from None
         audio_stream = None
         if capture.stream_id is not None:
             audio_stream = recognizer.audio_stream_event(capture)

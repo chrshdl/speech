@@ -760,6 +760,299 @@ body.has-card .step-aside {
   color: var(--faint);
 }
 
+/* Superball. */
+
+/* While playing, the clock makes room for the falling flowers. */
+body.playing .greeting-text,
+body.playing .bubble {
+  opacity: 0;
+}
+
+.game {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.game[hidden] {
+  display: none;
+}
+
+/* The level, the flowers dodged and the hearts left, between the buttons
+   of the bar. */
+.game-hud {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  height: 56px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.2);
+  white-space: nowrap;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-level {
+  color: var(--purple);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.game-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-score svg {
+  width: 30px;
+  height: 30px;
+}
+
+.game-hearts {
+  display: flex;
+  gap: 4px;
+}
+
+.game-heart {
+  width: 28px;
+  height: 28px;
+  fill: var(--pink);
+  transition:
+    fill 300ms ease,
+    scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-heart.lost {
+  fill: #e6dcf5;
+  scale: 0.8;
+}
+
+/* Big round buttons at the sides, which show what to say and light up
+   when it is heard. */
+.game-steer {
+  position: absolute;
+  top: 50%;
+  translate: 0 -50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--purple);
+  font: inherit;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.game-steer.left {
+  left: 20px;
+}
+
+.game-steer.right {
+  right: 20px;
+}
+
+.game-steer svg {
+  width: 84px;
+  height: 84px;
+  padding: 20px;
+  border-radius: 50%;
+  background: #ffffff;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  box-shadow:
+    0 8px 20px rgba(139, 92, 246, 0.3),
+    inset 0 -4px 0 rgba(139, 92, 246, 0.12);
+}
+
+.game-steer-word {
+  padding: 2px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.game-steer:focus-visible {
+  outline: none;
+}
+
+.game-steer:focus-visible svg {
+  outline: 4px solid var(--pink);
+  outline-offset: 5px;
+}
+
+.game-steer.pressed svg {
+  animation: steer 380ms ease;
+}
+
+@keyframes steer {
+  30% {
+    background: var(--pink);
+    color: #ffffff;
+    scale: 1.15;
+  }
+}
+
+/* The countdown, a new level and the score. */
+.game-banner {
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  translate: -50% -50%;
+  width: max-content;
+  max-width: calc(100% - 240px);
+  margin: 0;
+  padding: 22px 40px 26px;
+  border: 4px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(139, 92, 246, 0.25);
+  text-align: center;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.game-banner[hidden] {
+  display: none;
+}
+
+.game-banner-title {
+  margin: 0;
+  color: var(--pink);
+  font-size: 60px;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.game-banner-text {
+  margin: 8px 0 0;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 500;
+}
+
+.game-banner-text[hidden] {
+  display: none;
+}
+
+/* The countdown's numbers pop up without a card around them. */
+.game-banner.count {
+  padding: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  animation: count 700ms ease forwards;
+}
+
+.game-banner.count .game-banner-title {
+  color: #ffffff;
+  font-size: 160px;
+  -webkit-text-stroke: 10px var(--pink);
+  paint-order: stroke fill;
+}
+
+@keyframes count {
+  from {
+    opacity: 0;
+    scale: 2;
+  }
+  30% {
+    opacity: 1;
+    scale: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+    scale: 0.8;
+  }
+}
+
+.falling-flower {
+  stroke: rgba(75, 44, 110, 0.18);
+  stroke-width: 1.5;
+}
+
+/* A flower that hits the unicorn bursts. */
+.falling-flower.pop {
+  animation: pop 450ms ease-out forwards;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.falling-flower.fade {
+  animation: fade 500ms ease forwards;
+}
+
+@keyframes fade {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes pop {
+  to {
+    opacity: 0;
+    scale: 2;
+  }
+}
+
+.game-point {
+  fill: var(--pink);
+  stroke: #ffffff;
+  stroke-width: 8px;
+  paint-order: stroke fill;
+  font-size: 44px;
+  font-weight: 600;
+  animation: rise 900ms ease-out forwards;
+}
+
+@keyframes rise {
+  to {
+    opacity: 0;
+    translate: 0 -70px;
+  }
+}
+
+/* The unicorn blinks while it cannot be hit again. */
+.step-aside.hurt {
+  animation: hurt 280ms steps(2, jump-none) 5;
+}
+
+@keyframes hurt {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+/* Narrow screens: the score goes below the bar. */
+@media (max-width: 640px) {
+  .game-hud {
+    top: 112px;
+  }
+
+  .game-banner {
+    max-width: calc(100% - 32px);
+  }
+}
+
 /* Short screens, such as the Raspberry Pi touchscreen at 800 by 480: the
    card sits beside the microphone button rather than below it. */
 @media (max-height: 600px) {
@@ -837,6 +1130,48 @@ body.has-card .step-aside {
   .weather-day-name,
   .weather-day-range {
     font-size: 16px;
+  }
+
+  .game-hud {
+    top: 26px;
+    height: 48px;
+    gap: 14px;
+    padding: 0 18px;
+  }
+
+  .game-level {
+    font-size: 19px;
+  }
+
+  .game-score {
+    font-size: 22px;
+  }
+
+  .game-steer svg {
+    width: 68px;
+    height: 68px;
+    padding: 16px;
+  }
+
+  .game-steer-word {
+    font-size: 18px;
+  }
+
+  .game-banner {
+    max-width: calc(100% - 200px);
+    padding: 14px 28px 18px;
+  }
+
+  .game-banner-title {
+    font-size: 44px;
+  }
+
+  .game-banner-text {
+    font-size: 21px;
+  }
+
+  .game-banner.count .game-banner-title {
+    font-size: 120px;
   }
 }
 

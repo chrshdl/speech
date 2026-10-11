@@ -9,12 +9,15 @@ import os
 
 import uvicorn
 
-from speech import onnx_model, streaming, whisper_model
-from speech.backend import weather
+from speech import streaming
+from speech.backend import game, weather
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
-from speech.intents import IntentRecognizer, TextIntentRecognizer
+from speech.intents import THRESHOLD, IntentRecognizer
+
+# What the service answers.
+INTENTS = [weather.INTENT, game.INTENT]
 
 
 def main(args):
@@ -27,7 +30,7 @@ def main(args):
         card_timeout=args.card_timeout,
         answer_card_timeout=args.answer_card_timeout,
     )
-    new_transcriber, sample_rate, intents = load(args)
+    new_transcriber, sample_rate, intents, commands = load(args)
     recognizer = Recognizer(
         new_transcriber,
         sample_rate,
@@ -36,7 +39,11 @@ def main(args):
         model_name=os.path.basename(os.path.normpath(args.model)),
         language_model=os.path.basename(args.lm) if args.lm else None,
         intents=intents,
-        handlers={weather.INTENT.name: weather.Weather(args.weather_location)},
+        handlers={
+            weather.INTENT.name: weather.Weather(args.weather_location),
+            game.INTENT.name: game.Game(),
+        },
+        commands=commands,
     )
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
@@ -53,37 +60,29 @@ def main(args):
 
 def load(args):
     """
-    Loads the model and returns a function that creates the transcriber
-    of a capture, the sample rate, and the intent recognizer for the
-    model: Whisper exported by export_whisper.py transcribes each capture
-    when it ends, and its transcript is matched to the intents, while a
-    streaming CTC model transcribes as the audio arrives, and its output is
-    matched to them.
+    Loads the streaming CTC model and returns a function that creates the
+    transcriber of a capture, the sample rate, and the recognizers of the
+    intents and of the game's commands, which match the model's output.
     """
-    session = None
-    if args.model.endswith(".onnx"):
-        session = onnx_model.open_session(args.model, args.threads)
-    if session is not None and whisper_model.is_whisper(session):
-        if args.lm:
-            raise SystemExit("--lm only applies to streaming CTC models.")
-        whisper = whisper_model.WhisperModel(session)
-        return (
-            lambda: whisper_model.WhisperTranscriber(whisper, args.partial_seconds),
-            whisper.sample_rate,
-            TextIntentRecognizer([weather.INTENT]),
-        )
-    if session is not None:
-        model = onnx_model.OnnxModel(session=session)
-    else:
-        model = streaming.load(args.model, "best", "cpu", args.threads)
+    model = streaming.load(args.model, "best", "cpu", args.threads)
     new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
-    intents = IntentRecognizer(
-        [weather.INTENT], model.char_to_int, model.blank, model.frame_seconds
-    )
+
+    def recognizer(intents, spaced=False):
+        return IntentRecognizer(
+            intents,
+            model.char_to_int,
+            model.blank,
+            model.frame_seconds,
+            args.intent_threshold,
+            spaced,
+        )
+
     return (
         lambda: streaming.Transcriber(model, new_search()),
         model.sample_rate,
-        intents,
+        recognizer(INTENTS),
+        # Each command after the first is transcribed within the stream.
+        recognizer(game.COMMANDS, spaced=True),
     )
 
 
@@ -115,7 +114,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "model",
         help="A streaming CTC model exported to .onnx by export.py, or its PyTorch "
-        "directory, or Whisper exported to .onnx by export_whisper.py.",
+        "directory.",
     )
     parser.add_argument("--lm", help="A word LM .npz file from speech.models.word_lm.")
     parser.add_argument(
@@ -140,12 +139,13 @@ if __name__ == "__main__":
         "--threads", type=int, help="The CPU threads to run the model with."
     )
     parser.add_argument(
-        "--partial-seconds",
+        "--intent-threshold",
         type=float,
-        default=1.0,
-        help="With Whisper, transcribe the audio so far after each this many "
-        "seconds of it, for a transcript while speaking. 0 for none, which saves "
-        "work on a slow computer.",
+        default=THRESHOLD,
+        help="The lowest score of a matching intent or game command, see "
+        "speech/intents.py. Higher matches fewer other utterances "
+        "and fewer of the intent's. The default suits the 3,750 hour model, "
+        "-2 the 100 hour one, whose output is less confident.",
     )
     parser.add_argument(
         "--weather-location",

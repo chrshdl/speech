@@ -6,7 +6,6 @@ import pytest
 from speech.intents import (
     Intent,
     IntentRecognizer,
-    TextIntentRecognizer,
     alignment_score,
 )
 
@@ -93,41 +92,22 @@ def test_slots():
     assert (match.sample, match.slots) == ("a b", {})
 
 
+def test_spaced():
+    """
+    A transcript that starts within a stream starts with a space, which
+    only a spaced recognizer allows.
+    """
+    intents = [Intent("AB", ("ab",)), Intent("BA", ("ba",))]
+    path = [BLANK, 2, BLANK, 0, BLANK, 1, BLANK]
+    plain = IntentRecognizer(intents, CHAR_TO_INT, BLANK, frame_seconds=0.04)
+    spaced = IntentRecognizer(
+        intents, CHAR_TO_INT, BLANK, frame_seconds=0.04, spaced=True
+    )
+    assert plain.closest(one_hot_probs(path)).score < plain.threshold
+    match = spaced.recognize(one_hot_probs(path))
+    assert (match.intent.name, match.sample, match.score) == ("AB", "ab", 0)
+
+
 def test_slot_needs_values():
     with pytest.raises(ValueError, match="slot"):
         IntentRecognizer([Intent("Go", ("a {x}",))], CHAR_TO_INT, BLANK, 0.04)
-
-
-@pytest.mark.parametrize(
-    ("text", "intent", "slots"),
-    [
-        ("What's the weather in Hamburg?", "Weather", {"city": "hamburg"}),
-        ("Whether in New York.", "Weather", {"city": "new york"}),
-        ("How is the weather?", "Weather", {}),
-        (
-            "Hello Unicorn, what's the weather in Hamburg?",
-            "Weather",
-            {"city": "hamburg"},
-        ),
-        ("Hey, how is the weather?", "Weather", {}),
-        ("Turn on the radio.", None, None),
-        ("What's the news?", None, None),
-        ("", None, None),
-    ],
-)
-def test_text_intents(text, intent, slots):
-    weather = Intent(
-        "Weather",
-        (
-            "what's the weather",
-            "how is the weather",
-            "what's the weather in {city}",
-            "weather in {city}",
-        ),
-        {"city": ("hamburg",)},
-    )
-    match = TextIntentRecognizer([weather]).recognize(text)
-    if intent is None:
-        assert match is None
-    else:
-        assert (match.intent.name, match.slots) == (intent, slots)

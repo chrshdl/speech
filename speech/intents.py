@@ -19,13 +19,14 @@ import dataclasses
 import re
 
 import numpy as np
-from rapidfuzz import fuzz
 
 # The lowest mean log probability per character, relative to the best
-# path, of a match. On synthesized questions for the weather in 16
-# voices, -2 matched 99% of them, 4% of other short commands, and none of
-# 300 LibriSpeech dev sentences.
-THRESHOLD = -2.0
+# path, of a match. It depends on how confident the model is. On
+# synthesized questions for the weather in 16 voices, -1.5 matched 99% of
+# them with the 3,750 hour model, 4% of other short commands, and none of
+# 300 LibriSpeech dev sentences. The 100 hour model scores lower, and
+# matched as many at -2.
+THRESHOLD = -1.5
 # Utterances longer than this are not commands, so are not matched, which
 # also bounds the time to match them.
 MAX_SECONDS = 8.0
@@ -76,7 +77,15 @@ class _Sample:
 
 
 class IntentRecognizer:
-    def __init__(self, intents, char_to_int, blank, frame_seconds, threshold=THRESHOLD):
+    def __init__(
+        self,
+        intents,
+        char_to_int,
+        blank,
+        frame_seconds,
+        threshold=THRESHOLD,
+        spaced=False,
+    ):
         """
         Arguments:
             intents (list): The Intents to recognize.
@@ -84,6 +93,10 @@ class IntentRecognizer:
             blank (int): The model's blank label.
             frame_seconds (float): The time each output frame covers.
             threshold (float): The lowest score of a match.
+            spaced (bool): Also match the samples with a space before or
+                after them, which an utterance has when its transcript
+                starts within a stream, such as each command after the
+                first in a stream of commands.
         """
         self.intents = intents
         self.blank = blank
@@ -104,22 +117,25 @@ class IntentRecognizer:
             }
             for text in intent.samples:
                 slots = SLOT.findall(text)
-                if not slots:
-                    self.samples.append(_Sample(intent, text, labels(text)))
-                    continue
-                if len(slots) > 1 or not values.get(slots[0]):
+                if slots and (len(slots) > 1 or not values.get(slots[0])):
                     raise ValueError(f"{text!r} needs one slot with values")
-                before, after = SLOT.split(text)[::2]
-                self.samples.append(
-                    _Sample(
-                        intent,
-                        text,
-                        slot=slots[0],
-                        before=labels(before),
-                        after=labels(after),
-                        values=values[slots[0]],
-                    )
-                )
+                spellings = [text]
+                if spaced:
+                    spellings += [" " + text, text + " ", " " + text + " "]
+                for spelling in spellings:
+                    if not slots:
+                        sample = _Sample(intent, text, labels(spelling))
+                    else:
+                        before, after = SLOT.split(spelling)[::2]
+                        sample = _Sample(
+                            intent,
+                            text,
+                            slot=slots[0],
+                            before=labels(before),
+                            after=labels(after),
+                            values=values[slots[0]],
+                        )
+                    self.samples.append(sample)
 
     def recognize(self, probs):
         """
@@ -267,84 +283,3 @@ def viterbi(relative, sequences, blank, path=False):
 def alignment_score(relative, labels, blank):
     """The log probability of the best alignment of a label sequence."""
     return float(viterbi(relative, [labels], blank)[0])
-
-
-# The lowest score of a match by TextIntentRecognizer: a similarity of a
-# transcript to a sample of 0.8, minus 1.
-TEXT_THRESHOLD = -0.2
-
-
-# Words before a sample that TextIntentRecognizer passes over, such as
-# "hello unicorn" in "hello unicorn, what's the weather?", at most this
-# many, each lowering the similarity by the penalty.
-LEADING_WORDS = 3
-LEADING_PENALTY = 0.02
-
-
-class TextIntentRecognizer:
-    def __init__(self, intents, threshold=TEXT_THRESHOLD):
-        """
-        Recognizes intents in transcripts, such as from Whisper, rather
-        than in a model's output. A transcript matches a sample when they
-        are similar, which allows for small mistakes such as "whether"
-        for "weather", also after a few other words, such as a greeting.
-        The words where a sample has a slot are its value, whatever they
-        are.
-        """
-        self.intents = intents
-        self.threshold = threshold
-
-    def recognize(self, text):
-        """Returns the Match of the intent the text asks for, or None."""
-        match = self.closest(text)
-        return match if match is not None and match.score >= self.threshold else None
-
-    def closest_heard(self, transcriber):
-        """The closest Match to the final transcript of a transcriber."""
-        return self.closest(transcriber.text(final=True))
-
-    def closest(self, text):
-        """
-        Returns the Match of the intent closest to the text, or None for
-        an empty text. Its score is the similarity minus 1, so at most 0.
-        """
-        words = normalize(text).split()
-        if not words:
-            return None
-        best = None
-        for skip in range(min(LEADING_WORDS, len(words) - 1) + 1):
-            for intent in self.intents:
-                for sample in intent.samples:
-                    similarity, slots = _similarity(words[skip:], sample)
-                    similarity -= skip * LEADING_PENALTY
-                    if best is None or similarity > best[0]:
-                        best = (similarity, intent, sample, slots)
-        similarity, intent, sample, slots = best
-        return Match(intent, similarity - 1, sample, slots)
-
-
-def normalize(text):
-    """Lowercase words without punctuation, keeping apostrophes."""
-    text = text.lower().replace("’", "'")
-    return " ".join(re.sub(r"[^\w' ]", " ", text).split())
-
-
-def _similarity(words, sample):
-    """
-    The similarity of the words to the sample, and the values of its
-    slots: for a sample with a slot, at the best split of the words into
-    the parts before, of and after the slot.
-    """
-    text = " ".join(words)
-    slot = SLOT.search(sample)
-    if slot is None:
-        return fuzz.ratio(text, sample) / 100, {}
-    before, after = sample[: slot.start()].strip(), sample[slot.end() :].strip()
-    best = (0.0, {})
-    for i in range(len(words)):
-        for j in range(i + 1, len(words) + 1):
-            fixed = " ".join(words[:i]) + " | " + " ".join(words[j:])
-            similarity = fuzz.ratio(fixed, before + " | " + after) / 100
-            if similarity > best[0]:
-                best = (similarity, {slot.group(1): " ".join(words[i:j])})
-    return best

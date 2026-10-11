@@ -19,6 +19,7 @@ from speech.backend.messages import (
     CaptureEndReason,
     CaptureFinished,
     ClearCard,
+    CommandRecognized,
     DialogState,
     DialogStateChanged,
     EndOfSpeechDetected,
@@ -37,6 +38,10 @@ log = logging.getLogger(__name__)
 
 # Ends a capture's audio, see Recognizer.stop_capture.
 _STOP = object()
+# A COMMANDS capture drops the audio of a transcript without speech once it
+# is this long and this quiet, keeping the stream going.
+_DROP_SILENCE = 2.0
+_DROP_PAUSE = 1.0
 # How a capture can end and still ask for an intent.
 _ANSWERABLE = {
     CaptureEndReason.END_OF_SPEECH,
@@ -53,8 +58,17 @@ class Settings:
     end_of_speech: float = 1.0
     # A TAP_TO_TALK capture that hears no speech for this long ends.
     no_speech_timeout: float = 8.0
-    # The longest capture of any kind.
+    # The longest TAP_TO_TALK or HOLD_TO_TALK capture.
     max_capture: float = 60.0
+    # A pause after speech this long ends a command, in a COMMANDS
+    # capture. Pauses within short commands, such as between "go" and
+    # "left", were up to 0.44 seconds, at a median of 0.1.
+    command_pause: float = 0.3
+    # A command still going on after this long is matched as it is, and
+    # the next starts.
+    max_command: float = 3.0
+    # The longest COMMANDS capture, such as a game.
+    max_commands_capture: float = 1800.0
     # Ends a capture when no audio arrives for this long.
     audio_timeout: float = 5.0
     # A final card is cleared after this long.
@@ -68,6 +82,10 @@ class Settings:
 
 class Busy(Exception):
     """The request does not fit the dialog state."""
+
+
+class Unsupported(Exception):
+    """The service cannot do what was requested."""
 
 
 class EventBus:
@@ -153,15 +171,15 @@ class Recognizer:
         language_model=None,
         intents=None,
         handlers=None,
+        commands=None,
     ):
         """
         Arguments:
             new_transcriber: Creates the transcriber of a capture, such as
-                a streaming.Transcriber or a
-                speech.whisper_model.WhisperTranscriber. Its push(audio,
-                final) adds audio, its text(final) is the transcript so
-                far, heard_speech says whether speech was heard and
-                pause_seconds how long ago.
+                a streaming.Transcriber. Its push(audio, final) adds audio,
+                its text(final) is the transcript so far, heard_speech says
+                whether speech was heard, pause_seconds how long ago, and
+                clear() starts a new transcript within the stream.
             sample_rate (int): The sample rate of the audio.
             audio_input (AudioInputKind): Where the audio comes from. From
                 the MICROPHONE, deliver passes it in.
@@ -170,12 +188,13 @@ class Recognizer:
             language_model (str): The language model's name for Info, if
                 the transcribers use one.
             intents (optional): Recognizes what a capture asks for, such as
-                a speech.intents.IntentRecognizer from a streaming model's
-                output or a TextIntentRecognizer from the transcript.
+                a speech.intents.IntentRecognizer.
             handlers (dict, optional): Answers each intent by name, with an
                 object whose async card(card_id, slots) returns the card to
                 show for the intent's slots and whose async close()
                 releases it.
+            commands (optional): Recognizes the commands of a COMMANDS
+                capture, as intents does the intents.
         """
         self.new_transcriber = new_transcriber
         self._sample_rate = sample_rate
@@ -185,6 +204,7 @@ class Recognizer:
         self.language_model = language_model
         self.intents = intents
         self.handlers = handlers or {}
+        self.commands = commands
         self.bus = EventBus()
         self.state = DialogState.IDLE
         self.capture = None
@@ -206,9 +226,14 @@ class Recognizer:
         return events
 
     def start_capture(self, initiator):
-        """Starts a capture and returns it. Raises Busy unless IDLE."""
+        """
+        Starts a capture and returns it. Raises Busy unless IDLE, and
+        Unsupported for a COMMANDS capture without commands to recognize.
+        """
         if self.state != DialogState.IDLE:
             raise Busy(f"Cannot start a capture while {self.state}.")
+        if initiator == Initiator.COMMANDS and self.commands is None:
+            raise Unsupported("This service recognizes no commands.")
         capture = Capture(
             id=uuid.uuid4().hex,
             initiator=initiator,
@@ -220,7 +245,10 @@ class Recognizer:
         self.capture = capture
         log.info("Capture %s started with %s", capture.id, initiator)
         self._set_state(DialogState.LISTENING)
-        self._show(self._transcript_card(capture, "", final=False))
+        # Commands steer what is shown, such as a game, rather than show
+        # their transcript.
+        if initiator != Initiator.COMMANDS:
+            self._show(self._transcript_card(capture, "", final=False))
         if capture.stream_id is not None:
             self.bus.publish(self.audio_stream_event(capture))
         capture.task = asyncio.create_task(self._run(capture))
@@ -318,8 +346,11 @@ class Recognizer:
     async def _run(self, capture):
         """Transcribes the capture's audio until the capture ends."""
         reason = CaptureEndReason.ERROR
+        listen = self._listen
+        if capture.initiator == Initiator.COMMANDS:
+            listen = self._listen_commands
         try:
-            reason = await self._listen(capture)
+            reason = await listen(capture)
         except Exception:
             log.exception("Capture %s failed", capture.id)
         finally:
@@ -331,6 +362,24 @@ class Recognizer:
             self.capture = None
             self._set_state(DialogState.IDLE)
 
+    async def _next_chunks(self, capture):
+        """
+        Waits for the capture's audio and returns all the chunks queued,
+        and whether the capture was stopped after them. Raises TimeoutError
+        when none arrives in time.
+        """
+        chunks = [
+            await asyncio.wait_for(capture.audio.get(), self.settings.audio_timeout)
+        ]
+        # Take everything queued, so a slow step never builds a delay.
+        while not capture.audio.empty():
+            chunks.append(capture.audio.get_nowait())
+        # Compared by identity, since the chunks are arrays.
+        stops = [i for i, chunk in enumerate(chunks) if chunk is _STOP]
+        if stops:
+            chunks = chunks[: stops[0]]
+        return chunks, bool(stops)
+
     async def _listen(self, capture):
         settings = self.settings
         transcriber = capture.transcriber
@@ -338,20 +387,9 @@ class Recognizer:
         text = ""
         while True:
             try:
-                chunks = [
-                    await asyncio.wait_for(capture.audio.get(), settings.audio_timeout)
-                ]
+                chunks, stop = await self._next_chunks(capture)
             except TimeoutError:
                 return CaptureEndReason.AUDIO_TIMEOUT
-            # Take everything queued, so a slow step never builds a delay.
-            while not capture.audio.empty():
-                chunks.append(capture.audio.get_nowait())
-            # Compared by identity, since the chunks are arrays.
-            stops = [i for i, chunk in enumerate(chunks) if chunk is _STOP]
-            stop = bool(stops)
-            if stop:
-                chunks = chunks[: stops[0]]
-
             if chunks:
                 audio = np.concatenate(chunks)
                 await asyncio.to_thread(transcriber.push, audio)
@@ -375,13 +413,92 @@ class Recognizer:
             if heard >= settings.max_capture:
                 return CaptureEndReason.MAX_DURATION
 
+    async def _listen_commands(self, capture):
+        """
+        Recognizes commands in a COMMANDS capture's audio until it is
+        stopped. A pause ends each command, which is matched as it is said,
+        so it is reported as soon as it is recognized, once.
+        """
+        settings = self.settings
+        transcriber = capture.transcriber
+        heard = 0.0
+        # The audio of the transcript, which starts anew with each command.
+        said = 0.0
+        recognized = False
+        while True:
+            try:
+                chunks, stop = await self._next_chunks(capture)
+            except TimeoutError:
+                return CaptureEndReason.AUDIO_TIMEOUT
+            # A chunk at a time, so commands said one after another stay
+            # apart also when their audio queued up.
+            for chunk in chunks:
+                await asyncio.to_thread(transcriber.push, chunk)
+                heard += len(chunk) / self.sample_rate
+                said += len(chunk) / self.sample_rate
+                if transcriber.heard_speech:
+                    ended = (
+                        transcriber.pause_seconds >= settings.command_pause
+                        or said >= settings.max_command
+                    )
+                    if not recognized:
+                        if ended:
+                            # Flush the frames held back for the
+                            # lookahead, so all the command is matched.
+                            await asyncio.to_thread(
+                                transcriber.push, np.zeros(0, np.int16), True
+                            )
+                        recognized = await self._command(capture, final=ended)
+                    if ended:
+                        transcriber.clear()
+                        said, recognized = 0.0, False
+                elif said >= _DROP_SILENCE and transcriber.pause_seconds >= _DROP_PAUSE:
+                    transcriber.clear()
+                    said = 0.0
+            if stop:
+                return CaptureEndReason.STOP_CAPTURE
+            if heard >= settings.max_commands_capture:
+                return CaptureEndReason.MAX_DURATION
+
+    async def _command(self, capture, final):
+        """
+        Publishes the command the capture's transcript says, if it says
+        one, and returns whether it does.
+        """
+        transcriber = capture.transcriber
+        match = await asyncio.to_thread(self.commands.closest_heard, transcriber)
+        if match is None or match.score < self.commands.threshold:
+            return False
+        text = transcriber.text(final).strip()
+        log.info("Command %s %r, score %.2f", match.intent.name, text, match.score)
+        self.bus.publish(
+            CommandRecognized(
+                dialog_request_id=capture.id,
+                command=match.intent.name,
+                score=match.score,
+                text=text,
+            )
+        )
+        return True
+
     async def _finish(self, capture, reason):
         """Decodes the final transcript and returns to IDLE."""
+        if capture.initiator == Initiator.COMMANDS:
+            # Its commands were all reported, and the card it steered stays.
+            if capture.stream_id is not None:
+                self.bus.publish(StopAudioStream(stream_id=capture.stream_id))
+            log.info("Capture %s finished with %s", capture.id, reason)
+            self.bus.publish(
+                CaptureFinished(dialog_request_id=capture.id, text="", reason=reason)
+            )
+            self.capture = None
+            self._set_state(DialogState.IDLE)
+            return
         self._set_state(DialogState.THINKING)
         if capture.stream_id is not None:
             self.bus.publish(StopAudioStream(stream_id=capture.stream_id))
         # Flush the frames held back for the lookahead, and let a language
-        # model score the end of the utterance, or transcribe with Whisper.
+        # model score the end of the utterance.
         await asyncio.to_thread(
             capture.transcriber.push, np.zeros(0, dtype=np.int16), True
         )
@@ -392,7 +509,9 @@ class Recognizer:
         )
         card, timeout = await self._answer(capture, text, reason)
         self._show(card)
-        self._start_card_timer(timeout)
+        # A card such as a game's stays until the client dismisses it.
+        if not getattr(card, "UNTIL_DISMISSED", False):
+            self._start_card_timer(timeout)
         self.capture = None
         self._set_state(DialogState.IDLE)
 

@@ -24,6 +24,10 @@ class Initiator(enum.StrEnum):
     HOLD_TO_TALK = "HOLD_TO_TALK"
     # The user tapped a button. The capture ends at the end of speech.
     TAP_TO_TALK = "TAP_TO_TALK"
+    # Listens for short commands, such as "left" and "right" to steer a
+    # game, each reported by a CommandRecognized event as soon as it is
+    # said, until stop-capture.
+    COMMANDS = "COMMANDS"
 
 
 class DialogState(enum.StrEnum):
@@ -124,7 +128,25 @@ class WeatherCard(CamelModel):
     wind_speed_unit: str = "km/h"
 
 
-Card = Annotated[TranscriptCard | NoticeCard | WeatherCard, Field(discriminator="type")]
+class GameCard(CamelModel):
+    """
+    Play a game, Superball, at the level: the client lets flowers fall
+    toward the unicorn, which the user steers with the commands of a
+    COMMANDS capture. The card stays until the client dismisses it when
+    the game ends, or another card replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["GameCard"] = "GameCard"
+    id: str
+    title: str
+    # From 1, the easiest, to 5, where the flowers fall fastest.
+    level: int
+
+
+Card = Annotated[
+    TranscriptCard | NoticeCard | WeatherCard | GameCard, Field(discriminator="type")
+]
 
 
 # The payloads of the events the service publishes. The class name is the
@@ -166,6 +188,22 @@ class IntentRecognized(Payload):
     score: float
     # The values of the sample's slots, such as {"city": "hamburg"}.
     slots: dict[str, str]
+
+
+class CommandRecognized(Payload):
+    """
+    A COMMANDS capture heard a command, published as soon as it is
+    recognized, without waiting for the end of the capture.
+    """
+
+    TOPIC = "Recognition"
+    dialog_request_id: str
+    # Such as "LEFT" or "RIGHT".
+    command: str
+    # How well the utterance matched the command, as IntentRecognized's.
+    score: float
+    # The transcript of the utterance so far.
+    text: str
 
 
 class EndOfSpeechDetected(Payload):
@@ -232,6 +270,7 @@ EVENTS = (
     EndOfSpeechDetected,
     CaptureFinished,
     IntentRecognized,
+    CommandRecognized,
     ShowCard,
     ClearCard,
     StartAudioStream,

@@ -6,7 +6,6 @@ API key.
 
 import dataclasses
 import datetime
-import re
 
 import httpx
 from rapidfuzz import fuzz, process
@@ -25,11 +24,6 @@ PLACES = places.load()
 # The lowest similarity, out of 100, of a misspelled name to one of
 # PLACES, such as "breman" to "bremen".
 CLOSE = 80
-# Words said after a place, such as "what's the weather in hamburg today".
-TRAILING = re.compile(r"\s+(today|tomorrow|now|right now|please)$")
-# Primes Whisper for the words of the intent, so it writes "weather" rather
-# than "whether".
-PROMPT = "What's the weather in Hamburg?"
 
 INTENT = Intent(
     "GetWeather",
@@ -207,11 +201,10 @@ class Weather:
     async def place(self, name):
         """
         The Place of a name, said or written: one of PLACES, or one close
-        to it, as for a misspelled transcript, or else one Open-Meteo
-        finds. None if there is none.
+        to it, such as a misspelled --weather-location, or else one
+        Open-Meteo finds. None if there is none.
         """
         said = places.spoken(name) or ""
-        said = TRAILING.sub("", said)
         if said in PLACES:
             return PLACES[said]
         close = process.extractOne(

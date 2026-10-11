@@ -108,7 +108,6 @@ def test_unknown_place():
     ("said", "name"),
     [
         ("hamburg", "Hamburg"),
-        ("Hamburg today", "Hamburg"),
         ("breman", "Bremen"),
         ("München", "Munich"),
         ("cologne", "Köln"),
