@@ -256,8 +256,8 @@ otherwise.
 
 ### Language model
 
-CTC models can decode with a word bigram language model in the prefix beam
-search, both when streaming and in `eval.py`:
+CTC models can decode with a word n-gram language model, such as a 4-gram,
+in the prefix beam search, both when streaming and in `eval.py`:
 
 ```
 uv run stream.py <path_to_model> --mic --lm lm.npz
@@ -265,17 +265,22 @@ uv run eval.py <path_to_model> <path_to_data_json> --lm lm.npz
 ```
 
 A word is scored once it is complete, as `lm_weight * log P(word | previous
-word) + word_bonus`, plus `unk_penalty` for a word outside the LM's vocabulary.
+words) + word_bonus`, plus `unk_penalty` for a word outside the LM's vocabulary.
 While streaming, the transcript can change as more audio arrives, and a pause
 scores the end of the sentence before starting a new line.
 
 #### Training the language model
 
-`speech.models.word_lm` trains a bigram LM with interpolated absolute
-discounting from dataset json files or from text files with one sentence per
-line, which may be gzipped. It counts in passes over the text and keeps only
-the counts in memory, so the corpus can be far larger than memory. `--dev`
-reports the perplexity on a dev set, the lower the better.
+`speech.models.word_lm` trains an n-gram LM, a 4-gram by default or any
+`--order` from 2, with interpolated modified Kneser-Ney smoothing, from
+dataset json files or from text files with one sentence per line, which may
+be gzipped. It writes the text as word ids to a temporary file and counts
+each order in parts of it, each a pass over the file, so the corpus can be
+far larger than memory: `--memory` sets the gigabytes to count in, 2 by
+default, and less counts in more parts. The n-grams are stored as 64-bit
+hashes. `--dev` reports the perplexity on a dev set, the lower the better.
+LMs saved by the earlier bigram trainer, with interpolated absolute
+discounting, load unchanged.
 
 The transcripts of the training data make a small LM in about a second:
 
@@ -293,17 +298,39 @@ curl -L -o examples/librispeech/data/librispeech-lm-norm.txt.gz \
 uv run python -m speech.models.word_lm \
     examples/librispeech/data/librispeech-lm-norm.txt.gz \
     examples/librispeech/models/lm-librispeech.npz \
-    --max-vocab 200000 --min-count 3 --dev examples/librispeech/data/dev.json
+    --order 2 --max-vocab 200000 --min-count 3 --dev examples/librispeech/data/dev.json
 ```
 
-On an 8 GB MacBook Air this took 30 minutes and 2 GB of memory, plus 3.5 GB of
-temporary disk space. It keeps the 200,000 most frequent words and the 9.9
-million word pairs seen at least three times, in a 171 MB file.
+With the earlier bigram trainer this took 30 minutes and 2 GB of memory on an
+8 GB MacBook Air, plus 3.5 GB of temporary disk space. It keeps the 200,000
+most frequent words and the 9.9 million word pairs seen at least three times,
+in a 171 MB file.
 
 | LM | Text | Vocabulary | Dev perplexity |
 |---|---|---|---|
 | Training transcripts | 106 thousand words | 11,917 | 584 |
 | LibriSpeech LM corpus | 844 million words | 200,003 | 270 |
+
+`--min-count` drops the n-grams of each order, from bigrams up, seen fewer
+times, such as `--min-count 2,2,2` for a 4-gram LM. Below the highest order
+it counts the different words seen before an n-gram, as Kneser-Ney does.
+Trained on the first 5 million sentences of the LibriSpeech LM corpus, 106
+million words, with the 200,000 most frequent words and `--min-count 2` at
+each order, on the 8 GB MacBook Air:
+
+| Order | N-grams | File | Time | Memory | dev-clean perplexity | dev-clean WER |
+|---|---|---|---|---|---|---|
+| 2 | 3.7 million | 70 MB | 2 minutes | 2.4 GB | 388 | 0.363 |
+| 3 | 11.6 million | 221 MB | 4 minutes | 2.4 GB | 286 | 0.354 |
+| 4 | 17.7 million | 363 MB | 6 minutes | 3.2 GB | 269 | 0.353 |
+
+The WER is of the 3,750 hour model after its second epoch, `eval.py` with a
+beam of 32 and the default weight and bonus, which were also the best of a
+grid of 16 for the bigram and the 4-gram LM, on a quarter of dev-clean.
+Without an LM its WER is 0.427, and with the bigram LM of the whole corpus
+0.343. The 4-gram LM lowers the perplexity by a third, but the WER by only
+3%, as the acoustic model limits the result, see below. More text helped
+more than higher orders here.
 
 Best practices for the corpus:
 
