@@ -1,5 +1,6 @@
 import asyncio
 import string
+import types
 
 import pytest
 
@@ -30,5 +31,9 @@ def test_card():
 
 def test_intents_use_the_model_labels():
     # A model's labels: letters, the space and the apostrophe.
-    IntentRecognizer([game.INTENT], CHAR_TO_INT, len(CHAR_TO_INT), 0.04)
-    IntentRecognizer(game.COMMANDS, CHAR_TO_INT, len(CHAR_TO_INT), 0.04, spaced=True)
+    model = types.SimpleNamespace(
+        char_to_int=CHAR_TO_INT, blank=len(CHAR_TO_INT), frame_seconds=0.04
+    )
+    IntentRecognizer([game.INTENT], model.char_to_int, model.blank, 0.04)
+    commands = game.commands(model)
+    assert commands.threshold == game.THRESHOLD

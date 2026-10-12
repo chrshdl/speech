@@ -85,6 +85,7 @@ class IntentRecognizer:
         frame_seconds,
         threshold=THRESHOLD,
         spaced=False,
+        others=(),
     ):
         """
         Arguments:
@@ -97,6 +98,9 @@ class IntentRecognizer:
                 after them, which an utterance has when its transcript
                 starts within a stream, such as each command after the
                 first in a stream of commands.
+            others (tuple): Phrases that compete with the intents' samples
+                but match none, such as everyday words, so an utterance
+                that sounds more like one of them asks for nothing.
         """
         self.intents = intents
         self.blank = blank
@@ -110,7 +114,8 @@ class IntentRecognizer:
             return np.array([char_to_int[c] for c in text], dtype=np.int64)
 
         self.samples = []
-        for intent in intents:
+        self.other = Intent("", tuple(others))
+        for intent in [*intents, self.other]:
             values = {
                 name: [(value, labels(value)) for value in slot_values]
                 for name, slot_values in intent.slots.items()
@@ -155,8 +160,8 @@ class IntentRecognizer:
     def closest(self, probs):
         """
         Returns the Match of the intent closest to the utterance, also if
-        it is not close enough, or None for an utterance that is empty or
-        too long to be a command.
+        it is not close enough, or None for an utterance that is empty, too
+        long to be a command, or closest to one of the other phrases.
         """
         if len(probs) == 0 or len(probs) > self.max_frames:
             return None
@@ -178,6 +183,8 @@ class IntentRecognizer:
         scores /= [len(labels) for labels in sequences]
         best = int(np.argmax(scores))
         sample, _, value = candidates[best]
+        if sample.intent is self.other:
+            return None
         slots = {sample.slot: value} if value is not None else {}
         return Match(sample.intent, float(scores[best]), sample.text, slots)
 

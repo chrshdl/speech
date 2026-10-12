@@ -108,6 +108,22 @@ def test_spaced():
     assert (match.intent.name, match.sample, match.score) == ("AB", "ab", 0)
 
 
+def test_others():
+    """
+    An utterance closer to one of the other phrases than to any intent's
+    sample asks for nothing.
+    """
+    intents = [Intent("AB", ("ab",))]
+    probs = one_hot_probs([BLANK, 1, BLANK, 0, BLANK])
+    plain = IntentRecognizer(intents, CHAR_TO_INT, BLANK, frame_seconds=0.04)
+    assert plain.closest(probs).intent.name == "AB"
+    others = IntentRecognizer(
+        intents, CHAR_TO_INT, BLANK, frame_seconds=0.04, others=("ba",)
+    )
+    assert others.closest(probs) is None
+    assert others.recognize(one_hot_probs([0, BLANK, 1])).intent.name == "AB"
+
+
 def test_slot_needs_values():
     with pytest.raises(ValueError, match="slot"):
         IntentRecognizer([Intent("Go", ("a {x}",))], CHAR_TO_INT, BLANK, 0.04)

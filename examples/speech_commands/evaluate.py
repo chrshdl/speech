@@ -14,7 +14,7 @@ import numpy as np
 from speech import streaming
 from speech.backend import game
 from speech.features import log_specgram
-from speech.intents import THRESHOLD, Intent, IntentRecognizer
+from speech.intents import Intent, IntentRecognizer
 from speech.utils import wave
 
 # Silence around each clip, in seconds. Within a stream, as in the game, a
@@ -22,7 +22,12 @@ from speech.utils import wave
 PADDING = 0.5
 
 
-def evaluate(model, data, threshold):
+def evaluate(model, data):
+    """
+    Returns the counts of the clips closest to their word and transcribed
+    as it, and for each clip its word and the command closest to it, with
+    its score, or None, so the commands can be counted for any threshold.
+    """
     words = sorted({d["text"] for d in data})
     vocabulary = IntentRecognizer(
         [Intent(word, (word,)) for word in words],
@@ -30,15 +35,9 @@ def evaluate(model, data, threshold):
         model.blank,
         model.frame_seconds,
     )
-    commands = IntentRecognizer(
-        game.COMMANDS,
-        model.char_to_int,
-        model.blank,
-        model.frame_seconds,
-        threshold,
-        spaced=True,
-    )
+    commands = game.commands(model)
     counts = collections.Counter()
+    heard = []
     for datum in data:
         audio, sample_rate = wave.array_from_wave(datum["audio"])
         padding = np.zeros(int(PADDING * sample_rate), audio.dtype)
@@ -56,8 +55,24 @@ def evaluate(model, data, threshold):
         ]
         counts["transcript"] += model.decode(labels).strip() == word
 
-        match = commands.recognize(probs)
-        command = match.intent.name.lower() if match is not None else None
+        match = commands.closest(probs)
+        if match is None:
+            heard.append((word, None, None))
+        else:
+            heard.append((word, match.intent.name.lower(), match.score))
+    return counts, heard
+
+
+def command_counts(heard, threshold):
+    """
+    The "left" and "right" clips, how many of them the commands recognize
+    at the threshold, and in the wrong direction, and the other words taken
+    for a command.
+    """
+    counts = collections.Counter()
+    for word, command, score in heard:
+        if command is not None and score < threshold:
+            command = None
         if word in ("left", "right"):
             counts["commands"] += 1
             if command == word:
@@ -65,6 +80,7 @@ def evaluate(model, data, threshold):
             elif command is not None:
                 counts["wrong"] += 1
         else:
+            counts["others"] += 1
             counts["others taken"] += command is not None
     return counts
 
@@ -81,20 +97,21 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--threshold",
-        type=float,
-        default=THRESHOLD,
-        help="The lowest score of a command, as backend.py's --intent-threshold.",
+        default=str(game.THRESHOLD),
+        help="The lowest score of a command, as backend.py's --command-threshold, "
+        "or several, comma separated, to compare them from one pass over the clips.",
     )
     args = parser.parse_args()
     with open(args.data) as fid:
         data = [json.loads(line) for line in fid]
-    counts = evaluate(streaming.load(args.model), data, args.threshold)
-    n, words = len(data), counts["commands"]
-    others = n - words
+    counts, heard = evaluate(streaming.load(args.model), data)
+    n = len(data)
     print(f"Closest of the words: {counts['closest'] / n:.3f} of {n} clips")
     print(f"Transcript is the word: {counts['transcript'] / n:.3f}")
-    print(
-        f"Commands recognized: {counts['recognized']} of {words}, "
-        f"in the wrong direction: {counts['wrong']}"
-    )
-    print(f"Other words taken for a command: {counts['others taken']} of {others}")
+    for threshold in (float(t) for t in args.threshold.split(",")):
+        c = command_counts(heard, threshold)
+        print(
+            f"Threshold {threshold}: commands recognized {c['recognized']} of "
+            f"{c['commands']}, in the wrong direction {c['wrong']}, other words "
+            f"taken for a command {c['others taken']} of {c['others']}"
+        )
