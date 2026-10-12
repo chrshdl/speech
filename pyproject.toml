@@ -39,6 +39,7 @@ dev = [
 ]
 train = [
     "onnx>=1.23.2",
+    "pyarrow>=26.0.0",
     "tensorboard>=2.21.0",
     "torch>=2.14.1",
     "torchaudio>=2.11.0",

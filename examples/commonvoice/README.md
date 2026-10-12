@@ -174,6 +174,17 @@ after epoch 1, to train on them from epoch 2:
 
 From then on, an epoch has 53,171 batches rather than 50,520.
 
+### More datasets
+
+`examples/myst` prepares children's speech and `examples/voxpopuli`
+speeches with many accents, about 200 and 530 hours once filtered. A run
+can add them after any epoch the same way: prepare them, add their
+`train.json` to the config's `train_set`, such as
+`"examples/myst/data/train.json"`, and resume. Their dev sets stay out of
+`dev_set`, so the dev CER stays comparable. Measure what they add on the
+speech the model is for, such as a child's recordings with
+`examples/speech_commands/evaluate.py --data`, not only on the dev set.
+
 To check early that the model learns, watch `avg_loss` in the progress bar,
 a running average of the loss per batch. In random order it does not depend
 on where the epoch is, and it should fall steadily within the first half
