@@ -216,7 +216,8 @@ model's characters, and the values of its slots, and pass a handler whose
 
 A `COMMANDS` capture recognizes short commands as they are said, to steer
 a game, without a tap for each. Superball's are `LEFT`, from "left", "go
-left", "move left" or "turn left", and `RIGHT` likewise.
+left", "move left" or "turn left", and `RIGHT` likewise, also as "wight",
+since young children often say an r as a w.
 
 A pause of 0.3 seconds after speech ends each command, and the next
 starts a new transcript, while the model keeps streaming. Pauses within a
@@ -235,6 +236,32 @@ direction, and none of the other words, "yay", "oh no" and "wow". It
 reported them 0.21 seconds after the end of the word at the median, and
 0.43 at most. Most of those it missed were said by the few unusual
 voices.
+
+With only two commands, almost any short utterance is close to one of
+them. The kid's "yes" sounded to the model nearly like "lest", and
+moved the unicorn left. So everyday words, such as "yes", "no", "yay" and
+"hello", compete with the commands, and an utterance closer to one of
+them moves nothing, see `speech/backend/game.py`. Words that sound like a
+command as a child says it, such as "what" for "wight", are left out.
+`--command-threshold` sets the lowest score of a command, -1.25 by
+default, apart from the intents'.
+
+With the 3,750 hour model after two epochs, the competing words halved the
+other words taken for a command among Speech Commands' 10,197 test clips
+of other words, from 31 to 14, also among those not in the list, and
+recognized 86% rather than 88% of its 808 clips of "left" and "right".
+Recorded by `examples/speech_commands/record.py`, the kid said each
+command 12 times and 12 other words: streamed as the game does, it
+recognized 23 of the 24 commands, none in the wrong direction, and moved on
+none of the other words, where it had taken "yes" for "left" before.
+
+After a third epoch, which also trained on Speech Commands' training
+clips, the model took more other words for a command at the earlier
+threshold of -1.5, 34 of the test clips rather than 14. -1.25 takes 21, and
+recognizes 678 rather than 701 of the 808 commands. Of the kid's
+clips, decoded whole by `examples/speech_commands/evaluate.py`, both
+recognized 20 of the 24 commands, as the model after two epochs recognized
+21 at -1.5, and took none of the other words for one.
 
 ## Audio streaming
 
@@ -328,7 +355,10 @@ Pi's, made for a young child: a sunny meadow with a rainbow, drifting
 clouds, a clock, and a unicorn whose speech bubble suggests what to ask,
 with a round rainbow microphone button in the upper right corner.
 Tapping it, or pressing Space, starts a `TAP_TO_TALK` capture, and
-tapping it while listening stops it. The button shows the dialog state,
+tapping it while listening stops it. A rising chime sounds when listening
+starts and a falling one when it ends, also for captures with the
+service's microphone, but not while a game listens for its commands. The
+model ignores the chime that the microphone picks up. The button shows the dialog state,
 glowing with the loudness while listening and its rainbow ring spinning
 while listening and thinking, and the page shows the cards the service
 sends, for which the unicorn steps aside. The button in the upper left

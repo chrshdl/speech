@@ -67,22 +67,18 @@ def load(args):
     model = streaming.load(args.model, "best", "cpu", args.threads)
     new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
 
-    def recognizer(intents, spaced=False):
-        return IntentRecognizer(
-            intents,
-            model.char_to_int,
-            model.blank,
-            model.frame_seconds,
-            args.intent_threshold,
-            spaced,
-        )
-
+    intents = IntentRecognizer(
+        INTENTS,
+        model.char_to_int,
+        model.blank,
+        model.frame_seconds,
+        args.intent_threshold,
+    )
     return (
         lambda: streaming.Transcriber(model, new_search()),
         model.sample_rate,
-        recognizer(INTENTS),
-        # Each command after the first is transcribed within the stream.
-        recognizer(game.COMMANDS, spaced=True),
+        intents,
+        game.commands(model, args.command_threshold),
     )
 
 
@@ -142,10 +138,18 @@ if __name__ == "__main__":
         "--intent-threshold",
         type=float,
         default=THRESHOLD,
-        help="The lowest score of a matching intent or game command, see "
-        "speech/intents.py. Higher matches fewer other utterances "
-        "and fewer of the intent's. The default suits the 3,750 hour model, "
-        "-2 the 100 hour one, whose output is less confident.",
+        help="The lowest score of a matching intent, see speech/intents.py. "
+        "Higher matches fewer other utterances and fewer of the intent's. The "
+        "default suits the 3,750 hour model, -2 the 100 hour one, whose output "
+        "is less confident.",
+    )
+    parser.add_argument(
+        "--command-threshold",
+        type=float,
+        default=game.THRESHOLD,
+        help='The lowest score of a game command, such as "left", see '
+        "speech/backend/game.py. Higher moves less on other words, and on fewer "
+        "commands.",
     )
     parser.add_argument(
         "--weather-location",

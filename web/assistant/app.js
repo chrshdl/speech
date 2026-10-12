@@ -33,6 +33,9 @@ let starting = false;
 let heard = null; // The final transcript of the last capture, by its id.
 let game = null; // The Superball being played, and the id of its card.
 let commands = null; // The id of the capture that hears the game's commands.
+let lastCommands = null; // The last such id, also once that capture finished.
+let startingCommands = false; // Whether such a capture is being started.
+let listening = null; // The id of the capture listening, if any.
 let restarts = []; // When listening for commands restarted by itself.
 
 // The landing page.
@@ -40,7 +43,7 @@ let restarts = []; // When listening for commands restarted by itself.
 function updateClock() {
   const now = new Date();
   const hour = now.getHours();
-  ui.greeting.textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  // ui.greeting.textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   ui.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   ui.date.textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
@@ -100,10 +103,27 @@ function connectEvents() {
   const on = (name, handle) =>
     events.addEventListener(name, (event) => handle(JSON.parse(event.data).payload));
 
-  on("Recognition.DialogStateChanged", ({ state }) => {
+  on("Recognition.DialogStateChanged", ({ state, dialogRequestId }) => {
+    const wasListening = dialogState === "LISTENING";
     dialogState = state;
     document.body.dataset.state = state;
     ui.mic.setAttribute("aria-label", state === "LISTENING" ? "Stop" : "Talk");
+    // Chime when listening for a question starts and ends, but not for the
+    // game's commands, which it listens for all along.
+    if (state === "LISTENING" && !wasListening) {
+      listening = dialogRequestId;
+      // A capture this client started chimed before it opened the
+      // microphone; one started elsewhere chimes now.
+      if (!isCommands(listening) && !chimed) {
+        playTone(START_TONE);
+      }
+      chimed = false;
+    } else if (wasListening && state !== "LISTENING") {
+      if (!isCommands(listening)) {
+        playTone(END_TONE);
+      }
+      listening = null;
+    }
     listenForCommands();
   });
   on("Recognition.CaptureFinished", ({ dialogRequestId, text }) => {
@@ -249,6 +269,70 @@ function dismissCard() {
   post("/v1/display/card-dismissed", { cardId: id });
 }
 
+// Tones: a rising chime when listening starts and a falling one when it
+// ends, made with Web Audio, so they need no files. Browsers only play
+// sound after the user taps, so the first tap of the button unlocks them.
+
+// The start tone is the cue to speak, so it is the louder one.
+const START_TONE = { notes: [659.25, 987.77], volume: 0.32 }; // E5, then B5.
+const END_TONE = { notes: [987.77, 659.25], volume: 0.2 };
+const NOTE_STEP = 0.09;
+const NOTE_LENGTH = 0.25;
+let tones = null;
+// Whether this client chimed for the capture it starts, before listening.
+let chimed = false;
+
+function unlockTones() {
+  try {
+    tones ??= new AudioContext();
+    if (tones.state === "suspended") {
+      tones.resume();
+    }
+  } catch {
+    // Without Web Audio there are no tones, which only accompany the page.
+  }
+}
+
+// Plays the tone, and resolves once it has played, at once without one.
+async function playTone({ notes, volume }) {
+  if (!tones) {
+    return;
+  }
+  if (tones.state !== "running") {
+    // Firefox resumes the context only after the tap that unlocked it.
+    try {
+      await tones.resume();
+    } catch {
+      return;
+    }
+    if (tones.state !== "running") {
+      return;
+    }
+  }
+  const start = tones.currentTime + 0.01;
+  notes.forEach((frequency, i) => {
+    const time = start + i * NOTE_STEP;
+    const oscillator = tones.createOscillator();
+    oscillator.frequency.value = frequency;
+    const gain = tones.createGain();
+    gain.gain.setValueAtTime(0, time);
+    gain.gain.linearRampToValueAtTime(volume, time + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, time + NOTE_LENGTH - 0.01);
+    oscillator.connect(gain).connect(tones.destination);
+    oscillator.start(time);
+    oscillator.stop(time + NOTE_LENGTH);
+  });
+  await new Promise((resolve) => setTimeout(resolve, toneSeconds({ notes }) * 1000));
+}
+
+function toneSeconds({ notes }) {
+  return (notes.length - 1) * NOTE_STEP + NOTE_LENGTH;
+}
+
+function isCommands(id) {
+  return startingCommands || (id !== null && id === lastCommands);
+}
+
 // Superball, see game.js. The game's card starts it, and while it is played
 // a COMMANDS capture listens for "left" and "right".
 
@@ -314,6 +398,7 @@ function steer(command) {
 // Capturing.
 
 async function toggleCapture() {
+  unlockTones();
   if (document.body.dataset.connection !== "online" || starting) {
     return;
   }
@@ -335,7 +420,14 @@ async function toggleCapture() {
 
 async function startCapture(initiator) {
   starting = true;
+  startingCommands = initiator === "COMMANDS";
   try {
+    // Chime before listening, so the microphone opening never dulls the
+    // tone, which is the cue to speak, and the microphone misses it.
+    if (!startingCommands) {
+      chimed = true;
+      await playTone(START_TONE);
+    }
     // Open the microphone before starting, so no speech is lost while the
     // capture starts. Its audio waits until the stream is open.
     if (info.audioInput === "CLIENT") {
@@ -343,6 +435,7 @@ async function startCapture(initiator) {
     }
     const response = await post("/v1/recognition/start-capture", { initiator });
     if (!response.ok) {
+      chimed = false;
       stopAudio();
       if (response.status !== 409) {
         setStatus("Could not start listening.");
@@ -355,16 +448,19 @@ async function startCapture(initiator) {
     }
     if (initiator === "COMMANDS") {
       commands = dialogRequestId;
+      lastCommands = dialogRequestId;
       // The game can end while listening starts.
       if (!game || !game.superball.listening) {
         stopCapture();
       }
     }
   } catch (error) {
+    chimed = false;
     stopAudio();
     setStatus(error.name === "NotAllowedError" ? "Allow the microphone to talk." : "Could not start listening.");
   } finally {
     starting = false;
+    startingCommands = false;
   }
 }
 
@@ -379,7 +475,10 @@ function stopCapture() {
 
 function stopAudio() {
   if (audio) {
-    audio.close();
+    // Closing the microphone can switch the sound output, such as Bluetooth
+    // headphones out of their headset mode, which cuts off what plays, so
+    // it closes once the end tone has played.
+    audio.close(toneSeconds(END_TONE) + 0.15);
     audio = null;
   }
 }
@@ -443,14 +542,19 @@ async function openMicrophone(rate) {
         socket.close();
       }
     },
-    close() {
+    // Stops streaming at once, and closes the microphone after the delay
+    // in seconds.
+    close(delay = 0) {
       cancelAnimationFrame(frame);
       ui.mic.style.removeProperty("--level");
-      media.getTracks().forEach((track) => track.stop());
-      context.close();
+      recorder.port.onmessage = null;
       if (socket && socket.readyState <= WebSocket.OPEN) {
         socket.close();
       }
+      setTimeout(() => {
+        media.getTracks().forEach((track) => track.stop());
+        context.close();
+      }, delay * 1000);
     },
   };
 }
