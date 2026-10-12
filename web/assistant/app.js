@@ -43,7 +43,7 @@ let restarts = []; // When listening for commands restarted by itself.
 function updateClock() {
   const now = new Date();
   const hour = now.getHours();
-  ui.greeting.textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  // ui.greeting.textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
   ui.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   ui.date.textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
