@@ -355,7 +355,10 @@ Pi's, made for a young child: a sunny meadow with a rainbow, drifting
 clouds, a clock, and a unicorn whose speech bubble suggests what to ask,
 with a round rainbow microphone button in the upper right corner.
 Tapping it, or pressing Space, starts a `TAP_TO_TALK` capture, and
-tapping it while listening stops it. The button shows the dialog state,
+tapping it while listening stops it. A rising chime sounds when listening
+starts and a falling one when it ends, also for captures with the
+service's microphone, but not while a game listens for its commands. The
+model ignores the chime that the microphone picks up. The button shows the dialog state,
 glowing with the loudness while listening and its rainbow ring spinning
 while listening and thinking, and the page shows the cards the service
 sends, for which the unicorn steps aside. The button in the upper left
