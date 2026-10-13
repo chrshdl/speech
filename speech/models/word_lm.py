@@ -46,11 +46,12 @@ import tempfile
 import numpy as np
 
 # Defaults for decoding with the LM, tuned with tune_lm.py for the bigram LM
-# trained on the LibriSpeech LM corpus and the LibriSpeech streaming CTC
-# model, on its dev set. See docs/lm-tuning.json.
-LM_WEIGHT = 0.5
-WORD_BONUS = 4.0
-UNK_PENALTY = 0.0
+# trained on the LibriSpeech LM corpus and the 3,750 hour streaming CTC
+# model after its third epoch, on LibriSpeech dev-clean, see the README and
+# docs/lm-tuning.json. The 100 hour model was best at 0.5, 4 and 0.
+LM_WEIGHT = 0.3
+WORD_BONUS = 2.5
+UNK_PENALTY = -2.0
 
 # The number of word ids to process at once while reading the corpus.
 CHUNK = 20_000_000

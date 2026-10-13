@@ -49,8 +49,8 @@ uv run eval.py examples/librispeech/models/ctc_streaming_100h \
 ## Results
 
 Greedy decoding without the LM, and the prefix beam search with a beam of 32
-and the bigram LM trained on the LibriSpeech LM corpus, with the default
-weight 0.5 and word bonus 4.
+and the bigram LM trained on the LibriSpeech LM corpus, with weight 0.5 and
+word bonus 4, the defaults then, which were best for these models.
 
 | Config | Training data | Dev CER | Dev WER | Test CER | Test WER |
 |---|---|---|---|---|---|
