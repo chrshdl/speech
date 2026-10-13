@@ -3,328 +3,680 @@
  "results": [
   {
    "lm": false,
-   "cer": 0.30972360972360974,
-   "wer": 0.7797885683569252
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 1.0,
-   "unk_penalty": -3.0,
-   "cer": 0.3226773226773227,
-   "wer": 0.7226303529833363
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 1.0,
-   "unk_penalty": 0.0,
-   "cer": 0.307992007992008,
-   "wer": 0.7154631786418204
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 2.0,
-   "unk_penalty": 0.0,
-   "cer": 0.3014985014985015,
-   "wer": 0.7299767066833901
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 2.0,
-   "unk_penalty": -3.0,
-   "cer": 0.30316350316350316,
-   "wer": 0.7056083139222361
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 3.0,
-   "unk_penalty": 0.0,
-   "cer": 0.305994005994006,
-   "wer": 0.8021859881741623
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 3.0,
-   "unk_penalty": -3.0,
-   "cer": 0.297002997002997,
-   "wer": 0.7634832467299767
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 4.0,
-   "unk_penalty": 0.0,
-   "cer": 0.3160506160506161,
-   "wer": 0.9206235441677119
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 4.0,
-   "unk_penalty": -3.0,
-   "cer": 0.3074259074259074,
-   "wer": 0.8946425371797169
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 5.0,
-   "unk_penalty": 0.0,
-   "cer": 0.3373959373959374,
-   "wer": 1.1162874036910948
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.2,
-   "word_bonus": 5.0,
-   "unk_penalty": -3.0,
-   "cer": 0.328005328005328,
-   "wer": 1.0990861852714566
+   "cer": 0.12700174849435208,
+   "wer": 0.3850735294117647
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 1.0,
    "unk_penalty": 0.0,
-   "cer": 0.31814851814851813,
-   "wer": 0.7272890163053216
+   "cer": 0.12535039271738224,
+   "wer": 0.34808823529411764
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 1.0,
    "unk_penalty": -3.0,
-   "cer": 0.3536796536796537,
-   "wer": 0.7943020963984949
+   "cer": 0.13413449529571758,
+   "wer": 0.36551470588235296
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 2.0,
    "unk_penalty": 0.0,
-   "cer": 0.3045621045621046,
-   "wer": 0.6993370363734098
+   "cer": 0.11984124781438206,
+   "wer": 0.3260294117647059
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 2.0,
    "unk_penalty": -3.0,
-   "cer": 0.32317682317682317,
-   "wer": 0.7156423580003584
+   "cer": 0.11930004718159362,
+   "wer": 0.3085294117647059
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 3.0,
    "unk_penalty": 0.0,
-   "cer": 0.3001998001998002,
-   "wer": 0.7272890163053216
+   "cer": 0.11775970691904193,
+   "wer": 0.32544117647058823
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 3.0,
    "unk_penalty": -3.0,
-   "cer": 0.30366300366300364,
-   "wer": 0.6982619602221825
+   "cer": 0.11302767061696872,
+   "wer": 0.2958088235294118
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 4.0,
    "unk_penalty": 0.0,
-   "cer": 0.3076257076257076,
-   "wer": 0.8168786955742698
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.3,
-   "word_bonus": 4.0,
-   "unk_penalty": -3.0,
-   "cer": 0.29856809856809857,
-   "wer": 0.7636624260885146
+   "cer": 0.11981349393577752,
+   "wer": 0.3513970588235294
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 5.0,
    "unk_penalty": 0.0,
-   "cer": 0.31928071928071927,
-   "wer": 0.9539509048557606
+   "cer": 0.12737642585551331,
+   "wer": 0.41970588235294115
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11284727040603924,
+   "wer": 0.31882352941176473
   },
   {
    "lm": true,
    "lm_weight": 0.3,
    "word_bonus": 5.0,
    "unk_penalty": -3.0,
-   "cer": 0.31175491175491177,
-   "wer": 0.9265364629994625
+   "cer": 0.11952207821042991,
+   "wer": 0.37823529411764706
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.14284921317754157,
+   "wer": 0.5409558823529412
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.3,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.1356193278010602,
+   "wer": 0.49933823529411764
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.13550831228664206,
+   "wer": 0.3897794117647059
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.1558519053037662,
+   "wer": 0.4520588235294118
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.1232410979434376,
+   "wer": 0.3371323529411765
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.13235824706502733,
+   "wer": 0.35705882352941176
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.11893924675973468,
+   "wer": 0.3221323529411765
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11942493963531403,
+   "wer": 0.3094852941176471
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.117815214676251,
+   "wer": 0.3256617647058824
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12178401931669951,
+   "wer": 0.36580882352941174
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11480391884765896,
+   "wer": 0.30264705882352944
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11476228802975216,
+   "wer": 0.3289705882352941
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.13151175376758903,
+   "wer": 0.4476470588235294
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.4,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.12412922205878271,
+   "wer": 0.40786764705882356
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 1.0,
    "unk_penalty": 0.0,
-   "cer": 0.35407925407925406,
-   "wer": 0.8150869019888909
+   "cer": 0.1499958369182093,
+   "wer": 0.45375
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 1.0,
    "unk_penalty": -3.0,
-   "cer": 0.4015984015984016,
-   "wer": 0.9251030281311593
+   "cer": 0.1808720268657545,
+   "wer": 0.5588970588235294
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 2.0,
    "unk_penalty": 0.0,
-   "cer": 0.3296370296370296,
-   "wer": 0.7466403870274144
+   "cer": 0.13147012294968222,
+   "wer": 0.37051470588235297
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 2.0,
    "unk_penalty": -3.0,
-   "cer": 0.38031968031968033,
-   "wer": 0.8609568177745923
+   "cer": 0.15325691765424218,
+   "wer": 0.4398529411764706
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 3.0,
    "unk_penalty": 0.0,
-   "cer": 0.3103230103230103,
-   "wer": 0.6944991936928866
+   "cer": 0.12203380422414033,
+   "wer": 0.33073529411764707
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 3.0,
    "unk_penalty": -3.0,
-   "cer": 0.3506826506826507,
-   "wer": 0.7778175954130084
+   "cer": 0.13260803197246815,
+   "wer": 0.35860294117647057
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 4.0,
    "unk_penalty": 0.0,
-   "cer": 0.3016983016983017,
-   "wer": 0.6916323239562803
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.5,
-   "word_bonus": 4.0,
-   "unk_penalty": -3.0,
-   "cer": 0.3241758241758242,
-   "wer": 0.7133130263393657
+   "cer": 0.11878660042740972,
+   "wer": 0.3234558823529412
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 5.0,
    "unk_penalty": 0.0,
-   "cer": 0.3015984015984016,
-   "wer": 0.747357104461566
+   "cer": 0.11845355388415531,
+   "wer": 0.33375
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11985512475368433,
+   "wer": 0.31286764705882353
   },
   {
    "lm": true,
    "lm_weight": 0.5,
    "word_bonus": 5.0,
    "unk_penalty": -3.0,
-   "cer": 0.30606060606060603,
-   "wer": 0.7074001075076152
+   "cer": 0.11565041214509728,
+   "wer": 0.30911764705882355
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12408759124087591,
+   "wer": 0.3810294117647059
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.5,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11753767589020565,
+   "wer": 0.3461764705882353
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.16971496766673141,
+   "wer": 0.5371323529411764
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.20246454442008271,
+   "wer": 0.6522058823529412
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.14587438594543586,
+   "wer": 0.43051470588235297
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.1777497155227443,
+   "wer": 0.54375
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12949959756876023,
+   "wer": 0.36066176470588235
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.15195248535982903,
+   "wer": 0.43573529411764705
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.13217784685409786,
+   "wer": 0.3584558823529412
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12131220338042241,
+   "wer": 0.3289705882352941
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.11867558491299159,
+   "wer": 0.32419117647058826
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.12065998723321585,
+   "wer": 0.31772058823529414
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.1204657100829841,
+   "wer": 0.3486764705882353
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.6,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.11734339873997392,
+   "wer": 0.3202205882352941
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.22172573617163,
+   "wer": 0.735
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.19205683994338207,
+   "wer": 0.6311764705882353
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.16478865421442646,
+   "wer": 0.5117647058823529
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.1991479559268408,
+   "wer": 0.6375
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.14280758235963475,
+   "wer": 0.4153676470588235
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.17504371235880214,
+   "wer": 0.5327941176470589
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12744581055202464,
+   "wer": 0.3526470588235294
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.15164719269517915,
+   "wer": 0.43433823529411764
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12047958702228637,
+   "wer": 0.32691176470588235
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.1317754156143321,
+   "wer": 0.35794117647058826
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.11878660042740972,
+   "wer": 0.32838235294117646
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.7,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.12258888179623102,
+   "wer": 0.32683823529411765
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 1.0,
    "unk_penalty": 0.0,
-   "cer": 0.4077589077589078,
-   "wer": 0.9518007525533059
+   "cer": 0.21437095834142822,
+   "wer": 0.7221323529411765
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 1.0,
    "unk_penalty": -3.0,
-   "cer": 0.41285381285381284,
-   "wer": 0.9648808457265723
+   "cer": 0.23637978407482446,
+   "wer": 0.8002941176470588
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 2.0,
    "unk_penalty": 0.0,
-   "cer": 0.39823509823509823,
-   "wer": 0.9213402616018634
+   "cer": 0.1875745885487497,
+   "wer": 0.6063235294117647
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 2.0,
    "unk_penalty": -3.0,
-   "cer": 0.4101898101898102,
-   "wer": 0.9539509048557606
+   "cer": 0.21716022314118397,
+   "wer": 0.7129411764705882
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 3.0,
    "unk_penalty": 0.0,
-   "cer": 0.374991674991675,
-   "wer": 0.8571940512452966
+   "cer": 0.16147206572118453,
+   "wer": 0.4948529411764706
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 3.0,
    "unk_penalty": -3.0,
-   "cer": 0.40462870462870465,
-   "wer": 0.9319118437555993
-  },
-  {
-   "lm": true,
-   "lm_weight": 0.8,
-   "word_bonus": 4.0,
-   "unk_penalty": 0.0,
-   "cer": 0.348984348984349,
-   "wer": 0.785522307830138
+   "cer": 0.19522078210429908,
+   "wer": 0.6202941176470588
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 4.0,
    "unk_penalty": -3.0,
-   "cer": 0.3966033966033966,
-   "wer": 0.9041390431822254
+   "cer": 0.17268463267741666,
+   "wer": 0.5233088235294118
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.1406982875856901,
+   "wer": 0.4061029411764706
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 5.0,
    "unk_penalty": 0.0,
-   "cer": 0.32384282384282387,
-   "wer": 0.7152839992832826
+   "cer": 0.12777885709527906,
+   "wer": 0.35463235294117645
   },
   {
    "lm": true,
    "lm_weight": 0.8,
    "word_bonus": 5.0,
    "unk_penalty": -3.0,
-   "cer": 0.3798201798201798,
-   "wer": 0.8534312847160007
+   "cer": 0.1509949765479726,
+   "wer": 0.43279411764705883
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.12117343398739974,
+   "wer": 0.3297794117647059
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 1.0,
+   "unk_penalty": 0.0,
+   "cer": 0.24406760844828065,
+   "wer": 0.8461029411764706
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 1.0,
+   "unk_penalty": -3.0,
+   "cer": 0.2512697399461575,
+   "wer": 0.8708823529411764
+  },
+  {
+   "lm": true,
+   "lm_weight": 0.8,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.13295495545502484,
+   "wer": 0.36205882352941177
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 2.0,
+   "unk_penalty": 0.0,
+   "cer": 0.22891399073020455,
+   "wer": 0.7783823529411765
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 2.0,
+   "unk_penalty": -3.0,
+   "cer": 0.24237462185340403,
+   "wer": 0.8275735294117647
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 3.0,
+   "unk_penalty": 0.0,
+   "cer": 0.20589214842774278,
+   "wer": 0.6805882352941176
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 3.0,
+   "unk_penalty": -3.0,
+   "cer": 0.2288862368516,
+   "wer": 0.7641176470588236
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 4.0,
+   "unk_penalty": 0.0,
+   "cer": 0.1821070744636563,
+   "wer": 0.57875
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 4.0,
+   "unk_penalty": -3.0,
+   "cer": 0.21123477005911576,
+   "wer": 0.6866176470588236
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 5.0,
+   "unk_penalty": 0.0,
+   "cer": 0.15812772334933806,
+   "wer": 0.4768382352941177
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 5.0,
+   "unk_penalty": -3.0,
+   "cer": 0.19147400849268686,
+   "wer": 0.6013235294117647
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 6.0,
+   "unk_penalty": 0.0,
+   "cer": 0.14032361022452888,
+   "wer": 0.40294117647058825
+  },
+  {
+   "lm": true,
+   "lm_weight": 1.0,
+   "word_bonus": 6.0,
+   "unk_penalty": -3.0,
+   "cer": 0.17136632344370126,
+   "wer": 0.5170588235294118
   }
  ]
 }

@@ -325,8 +325,9 @@ each order, on the 8 GB MacBook Air:
 | 4 | 17.7 million | 363 MB | 6 minutes | 3.2 GB | 269 | 0.353 |
 
 The WER is of the 3,750 hour model after its second epoch, `eval.py` with a
-beam of 32 and the default weight and bonus, which were also the best of a
-grid of 16 for the bigram and the 4-gram LM, on a quarter of dev-clean.
+beam of 32, weight 0.5 and bonus 4, which were also the best of a grid of 16
+without an unknown-word penalty for the bigram and the 4-gram LM, on a
+quarter of dev-clean.
 Without an LM its WER is 0.427, and with the bigram LM of the whole corpus
 0.343. The 4-gram LM lowers the perplexity by a third, but the WER by only
 3%, as the acoustic model limits the result, see below. More text helped
@@ -365,39 +366,47 @@ runs the acoustic model once and then decodes the dev set for each setting in
 parallel, ranking the settings by WER:
 
 ```
-uv run tune_lm.py examples/librispeech/models/ctc_streaming \
-    examples/librispeech/data/dev.json \
-    --lm examples/librispeech/models/lm-librispeech.npz \
-    --weights 0.2,0.3,0.5,0.8 --bonuses 1,2,3,4,5 --unk-penalties 0,-3 \
-    --results docs/lm-tuning.json --plot docs/lm-tuning.png
+awk 'NR % 4 == 1' examples/librispeech/data/LibriSpeech/dev-clean.json > dev-clean-quarter.json
+uv run tune_lm.py examples/commonvoice/models/ctc_streaming_3750h_epoch2 \
+    dev-clean-quarter.json --lm examples/librispeech/models/lm-librispeech.npz \
+    --weights 0.3,0.4,0.5,0.6,0.7,0.8,1.0 --bonuses 1,2,3,4,5,6 \
+    --unk-penalties=0,-3 --results docs/lm-tuning.json --plot docs/lm-tuning.png
 ```
 
-It tunes with a beam of 16 to save time. A wider beam then adds a little on
-top. With `--from-results` it reports and plots saved results again.
+Values that start with a minus need the equals sign. It tunes with a beam of
+16 to save time. A wider beam then adds a little on top. With
+`--from-results` it reports and plots saved results again.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/lm-tuning-dark.png">
-  <img alt="The dev WER over the LM weight and word bonus as a 3D surface and as a heatmap, with the best setting at weight 0.5 and bonus 4" src="docs/lm-tuning.png">
+  <img alt="The dev WER over the LM weight and word bonus as a 3D surface and as a heatmap, at an unknown-word penalty of -3, with the best setting at weight 0.3 and bonus 3" src="docs/lm-tuning.png">
 </picture>
 
 The plot shows the dev WER over α and β at the best unknown-word penalty, with
-blue for settings better than decoding without the LM and red for worse ones.
-For the LibriSpeech LM and the streaming CTC model:
+blue for settings better than decoding without the LM and red for worse ones,
+for the LibriSpeech bigram LM and the 3,750 hour model after its third epoch,
+on every fourth utterance of dev-clean, 676 of them:
 
 - The good settings form a diagonal valley. A stronger LM needs a larger word
   bonus, or it drops and merges words, and too large a bonus inserts words.
-- A negative unknown-word penalty only made things worse. The LM already
-  gives an unknown word the probability of `<unk>`, the share of all words
-  outside its vocabulary.
-- The best setting, α 0.5, β 4 and no unknown-word penalty, became the
-  default. With a beam of 32 it lowered the dev WER from 0.787 to 0.687 and
-  the CER from 0.315 to 0.298.
-- The small LM from the training transcripts did as well, WER 0.685, despite
-  its higher perplexity. At a CER of 0.3 most words have a wrong letter and
-  the LM can only choose among the spellings in the beam, so the acoustic
-  model limits the result. The larger LM should help more with a better
-  acoustic model and with speech outside LibriSpeech, as its vocabulary is
-  17 times larger.
+- An unknown-word penalty now helps. Without one the best setting, α 0.4 and
+  β 3, was hardly better than α 0.5 and β 4. A finer grid around the best
+  found a flat floor from α 0.25 to 0.35, β 2.5 to 3 and a penalty of -2 to
+  -3, while -4 was worse and -6 clearly worse. Most of this model's
+  misspelled words are close to a word the LM knows, which the penalty
+  pushes them to.
+- The best setting, α 0.3, β 2.5 and a penalty of -2, became the default. On
+  all of dev-clean with a beam of 32 it lowered the WER from 0.388 without
+  the LM to 0.286, against 0.313 at α 0.5 and β 4, and the CER from 0.128 to
+  0.110.
+
+For the 100 hour model, with a CER of 0.3, the best setting was α 0.5, β 4
+and no penalty, the default before, and a negative penalty only made things
+worse: most of its words had a wrong letter, too far from any word to push
+to the right one. The LM lowered its dev WER, of the 10 hour configs' dev
+set, from 0.787 to 0.687, 13%, against 26% for the 3,750 hour model. The
+small LM from the training transcripts did as well for it, WER 0.685, as the
+acoustic model limited the result.
 
 [LibriSpeech LM corpus]: https://www.openslr.org/11/
 
