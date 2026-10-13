@@ -43,8 +43,8 @@
 
     "optimizer" : {
         "type" : "adam",
-        "batch_size" : 32,
-        "accumulate" : 8,
+        "batch_size" : 64,
+        "accumulate" : 4,
         "grad_clip" : 400,
         "epochs" : 6,
         "learning_rate" : 2e-4,

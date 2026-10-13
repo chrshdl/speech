@@ -96,17 +96,21 @@ uv run examples/speech_commands/prepare.py examples/speech_commands/data
 ### 6. Benchmark
 
 Before a run that takes days, measure the speed on the machine with
-`benchmark.py`. It times training steps on real batches for each batch size
-and precision, and estimates the hours per epoch from the prepared training
-set:
+`benchmark.py`. For each batch size and precision it times the training step
+on clips from the shortest to the longest of the prepared training set, with
+the accumulation that keeps the config's batches of 256. It estimates the
+hours per epoch from the real batches, and reports the peak memory against
+what the GPU holds and how fast the data loader keeps up:
 
 ```
 uv run benchmark.py examples/commonvoice/ctc_streaming_3750h_config.json \
-    --batch-sizes 16,32,64 --precisions none,bf16
+    --batch-sizes 32,64,128 --precisions none,bf16
 ```
 
-If another batch size or precision is clearly faster than the config's, change
-`batch_size` or `mixed_precision` in the config.
+If another batch size or precision is clearly faster than the config's and
+fits in memory, change `batch_size`, `accumulate` or `mixed_precision` in the
+config. Once an epoch has run, `--epoch-hours` scales the estimates to its
+measured time.
 
 ## Train
 
@@ -130,8 +134,8 @@ should be enough for that.
 
 ### On an Apple M4 Max
 
-`ctc_streaming_3750h_config.json` uses bfloat16, batches of 32, 8 data loader
-workers and 6 epochs. Each optimizer step averages 8 batches, so the model
+`ctc_streaming_3750h_config.json` uses bfloat16, batches of 64, 8 data loader
+workers and 6 epochs. Each optimizer step averages 4 batches, so the model
 learns from batches of 256 clips, with gradients clipped at a norm of 400.
 Adam's learning rate starts at 2e-4 and is divided by
 1.2 after every epoch, as in Deep Speech 2, to 8.0e-5 in the last. Keep the
@@ -142,12 +146,15 @@ caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_config.js
 ```
 
 On an 8 GB M1 MacBook Air the model trained at 40 seconds of audio per second
-in bfloat16, which is 94 hours per epoch. The M4 Max has about five to six
-times its GPU throughput, so expect roughly 15 to 20 hours per epoch and four
-to five days for the run, and check it with `benchmark.py`. Training saves the
-model after every epoch and continues after a stop with `--resume`. Each
-epoch sees 37 times the audio of an epoch on `train-clean-100`, so a few
-epochs go a long way.
+in bfloat16, which is 94 hours per epoch. On an M4 Max an epoch took 14 hours
+in batches of 32, accumulated 8 times. In batches of 64, `benchmark.py`
+estimates 11 hours, with a measured peak of 15 GB of the GPU's 32 GB working
+set. Batches of 128 would save about another hour, but their longest batches,
+of 30 second clips that tempo augmentation stretches by up to 11%, would need
+more memory than the working set. Training saves the model after every epoch
+and continues after a stop with `--resume`, also with another batch size that
+keeps the batches of 256. Each epoch sees 37 times the audio of an epoch on
+`train-clean-100`, so a few epochs go a long way.
 
 ### Speech Commands
 
@@ -196,7 +203,7 @@ instead.
 ### On an NVIDIA GPU
 
 `ctc_streaming_3750h_gpu_config.json` is meant for a GPU with bfloat16, such
-as an A100 or H100, with batches of 32 accumulated into 256 as above, 16 data
+as an A100 or H100, with batches of 32 accumulated into 256, 16 data
 loader workers and 12 epochs, over which the learning rate falls from 2e-4 to
 2.7e-5:
 
