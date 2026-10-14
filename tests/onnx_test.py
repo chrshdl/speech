@@ -83,6 +83,25 @@ def test_export_matches_torch(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", CONFIGS)
+def test_flush_without_new_frames(name, tmp_path):
+    # A stream can end with no audio left, as stream.py ends one, which
+    # gives the frames that wait for their lookahead.
+    model, preproc = make_model(CONFIGS[name])
+    audio, sample_rate = wave.array_from_wave("test0.wav")
+    features = log_specgram(audio, sample_rate)
+    expected = TorchModel(model, preproc).probs(features)
+
+    path = str(tmp_path / "model.onnx")
+    export.export(model, preproc, path, int8=False)
+    onnx_model = OnnxModel(path, threads=1)
+    probs, state = onnx_model.stream(features)
+    rest, _ = onnx_model.stream(features[:0], state, final=True)
+    context = model.lookahead.context if model.lookahead is not None else 0
+    assert len(rest) == context
+    assert np.allclose(np.concatenate([probs, rest]), expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("name", CONFIGS)
 def test_receptive_field(name):
     model, _ = make_model(CONFIGS[name])
     stride, field = export.receptive_field(model)
@@ -115,6 +134,20 @@ def test_decode_start_and_end(tmp_path):
     start, end = preproc.char_to_int["<s>"], preproc.char_to_int["</s>"]
     for labels in ([start, 3, 4, end], [3, 4], [start, 3, end, 4, end], [3, end, 4]):
         assert onnx_model.decode(labels) == "".join(preproc.decode(labels))
+
+
+def test_bigrams(tmp_path):
+    torch.manual_seed(0)
+    preproc = loader.Preprocessor("test.json", start_and_end=False, bigrams=True)
+    model = CTC(preproc.input_dim, preproc.vocab_size, shared.model_config)
+    path = str(tmp_path / "model.onnx")
+    export.export(model, preproc, path)
+    onnx_model = OnnxModel(path)
+
+    assert onnx_model.char_to_int == preproc.char_to_int
+    labels = preproc.encode("hello world")
+    assert onnx_model.decode(labels) == "hello world"
+    assert TorchModel(model, preproc).decode(labels) == "hello world"
 
 
 def test_export_rejects_bidirectional(tmp_path):

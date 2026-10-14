@@ -5,7 +5,7 @@ import tqdm
 
 import speech
 from speech.features import log_specgram
-from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, decode
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, TOP_K, decode
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
 from speech.utils import wave
 from speech.utils.dataset import read_data_json
@@ -32,6 +32,7 @@ def eval_onnx(model, dataset_json, decoder_args):
     beam_size = decoder_args.get("beam_size", 1)
     lm = decoder_args.get("lm")
     prune = decoder_args.get("prune")
+    top_k = decoder_args.get("top_k")
     results = []
     for datum in tqdm.tqdm(read_data_json(dataset_json)):
         audio, sample_rate = wave.array_from_wave(datum["audio"])
@@ -41,7 +42,7 @@ def eval_onnx(model, dataset_json, decoder_args):
                 f"{model.sample_rate} Hz."
             )
         probs = model.probs(log_specgram(audio, sample_rate))
-        labels = decode(probs, beam_size, model.blank, lm, prune)[0]
+        labels = decode(probs, beam_size, model.blank, lm, prune, top_k)[0]
         results.append((list(datum["text"]), list(model.decode(labels))))
     return results
 
@@ -128,6 +129,13 @@ if __name__ == "__main__":
         "in a frame.",
     )
     decoding.add_argument(
+        "--top-k",
+        type=int,
+        default=TOP_K,
+        help="With a beam size or LM, try at most this many of the most likely "
+        "labels of a frame.",
+    )
+    decoding.add_argument(
         "--lm", help="A word LM .npz file from speech.models.word_lm."
     )
     decoding.add_argument(
@@ -151,6 +159,7 @@ if __name__ == "__main__":
     if args.beam_size is not None or args.lm is not None:
         decoder_args["beam_size"] = args.beam_size or BEAM_SIZE
         decoder_args["prune"] = args.prune
+        decoder_args["top_k"] = args.top_k
     run(
         args.model,
         args.dataset,

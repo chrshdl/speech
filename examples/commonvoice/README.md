@@ -28,10 +28,14 @@ while they download, so they never take space on disk.
 
 ```
 uv run examples/librispeech/download.py examples/librispeech/data --sets \
-    train-clean-100 train-clean-360 train-other-500 dev-clean test-clean
+    train-clean-100 train-clean-360 train-other-500 dev-clean dev-other test-clean
 uv run examples/librispeech/preprocess.py examples/librispeech/data --sets \
-    train-clean-100 train-clean-360 train-other-500 dev-clean test-clean
+    train-clean-100 train-clean-360 train-other-500 dev-clean dev-other test-clean
 ```
+
+dev-other, the harder half of LibriSpeech's dev speakers, is a dev set of
+the bigram config. A setup without it adds it with the same commands and
+`--sets dev-other`.
 
 ### 3. Noise
 
@@ -213,6 +217,48 @@ uv run train.py examples/commonvoice/ctc_streaming_3750h_gpu_config.json
 
 It has not been run yet, so measure its speed with `benchmark.py` before
 committing to a full run.
+
+### Bigrams
+
+`ctc_streaming_3750h_bigrams_config.json` is the config with
+`"bigrams" : true`, which outputs pairs of characters, so the transcripts
+fit the model's 40 ms frames better, see "Bigram outputs" in the main
+README. It also differs in:
+
+- **Epochs.** It trains for 8 epochs rather than 6, over which the
+  learning rate falls from 2e-4 to 5.6e-5, the same rate in each epoch as
+  the run of characters.
+- **MyST.** It also trains on the children's speech of MyST, which needs
+  preparing first, see `examples/myst/README.md`. A model trained on it
+  is for non-commercial use only.
+- **dev-other.** LibriSpeech dev-other, the closest public stand-in for
+  hard speech, is a third dev set, see setup step 2.
+
+Each dev set's loss, CER and WER are reported apart, such as
+`dev_wer/librispeech/dev-clean` in TensorBoard. Compare those with the run
+of characters epoch by epoch, as its `dev_cer` over all dev sets, which
+selects the best model, has no dev-other. It saves to its own directory:
+
+```
+caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_bigrams_config.json
+```
+
+The configs start at a learning rate of 2e-4, found with batches of 32,
+where 5e-4 saturated the gates of the GRU. With batches of 256 a higher
+rate may learn faster. Before a run, `trials.py` compares them: setups J,
+K, L and M train the model of bigrams at 2e-4, 3e-4, 4e-4 and 6e-4 for 400
+steps each, as the run trains, and report the dev CER and the share of
+saturated gates every 100 steps. They train on
+`examples/commonvoice/data/trial_train_set.json`, the random sample of the
+training clips that `trial_noaug.py` writes:
+
+```
+uv run examples/commonvoice/trials.py --setups J,K,L,M
+```
+
+Each trains on 1,600 batches of 64, about 40 minutes at the speed of the
+run of characters, 0.67 batches per second. Choose the highest rate whose
+CER falls fastest while few of its gates saturate.
 
 [Mozilla Common Voice]: https://commonvoice.mozilla.org
 [Mozilla Data Collective]: https://mozilladatacollective.com

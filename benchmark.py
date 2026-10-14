@@ -67,7 +67,7 @@ def batch_lengths(durations, batch_size):
     return np.array([max(durations[e - batch_size : e]) for e in ends])
 
 
-def synthetic_batch(preproc, batch_size, secs, chars_per_sec):
+def synthetic_batch(preproc, batch_size, secs, labels_per_sec):
     """Random features and labels of clips about secs long."""
     frames = max(int(secs * FRAMES_PER_SECOND), 32)
     inputs = [
@@ -76,7 +76,7 @@ def synthetic_batch(preproc, batch_size, secs, chars_per_sec):
         )
         for _ in range(batch_size)
     ]
-    n = max(1, round(secs * chars_per_sec))
+    n = max(1, round(secs * labels_per_sec))
     labels = [
         [random.randrange(preproc.vocab_size) for _ in range(n)]
         for _ in range(batch_size)
@@ -235,15 +235,22 @@ def main():
     random.seed(0)
     np.random.seed(0)
     torch.manual_seed(0)
-    preproc = loader.Preprocessor(data_json, start_and_end=data_cfg["start_and_end"])
+    preproc = loader.Preprocessor(
+        data_json,
+        start_and_end=data_cfg["start_and_end"],
+        bigrams=data_cfg.get("bigrams", False),
+    )
     data = loader.AudioDataset(data_json, preproc, batch_sizes[0]).data
     durations = [d["duration"] for d in data]
     total_hours = sum(durations) / 3600
-    chars_per_sec = float(np.median([len(d["text"]) / d["duration"] for d in data]))
+    # Bigrams make fewer labels than characters.
+    labels_per_sec = float(
+        np.median([len(preproc.encode(d["text"])) / d["duration"] for d in data])
+    )
     grid = clip_lengths(durations)
     print(
-        f"{len(data):,} clips, {total_hours:,.0f} hours, {chars_per_sec:.1f} "
-        f"characters per second. Timing clips of {', '.join(map(str, grid))} s."
+        f"{len(data):,} clips, {total_hours:,.0f} hours, {labels_per_sec:.1f} "
+        f"labels per second. Timing clips of {', '.join(map(str, grid))} s."
     )
     limit = memory_limit(device)
     if limit:
@@ -268,7 +275,7 @@ def main():
                 step_seconds[b, p][secs] = None
                 continue
             name = f"batch {b:>4}, {p or 'float32':>7}, {secs:>5} s clips"
-            batch = synthetic_batch(preproc, b, secs, chars_per_sec)
+            batch = synthetic_batch(preproc, b, secs, labels_per_sec)
             try:
                 s, peak = time_step(
                     model, batch, precision, effective // b, args.steps, device

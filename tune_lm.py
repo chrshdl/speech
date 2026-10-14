@@ -9,7 +9,7 @@ import tqdm
 
 import speech
 from speech import loader
-from speech.models.ctc_decoder import PRUNE, decode
+from speech.models.ctc_decoder import PRUNE, TOP_K, decode
 from speech.models.word_lm import WordLM
 
 # Colors for the plot: the chart surface, ink and diverging scale in
@@ -41,7 +41,7 @@ THEMES = {
 _worker = {}
 
 
-def _init_worker(outputs, char_to_int, blank, lm_path, beam_size, prune):
+def _init_worker(outputs, char_to_int, blank, lm_path, beam_size, prune, top_k):
     _worker.update(
         outputs=outputs,
         char_to_int=char_to_int,
@@ -50,6 +50,7 @@ def _init_worker(outputs, char_to_int, blank, lm_path, beam_size, prune):
         lm=WordLM.load(lm_path),
         beam_size=beam_size,
         prune=prune,
+        top_k=top_k,
     )
 
 
@@ -61,8 +62,12 @@ def _evaluate(setting):
         scorer = w["lm"].scorer(w["char_to_int"], *setting)
     results = []
     for probs, text in w["outputs"]:
-        labels = decode(probs, w["beam_size"], w["blank"], scorer, w["prune"])[0]
-        results.append((list(text), [w["int_to_char"][i] for i in labels]))
+        labels = decode(
+            probs, w["beam_size"], w["blank"], scorer, w["prune"], w["top_k"]
+        )[0]
+        # A bigram label is two characters.
+        pred = "".join(w["int_to_char"][i] for i in labels)
+        results.append((list(text), list(pred)))
     return setting, speech.compute_cer(results), speech.compute_wer(results)
 
 
@@ -84,7 +89,15 @@ def model_outputs(model_path, dataset_json, tag):
 def search(args):
     outputs, char_to_int, blank = model_outputs(args.model, args.dataset, args.tag)
     grid = [None, *itertools.product(args.weights, args.bonuses, args.unk_penalties)]
-    init = (outputs, char_to_int, blank, args.lm, args.beam_size, args.prune)
+    init = (
+        outputs,
+        char_to_int,
+        blank,
+        args.lm,
+        args.beam_size,
+        args.prune,
+        args.top_k,
+    )
     results = []
     with multiprocessing.Pool(args.jobs, _init_worker, init) as pool:
         for setting, cer, wer in tqdm.tqdm(
@@ -286,6 +299,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--beam-size", type=int, default=16)
     parser.add_argument("--prune", type=float, default=PRUNE)
+    parser.add_argument("--top-k", type=int, default=TOP_K)
     parser.add_argument(
         "--jobs", type=int, default=3, help="Decoding processes to run at once."
     )

@@ -71,6 +71,20 @@ def test_recognize():
     assert recognizer.closest(one_hot_probs([0, 1] * 101)) is None
 
 
+def test_bigrams():
+    # A model of bigrams labels "ab ba" as ab, space, ba.
+    char_to_int = {"a": 0, "b": 1, " ": 2, "ab": 3, "ba": 4}
+    blank = 5
+    intents = [Intent("ABBA", ("ab ba",)), Intent("A", ("a",))]
+    recognizer = IntentRecognizer(intents, char_to_int, blank, frame_seconds=0.04)
+
+    path = [3, blank, 2, 4]
+    probs = np.full((len(path), blank + 1), 0.01)
+    probs[np.arange(len(path)), path] = 0.95
+    match = recognizer.recognize(probs / probs.sum(axis=1, keepdims=True))
+    assert (match.intent.name, match.score) == ("ABBA", 0)
+
+
 def test_samples_must_use_the_model_labels():
     with pytest.raises(ValueError, match="characters"):
         IntentRecognizer([Intent("C", ("abc",))], CHAR_TO_INT, BLANK, 0.04)

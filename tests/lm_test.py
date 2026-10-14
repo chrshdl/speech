@@ -6,6 +6,7 @@ import tempfile
 import numpy as np
 import pytest
 
+from speech import tokens
 from speech.models import word_lm
 from speech.models.word_lm import WordLM
 
@@ -75,6 +76,24 @@ def test_scorer():
 
     # The LM prefers what it has seen.
     assert lm.log_prob("cat", "the") > lm.log_prob("sat", "the")
+
+
+def test_scorer_with_bigrams():
+    lm = WordLM(["the cat sat on the mat"])
+    chars = {c: i for i, c in enumerate(sorted(set("the cat sat on mat")))}
+    labels = {t: i for i, t in enumerate([*chars, "th", "ca", "sa", "ma", "on"])}
+
+    def run(text, char_to_int):
+        scorer = lm.scorer(char_to_int, weight=0.5, word_bonus=2.0)
+        state, total = scorer.initial(), 0.0
+        for t in tokens.tokenize(text, char_to_int):
+            state, score = scorer.extend(state, char_to_int[t])
+            total += score
+        return state, total + scorer.finish(state)
+
+    # Words spelled with bigrams score as with characters.
+    for text in ("the cat", "the mat ", "on the ca"):
+        assert run(text, labels) == run(text, chars)
 
 
 def test_save_load():

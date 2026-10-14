@@ -65,7 +65,7 @@ class CTC(model.Model):
         return F.softmax(self.fc(x).float(), dim=2), state
 
     @torch.no_grad()
-    def infer(self, batch, beam_size=1, lm=None, prune=None):
+    def infer(self, batch, beam_size=1, lm=None, prune=None, top_k=None):
         """
         Decodes the batch with a prefix beam search, optionally with a
         language model scorer. See ctc_decoder.BeamSearch.
@@ -75,7 +75,7 @@ class CTC(model.Model):
         probs = probs.cpu().numpy()
         lens = self.encoded_lengths(x_lens)
         return [
-            decode(p[:n], beam_size, self.blank, lm, prune)[0]
+            decode(p[:n], beam_size, self.blank, lm, prune, top_k)[0]
             for p, n in zip(probs, lens)
         ]
 

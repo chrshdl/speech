@@ -8,7 +8,7 @@ which runs without PyTorch.
 import numpy as np
 
 from speech.features import SpecgramStream
-from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, BeamSearch
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, TOP_K, BeamSearch
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
 
 
@@ -54,6 +54,7 @@ def search_factory(
     lm_path=None,
     beam_size=None,
     prune=PRUNE,
+    top_k=TOP_K,
     lm_weight=LM_WEIGHT,
     word_bonus=WORD_BONUS,
     unk_penalty=UNK_PENALTY,
@@ -71,7 +72,7 @@ def search_factory(
     beam_size = beam_size or (BEAM_SIZE if lm is not None else 1)
     if lm is None and beam_size == 1:
         return lambda: None
-    return lambda: BeamSearch(blank, beam_size, lm, prune)
+    return lambda: BeamSearch(blank, beam_size, lm, prune, top_k)
 
 
 class Transcriber:

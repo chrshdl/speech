@@ -112,30 +112,56 @@ def run_epoch(
     return it, avg_loss
 
 
-def eval_dev(model, ldr, preproc, precision):
-    losses = []
-    all_preds = []
-    all_labels = []
+def dev_set_names(paths):
+    """
+    Short names of dev sets for the log, such as librispeech/dev-clean for
+    examples/librispeech/data/LibriSpeech/dev-clean.json, or the paths if
+    the names are not unique.
+    """
+    names = []
+    for path in paths:
+        parts = os.path.normpath(path).split(os.sep)
+        name = os.path.splitext(parts[-1])[0]
+        if "examples" in parts[:-1]:
+            name = f"{parts[parts.index('examples') + 1]}/{name}"
+        names.append(name)
+    return names if len(set(names)) == len(names) else list(paths)
 
+
+def eval_dev(model, ldrs, preproc, precision):
+    """
+    Evaluates each dev set, given as a dict of names and loaders, and
+    returns the loss and CER over all of them, which select the best model,
+    and the loss, CER and WER of each.
+    """
     model.set_eval()
-
+    total_loss, total_count, all_results, per_set = 0.0, 0, [], {}
     with torch.no_grad(), precision.autocast():
-        for batch in tqdm.tqdm(ldr):
-            preds = model.infer(batch)
-            loss = model.loss(batch)
-            losses.append(loss.item())
-            all_preds.extend(preds)
-            all_labels.extend(batch[1])
-
+        for name, ldr in ldrs.items():
+            loss, count, results = 0.0, 0, []
+            for batch in tqdm.tqdm(ldr, desc=name):
+                preds = model.infer(batch)
+                # The loss is the mean over the batch's examples.
+                loss += model.loss(batch).item() * len(batch[1])
+                count += len(batch[1])
+                results.extend(
+                    (preproc.decode(l), preproc.decode(p))
+                    for l, p in zip(batch[1], preds)
+                )
+            per_set[name] = (
+                loss / count,
+                speech.compute_cer(results),
+                speech.compute_wer(results),
+            )
+            total_loss, total_count = total_loss + loss, total_count + count
+            all_results.extend(results)
     model.set_train()
 
-    loss = sum(losses) / len(losses)
-    results = [
-        (preproc.decode(l), preproc.decode(p)) for l, p in zip(all_labels, all_preds)
-    ]
-    cer = speech.compute_cer(results)
+    for name, (loss, cer, wer) in per_set.items():
+        print(f"Dev {name}: Loss {loss:.3f}, CER {cer:.3f}, WER {wer:.3f}")
+    loss, cer = total_loss / total_count, speech.compute_cer(all_results)
     print(f"Dev: Loss {loss:.3f}, CER {cer:.3f}")
-    return loss, cer
+    return loss, cer, per_set
 
 
 def save_state(
@@ -257,7 +283,9 @@ def run(config, device, resume=False):
         saved_model, preproc = speech.load(save_path)
     else:
         preproc = loader.Preprocessor(
-            data_cfg["train_set"], start_and_end=data_cfg["start_and_end"]
+            data_cfg["train_set"],
+            start_and_end=data_cfg["start_and_end"],
+            bigrams=data_cfg.get("bigrams", False),
         )
     workers = data_cfg.get("num_workers", 4)
     # Only the training data is augmented.
@@ -273,7 +301,13 @@ def run(config, device, resume=False):
         augment=augment,
         sortagrad=sortagrad,
     )
-    dev_ldr = loader.make_loader(data_cfg["dev_set"], preproc, batch_size, workers)
+    dev_sets = data_cfg["dev_set"]
+    if isinstance(dev_sets, str):
+        dev_sets = [dev_sets]
+    dev_ldrs = {
+        name: loader.make_loader(path, preproc, batch_size, workers)
+        for name, path in zip(dev_set_names(dev_sets), dev_sets)
+    }
 
     # Model
     model_class = getattr(models, model_cfg["class"])
@@ -343,11 +377,15 @@ def run(config, device, resume=False):
         msg = "Epoch {} completed in {:.2f} (s)."
         print(msg.format(e, time.time() - start))
 
-        dev_loss, dev_cer = eval_dev(model, dev_ldr, preproc, precision)
+        dev_loss, dev_cer, per_set = eval_dev(model, dev_ldrs, preproc, precision)
 
         # Log for tensorboard
         writer.add_scalar("dev_loss", dev_loss, e)
         writer.add_scalar("dev_cer", dev_cer, e)
+        for name, (loss, cer, wer) in per_set.items():
+            writer.add_scalar(f"dev_loss/{name}", loss, e)
+            writer.add_scalar(f"dev_cer/{name}", cer, e)
+            writer.add_scalar(f"dev_wer/{name}", wer, e)
         writer.add_scalar("learning_rate", optimizer.param_groups[0]["lr"], e)
         writer.flush()
 

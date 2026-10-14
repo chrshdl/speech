@@ -131,6 +131,23 @@ def test_argmax_decode():
     assert CTC.max_decode(pre, blank) == post
 
 
+def test_top_k():
+    from speech.models.ctc_decoder import decode
+
+    blank = 4
+    rng = np.random.RandomState(0)
+    for _ in range(10):
+        probs = rng.rand(8, 5) ** 3
+        probs /= probs.sum(axis=1, keepdims=True)
+
+        # Trying only each frame's most likely label decodes greedily.
+        labels, _ = decode(probs, beam_size=16, blank=blank, top_k=1)
+        assert list(labels) == CTC.max_decode(probs.argmax(axis=1).tolist(), blank)
+
+        # Trying all labels changes nothing.
+        assert decode(probs, 16, blank, top_k=5) == decode(probs, 16, blank)
+
+
 def brute_force_decode(probs, blank, lm):
     # Scores every label sequence by summing the probabilities of all
     # alignments that collapse to it, then adds its LM score.
