@@ -10,7 +10,7 @@
             "examples/librispeech/data/LibriSpeech/train-other-500.json",
             "examples/commonvoice/data/train.json",
             "examples/speech_commands/data/train.json",
-            "examples/myst/data/train.json"
+            "examples/voxpopuli/data/train.json"
         ],
         "dev_set" : [
             "examples/librispeech/data/LibriSpeech/dev-clean.json",

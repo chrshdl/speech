@@ -228,9 +228,11 @@ README. It also differs in:
 - **Epochs.** It trains for 8 epochs rather than 6, over which the
   learning rate falls from 2e-4 to 5.6e-5, the same rate in each epoch as
   the run of characters.
-- **MyST.** It also trains on the children's speech of MyST, which needs
-  preparing first, see `examples/myst/README.md`. A model trained on it
-  is for non-commercial use only.
+- **VoxPopuli.** It also trains on the European Parliament speeches of
+  VoxPopuli, with many accents and more spontaneous than audiobooks,
+  which need preparing first, see `examples/voxpopuli/README.md`. The
+  children's speech of MyST can join after any epoch, see "More datasets"
+  above.
 - **dev-other.** LibriSpeech dev-other, the closest public stand-in for
   hard speech, is a third dev set, see setup step 2.
 
