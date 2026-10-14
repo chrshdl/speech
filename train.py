@@ -392,6 +392,7 @@ def run(config, device, resume=False):
         step_schedulers(schedulers, dev_loss)
 
         speech.save(model, preproc, save_path)
+        speech.save(model, preproc, save_path, epoch=e)
 
         # Save the best model on the dev set
         if dev_cer < best_so_far:

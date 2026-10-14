@@ -169,7 +169,11 @@ def listen(model, chunk_ms, mic_device, pause, new_search):
 
 def run(args):
     model = streaming.load(
-        args.model, None if args.last else "best", args.device, args.threads
+        args.model,
+        None if args.last or args.epoch is not None else "best",
+        args.device,
+        args.threads,
+        args.epoch,
     )
     new_search = streaming.search_factory(
         model.blank,
@@ -248,10 +252,17 @@ if __name__ == "__main__":
         help="The CPU threads to run the model with. By default an exported "
         "model uses one per core and a PyTorch model PyTorch's default.",
     )
-    parser.add_argument(
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "--last",
         action="store_true",
         help="Last saved model instead of best on dev set.",
+    )
+    which.add_argument(
+        "--epoch",
+        type=int,
+        help="The model saved after this epoch, counted from 0 as train.py "
+        "prints them, instead of the best on the dev set.",
     )
     decoding = parser.add_argument_group("decoding")
     decoding.add_argument(
