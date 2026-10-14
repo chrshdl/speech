@@ -10,6 +10,7 @@ import soundfile
 import torch
 import torch.utils.data as tud
 
+from speech import tokens
 from speech.features import log_specgram
 from speech.utils import wave
 from speech.utils.dataset import read_data_json
@@ -24,7 +25,7 @@ class Preprocessor:
     END = "</s>"
     START = "<s>"
 
-    def __init__(self, data_json, max_samples=100, start_and_end=True):
+    def __init__(self, data_json, max_samples=100, start_and_end=True, bigrams=False):
         """
         Builds a preprocessor from a dataset.
         Arguments:
@@ -34,6 +35,9 @@ class Preprocessor:
             max_samples (int): The maximum number of examples to be used
                 in computing summary statistics.
             start_and_end (bool): Include start and end tokens in labels.
+            bigrams (bool): Label the bigrams of the transcripts, see
+                speech.tokens, as well as their characters, rather than
+                only the characters.
         """
         data = read_data_json(data_json)
 
@@ -43,32 +47,44 @@ class Preprocessor:
         self.mean, self.std = compute_mean_std(audio_files[:max_samples])
         self._input_dim = self.mean.shape[0]
 
-        # Make char map
-        chars = sorted({t for d in data for t in d["text"]})
+        # Make the label map. With bigrams, a word of the dev set or of an
+        # intent can have a bigram that training never saw, which is then
+        # labeled by its characters, so every character is a label too.
+        labels = {t for d in data for t in d["text"]}
+        if bigrams:
+            labels.update(t for d in data for t in tokens.bigrams(d["text"]))
+        labels = sorted(labels)
         if start_and_end:
             # START must be last so it can easily be
             # excluded in the output classes of a model.
-            chars.extend([self.END, self.START])
+            labels.extend([self.END, self.START])
         self.start_and_end = start_and_end
-        self.int_to_char = dict(enumerate(chars))
+        self.int_to_char = dict(enumerate(labels))
         self.char_to_int = {v: k for k, v in self.int_to_char.items()}
 
     def encode(self, text):
-        text = list(text)
+        text = tokens.tokenize(text, self.char_to_int)
         if self.start_and_end:
             text = [self.START] + text + [self.END]
         return [self.char_to_int[t] for t in text]
 
     def decode(self, seq):
+        """
+        Returns the characters of a label sequence, also for bigram
+        labels, without the start and end tokens.
+        """
         text = [self.int_to_char[s] for s in seq]
-        if not self.start_and_end:
-            return text
-
-        s = text[0] == self.START
-        e = len(text)
-        if text[-1] == self.END:
-            e = text.index(self.END)
-        return text[s:e]
+        if self.start_and_end and text:
+            s = text[0] == self.START
+            e = len(text)
+            if text[-1] == self.END:
+                e = text.index(self.END)
+            text = text[s:e]
+        chars = []
+        for label in text:
+            # A bigram is its two characters, a start or end token one.
+            chars.extend([label] if label in (self.START, self.END) else label)
+        return chars
 
     def preprocess(self, wave_file, text):
         inputs = self.normalize(log_specgram_from_file(wave_file))

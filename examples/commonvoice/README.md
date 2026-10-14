@@ -214,6 +214,18 @@ uv run train.py examples/commonvoice/ctc_streaming_3750h_gpu_config.json
 It has not been run yet, so measure its speed with `benchmark.py` before
 committing to a full run.
 
+### Bigrams
+
+`ctc_streaming_3750h_bigrams_config.json` is the config with only
+`"bigrams" : true` added, which outputs pairs of characters, so the
+transcripts fit the model's 40 ms frames better, see "Bigram outputs" in
+the main README. Its dev CER compares with the run of characters epoch by
+epoch. It saves to its own directory:
+
+```
+caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_bigrams_config.json
+```
+
 [Mozilla Common Voice]: https://commonvoice.mozilla.org
 [Mozilla Data Collective]: https://mozilladatacollective.com
 [uv]: https://docs.astral.sh/uv/

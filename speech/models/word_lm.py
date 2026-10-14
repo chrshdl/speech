@@ -523,8 +523,9 @@ class WordLM:
         :func:`~speech.models.ctc_decoder.decode`.
 
         Arguments:
-            char_to_int (dict): Mapping from character → integer index,
-                as used by :class:`~speech.loader.Preprocessor`.
+            char_to_int (dict): Mapping from label, a character or a
+                bigram, → integer index, as used by
+                :class:`~speech.loader.Preprocessor`.
             weight (float): Scales the LM log-probabilities.
             word_bonus (float): Added for each word, which offsets the
                 LM's preference for fewer words.

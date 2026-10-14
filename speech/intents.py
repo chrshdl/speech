@@ -20,12 +20,15 @@ import re
 
 import numpy as np
 
-# The lowest mean log probability per character, relative to the best
-# path, of a match. It depends on how confident the model is. On
-# synthesized questions for the weather in 16 voices, -1.5 matched 99% of
-# them with the 3,750 hour model, 4% of other short commands, and none of
-# 300 LibriSpeech dev sentences. The 100 hour model scores lower, and
-# matched as many at -2.
+from speech import tokens
+
+# The lowest mean log probability per label, relative to the best path,
+# of a match. It depends on how confident the model is. On synthesized
+# questions for the weather in 16 voices, -1.5 matched 99% of them with
+# the 3,750 hour model of characters, 4% of other short commands, and none
+# of 300 LibriSpeech dev sentences. The 100 hour model scores lower, and
+# matched as many at -2. A model of bigrams has about half the labels per
+# sample, so check the threshold for it.
 THRESHOLD = -1.5
 # Utterances longer than this are not commands, so are not matched, which
 # also bounds the time to match them.
@@ -54,7 +57,7 @@ class Intent:
 @dataclasses.dataclass(frozen=True)
 class Match:
     intent: Intent
-    # The mean log probability per character of the best sample, with its
+    # The mean log probability per label of the best sample, with its
     # slot filled in, relative to the best path, so at most 0.
     score: float
     sample: str
@@ -111,7 +114,10 @@ class IntentRecognizer:
             unknown = set(text) - set(char_to_int)
             if unknown:
                 raise ValueError(f"{text!r} has characters {unknown} the model lacks")
-            return np.array([char_to_int[c] for c in text], dtype=np.int64)
+            # Split as the model's transcripts were, into its bigrams if it
+            # has them.
+            labels = tokens.tokenize(text, char_to_int)
+            return np.array([char_to_int[t] for t in labels], dtype=np.int64)
 
         self.samples = []
         self.other = Intent("", tuple(others))

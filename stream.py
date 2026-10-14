@@ -10,7 +10,7 @@ import sounddevice
 import speech
 from speech import streaming
 from speech.features import log_specgram
-from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, best_path, decode
+from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, TOP_K, best_path, decode
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
 from speech.streaming import Transcriber
 from speech.utils import wave
@@ -82,7 +82,12 @@ def transcribe_files(model, inputs, num, chunk_ms, realtime, new_search):
             offline = best_path(probs.argmax(axis=1).tolist(), model.blank)
         else:
             offline = decode(
-                probs, search.beam_size, search.blank, search.lm, search.prune
+                probs,
+                search.beam_size,
+                search.blank,
+                search.lm,
+                search.prune,
+                search.top_k,
             )[0]
 
         print(f"  offline:   {model.decode(offline)}")
@@ -172,6 +177,7 @@ def run(args):
         args.lm,
         args.beam_size,
         args.prune,
+        args.top_k,
         args.lm_weight,
         args.word_bonus,
         args.unk_penalty,
@@ -262,6 +268,12 @@ if __name__ == "__main__":
         type=float,
         default=PRUNE,
         help="Skip labels with a lower log probability in a frame.",
+    )
+    decoding.add_argument(
+        "--top-k",
+        type=int,
+        default=TOP_K,
+        help="Try at most this many of the most likely labels of a frame.",
     )
     decoding.add_argument(
         "--lm-weight", type=float, default=LM_WEIGHT, help="Scales the LM scores."

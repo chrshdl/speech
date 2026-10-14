@@ -208,6 +208,48 @@ to learn once the clips reached about six seconds. In random order it
 learned from the start, also with batches of 32: its CER on Common Voice
 fell to 0.77 in 400 steps, against 0.95 in sorted order.
 
+### Bigram outputs
+
+A CTC model needs an output frame for each label, and one more between
+two equal labels. The convolutions of the 3,750 hour configs stride 4 over
+time, a frame every 40 ms, and English has so many characters per second
+that a LibriSpeech dev-clean transcript of characters fills a median of 61%
+of its frames, 77% at the 95th percentile. Tempo augmentation, which speeds
+clips up by up to 10%, leaves some clips too few frames, and the loss
+skips them. [Deep Speech 2] found the same: at a stride of 4 its WER was
+26% worse than at a stride of 2 with characters, but as good with
+non-overlapping bigrams.
+
+Set `"bigrams" : true` in a config's `data` to train on bigrams, as
+`examples/commonvoice/ctc_streaming_3750h_bigrams_config.json` does. Each
+word is split into pairs of characters from its start, with the last
+character of a word of odd length and each space on their own, so "the cat
+sat" is th, e, space, ca, t, space, sa, t, see `speech/tokens.py`. That
+fills a median of 38% of the frames of dev-clean and at most 65%, about
+what characters fill at a stride of 2, without doubling the work of the
+GRU.
+
+- The labels are every character and every bigram of the training
+  transcripts, 585 for `train-clean-100`. A word with a bigram that
+  training never saw, such as in the dev set or a city name of an intent,
+  is labeled by its characters.
+- Decoded labels are characters again, so the CER and WER, the word LM,
+  the intents, `stream.py` and the exported ONNX model work as for a model
+  of characters.
+- The intents' `THRESHOLD` is a mean log probability per label, and a
+  sample has about half as many labels, so check it for a model of
+  bigrams, and tune the LM again with `tune_lm.py`.
+
+The beam search tries each label above the pruning threshold in a frame
+for each prefix in the beam. With hundreds of labels an uncertain frame
+can leave many above it, so it tries at most the 20 most likely, which
+`--top-k` changes in `eval.py`, `stream.py` and `tune_lm.py`. On a
+Raspberry Pi 4 at 1.0 GHz, the beam search with the LibriSpeech LM costs
+about 0.01 s per second of audio for each label it tries per frame, so 20
+labels bound it at about 0.2 s, with the model itself at about 0.3 s. For
+the 3,750 hour model of characters, the limit changed none of the
+transcripts of every fourth utterance of dev-clean with the LM.
+
 ## Streaming
 
 A bidirectional encoder needs the whole utterance before it can output

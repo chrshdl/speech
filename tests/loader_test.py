@@ -32,6 +32,38 @@ def test_dataset():
     assert len(dataset.data) == 8
 
 
+def test_bigram_labels():
+    preproc = loader.Preprocessor("test.json", start_and_end=False, bigrams=True)
+    # The characters of "hello hi" and "hello world", and their bigrams.
+    chars = set("hello hi world")
+    assert set(preproc.char_to_int) == chars | {"he", "ll", "hi", "wo", "rl"}
+
+    labels = preproc.encode("hello world")
+    expected = ["he", "ll", "o", " ", "wo", "rl", "d"]
+    assert [preproc.int_to_char[i] for i in labels] == expected
+    # Decoding gives characters, so the CER is comparable with a model of
+    # characters.
+    assert preproc.decode(labels) == list("hello world")
+
+    # Words with bigrams that training never saw are labeled by their
+    # characters.
+    labels = preproc.encode("hold her")
+    expected = ["h", "o", "l", "d", " ", "he", "r"]
+    assert [preproc.int_to_char[i] for i in labels] == expected
+
+
+def test_decode_start_and_end():
+    preproc = loader.Preprocessor("test.json", start_and_end=True, bigrams=True)
+    labels = preproc.encode("hello hi")
+    assert preproc.int_to_char[labels[0]] == preproc.START
+    assert preproc.decode(labels) == list("hello hi")
+    assert preproc.decode([]) == []
+    # An end token within the labels stays one label.
+    end = preproc.char_to_int[preproc.END]
+    decoded = preproc.decode(labels[:2] + [end] + labels[2:4])
+    assert decoded == ["h", "e", preproc.END, "l", "l", "o"]
+
+
 def test_loader():
 
     batch_size = 2

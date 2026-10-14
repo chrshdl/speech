@@ -117,6 +117,20 @@ def test_decode_start_and_end(tmp_path):
         assert onnx_model.decode(labels) == "".join(preproc.decode(labels))
 
 
+def test_bigrams(tmp_path):
+    torch.manual_seed(0)
+    preproc = loader.Preprocessor("test.json", start_and_end=False, bigrams=True)
+    model = CTC(preproc.input_dim, preproc.vocab_size, shared.model_config)
+    path = str(tmp_path / "model.onnx")
+    export.export(model, preproc, path)
+    onnx_model = OnnxModel(path)
+
+    assert onnx_model.char_to_int == preproc.char_to_int
+    labels = preproc.encode("hello world")
+    assert onnx_model.decode(labels) == "hello world"
+    assert TorchModel(model, preproc).decode(labels) == "hello world"
+
+
 def test_export_rejects_bidirectional(tmp_path):
     torch.manual_seed(0)
     preproc = loader.Preprocessor("test.json", start_and_end=False)

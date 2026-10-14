@@ -136,6 +136,17 @@ def test_resume_with_more_data(tmp_path, capsys):
     assert all(torch.isfinite(v).all() for v in weights(tmp_path / "run").values())
 
 
+def test_bigrams(tmp_path):
+    config = make_config(tmp_path, 1)
+    config["data"]["bigrams"] = True
+    train_run(config, seed=0)
+    model, preproc = speech.load(str(tmp_path))
+    assert {"he", "ll", "wo"} <= set(preproc.char_to_int)
+    # A label per character and bigram, and the blank.
+    assert model.fc.out_features == preproc.vocab_size + 1
+    assert all(torch.isfinite(v).all() for v in model.state_dict().values())
+
+
 def test_lr_anneal(tmp_path, capsys):
     # The learning rate is divided by the factor after every epoch.
     config = make_config(tmp_path / "anneal", 3)

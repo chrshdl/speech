@@ -25,9 +25,13 @@ NEG_INF = -float("inf")
 
 # Defaults for decoding with a language model. On the LibriSpeech dev set
 # a wider beam barely helped and pruning at 1e-3 changed nothing while
-# making the search three times faster.
+# making the search three times faster. A model of bigrams has hundreds
+# of labels, which can leave many above the pruning threshold in an
+# uncertain frame, so at most TOP_K of them are tried, which bounds the
+# work of a frame on a Raspberry Pi.
 BEAM_SIZE = 32
 PRUNE = math.log(1e-3)
+TOP_K = 20
 
 
 def logaddexp(a, b):
@@ -43,7 +47,7 @@ def logaddexp(a, b):
 
 
 class BeamSearch:
-    def __init__(self, blank, beam_size=10, lm=None, prune=None):
+    def __init__(self, blank, beam_size=10, lm=None, prune=None, top_k=None):
         """
         A prefix beam search that consumes the output of a CTC model one
         frame at a time.
@@ -58,11 +62,14 @@ class BeamSearch:
             WordLM.scorer.
           prune (float, optional): Skip labels whose log probability in
             a frame is below this, which speeds up the search.
+          top_k (int, optional): Try only this many of the most likely
+            labels of a frame, which bounds the work of a frame.
         """
         self.blank = blank
         self.beam_size = beam_size
         self.lm = lm
         self.prune = prune
+        self.top_k = top_k
         self.reset()
 
     def reset(self):
@@ -92,6 +99,8 @@ class BeamSearch:
             for s, p in enumerate(log_probs)
             if self.prune is None or p >= self.prune
         ]
+        if self.top_k is not None and len(labels) > self.top_k:
+            labels = heapq.nlargest(self.top_k, labels, key=lambda x: x[1])
         for prefix, (p_b, p_nb, lm_state, lm_score) in self.beam.items():
             # The variables p_b and p_nb are respectively the
             # probabilities for the prefix given that it ends in a
@@ -169,7 +178,7 @@ def best_path(labels, blank):
     return seq
 
 
-def decode(probs, beam_size=10, blank=0, lm=None, prune=None):
+def decode(probs, beam_size=10, blank=0, lm=None, prune=None, top_k=None):
     """
     Performs inference for the given output probabilities.
 
@@ -180,11 +189,12 @@ def decode(probs, beam_size=10, blank=0, lm=None, prune=None):
       blank (int): Index of the CTC blank label.
       lm (optional): A language model scorer, see BeamSearch.
       prune (float, optional): See BeamSearch.
+      top_k (int, optional): See BeamSearch.
 
     Returns the output label sequence and the corresponding negative
     log-likelihood estimated by the decoder.
     """
-    search = BeamSearch(blank, beam_size, lm, prune)
+    search = BeamSearch(blank, beam_size, lm, prune, top_k)
     with np.errstate(divide="ignore"):
         log_probs = np.log(probs)
     for t in range(log_probs.shape[0]):

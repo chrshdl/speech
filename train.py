@@ -257,7 +257,9 @@ def run(config, device, resume=False):
         saved_model, preproc = speech.load(save_path)
     else:
         preproc = loader.Preprocessor(
-            data_cfg["train_set"], start_and_end=data_cfg["start_and_end"]
+            data_cfg["train_set"],
+            start_and_end=data_cfg["start_and_end"],
+            bigrams=data_cfg.get("bigrams", False),
         )
     workers = data_cfg.get("num_workers", 4)
     # Only the training data is augmented.
