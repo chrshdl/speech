@@ -71,9 +71,9 @@ def _evaluate(setting):
     return setting, speech.compute_cer(results), speech.compute_wer(results)
 
 
-def model_outputs(model_path, dataset_json, tag):
+def model_outputs(model_path, dataset_json, tag, epoch=None):
     """Runs the model once over the dataset."""
-    model, preproc = speech.load(model_path, tag=tag)
+    model, preproc = speech.load(model_path, tag=tag, epoch=epoch)
     model.to(speech.best_device())
     model.set_eval()
     outputs = []
@@ -87,7 +87,9 @@ def model_outputs(model_path, dataset_json, tag):
 
 
 def search(args):
-    outputs, char_to_int, blank = model_outputs(args.model, args.dataset, args.tag)
+    outputs, char_to_int, blank = model_outputs(
+        args.model, args.dataset, args.tag, args.epoch
+    )
     grid = [None, *itertools.product(args.weights, args.bonuses, args.unk_penalties)]
     init = (
         outputs,
@@ -303,10 +305,17 @@ if __name__ == "__main__":
     parser.add_argument(
         "--jobs", type=int, default=3, help="Decoding processes to run at once."
     )
-    parser.add_argument(
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "--last",
         action="store_true",
         help="Last saved model instead of best on dev set.",
+    )
+    which.add_argument(
+        "--epoch",
+        type=int,
+        help="The model saved after this epoch, counted from 0 as train.py "
+        "prints them, instead of the best on the dev set.",
     )
     parser.add_argument("--results", help="A json file to save the results to.")
     parser.add_argument(
@@ -325,7 +334,7 @@ if __name__ == "__main__":
     else:
         if args.model is None or args.dataset is None or args.lm is None:
             parser.error("give a model, a dataset and --lm, or --from-results")
-        args.tag = None if args.last else "best"
+        args.tag = None if args.last or args.epoch is not None else "best"
         search_results = search(args)
         if args.results is not None:
             with open(args.results, "w") as fid:

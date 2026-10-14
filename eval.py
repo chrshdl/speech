@@ -52,6 +52,7 @@ def run(
     dataset_json,
     batch_size=8,
     tag="best",
+    epoch=None,
     out_file=None,
     decoder_args=None,
     lm_path=None,
@@ -78,7 +79,7 @@ def run(
         from speech import loader
 
         device = speech.best_device()
-        model, preproc = speech.load(model_path, tag=tag)
+        model, preproc = speech.load(model_path, tag=tag, epoch=epoch)
         ldr = loader.make_loader(dataset_json, preproc, batch_size)
         model.to(device)
         model.set_eval()
@@ -108,10 +109,17 @@ if __name__ == "__main__":
         help="A path to a stored model, or a CTC model exported to .onnx by export.py.",
     )
     parser.add_argument("dataset", help="A json file with the dataset to evaluate.")
-    parser.add_argument(
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "--last",
         action="store_true",
         help="Last saved model instead of best on dev set.",
+    )
+    which.add_argument(
+        "--epoch",
+        type=int,
+        help="The model saved after this epoch, counted from 0 as train.py "
+        "prints them, instead of the best on the dev set.",
     )
     parser.add_argument("--save", help="Optional file to save predicted results.")
     decoding = parser.add_argument_group("CTC decoding")
@@ -163,7 +171,8 @@ if __name__ == "__main__":
     run(
         args.model,
         args.dataset,
-        tag=None if args.last else "best",
+        tag=None if args.last or args.epoch is not None else "best",
+        epoch=args.epoch,
         out_file=args.save,
         decoder_args=decoder_args,
         lm_path=args.lm,

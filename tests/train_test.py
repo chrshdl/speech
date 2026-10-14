@@ -170,6 +170,23 @@ def test_dev_sets_reported_apart(tmp_path, capsys):
     assert {"dev_loss", "dev_cer"} <= tags
 
 
+def test_saves_every_epoch(tmp_path):
+    train_run(make_config(tmp_path, 2), seed=0)
+    names = {p.name for p in tmp_path.iterdir()}
+    for e in range(2):
+        assert {f"model_epoch_{e}", f"preproc_epoch_{e}.pyc"} <= names
+    # The model of the last epoch is also the last model.
+    last = weights(tmp_path)
+    epoch_0, _ = speech.load(str(tmp_path), epoch=0)
+    epoch_1, _ = speech.load(str(tmp_path), epoch=1)
+    for name, value in epoch_1.state_dict().items():
+        assert torch.equal(value, last[name]), name
+    assert any(
+        not torch.equal(value, last[name])
+        for name, value in epoch_0.state_dict().items()
+    )
+
+
 def test_dev_set_names():
     paths = [
         "examples/librispeech/data/LibriSpeech/dev-clean.json",

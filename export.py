@@ -7,6 +7,7 @@ import speech
 from speech import export
 from speech.onnx_model import OnnxModel
 from speech.torch_model import TorchModel
+from speech.utils.io import get_names
 
 
 def check(model, preproc, path, seconds=10, chunk=17):
@@ -42,8 +43,8 @@ if __name__ == "__main__":
     parser.add_argument("model", help="A path to a stored model.")
     parser.add_argument(
         "--out",
-        help="The .onnx file to write, by default best_model-int8.onnx or "
-        "best_model-fp32.onnx in the model's directory.",
+        help="The .onnx file to write, by default the saved model's name with "
+        "-int8.onnx or -fp32.onnx, such as best_model-int8.onnx.",
     )
     parser.add_argument(
         "--fp32",
@@ -51,20 +52,26 @@ if __name__ == "__main__":
         help="Keep the GRU weights in float32 instead of int8, four times "
         "larger and slower but exactly the PyTorch model.",
     )
-    parser.add_argument(
+    which = parser.add_mutually_exclusive_group()
+    which.add_argument(
         "--last",
         action="store_true",
         help="Last saved model instead of best on dev set.",
     )
+    which.add_argument(
+        "--epoch",
+        type=int,
+        help="The model saved after this epoch, counted from 0 as train.py "
+        "prints them, instead of the best on the dev set.",
+    )
     args = parser.parse_args()
 
-    tag = None if args.last else "best"
-    model, preproc = speech.load(args.model, tag=tag)
+    tag = None if args.last or args.epoch is not None else "best"
+    model, preproc = speech.load(args.model, tag=tag, epoch=args.epoch)
     model.set_eval()
     precision = "fp32" if args.fp32 else "int8"
-    out = args.out or os.path.join(
-        args.model, f"{tag + '_' if tag else ''}model-{precision}.onnx"
-    )
+    model_path = get_names(args.model, tag, args.epoch)[0]
+    out = args.out or f"{model_path}-{precision}.onnx"
     export.export(model, preproc, out, int8=not args.fp32)
     print(f"Wrote {out}, {os.path.getsize(out) / 1e6:.1f} MB")
     diff = check(model, preproc, out)

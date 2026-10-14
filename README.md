@@ -67,6 +67,7 @@ After each epoch, `train.py` writes these files to the config's `save_path`:
 |---|---|
 | `model`, `preproc.pyc` | The model after the last epoch, for `eval.py` and `stream.py` |
 | `best_model`, `best_preproc.pyc` | The model with the lowest dev CER so far |
+| `model_epoch_N`, `preproc_epoch_N.pyc` | The model after epoch N, counted from 0 as the log counts them, kept to compare the epochs. `eval.py`, `export.py`, `stream.py` and `tune_lm.py` load it with `--epoch N` |
 | `train_state` | Everything needed to resume: the model, the optimizer state, the epoch and step counts, the best dev CER and the random number generator states |
 | `events.out.tfevents.*` | The TensorBoard log |
 
@@ -474,7 +475,8 @@ This writes `best_model-int8.onnx` to the model's directory, a single file
 with the weights, the feature normalization and the labels. It then streams
 random input through the file and prints the largest difference of its
 output probabilities from the PyTorch model's. `--last` exports the last
-model instead of the best one.
+model instead of the best one, and `--epoch 3` the model saved after epoch
+3, to `model_epoch_3-int8.onnx`.
 
 The GRU weights, nearly all of the model and of the memory read for each
 frame, are stored as 8 bit integers, which makes the file four times

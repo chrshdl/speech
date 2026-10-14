@@ -12,7 +12,7 @@ from speech.models.ctc_decoder import BEAM_SIZE, PRUNE, TOP_K, BeamSearch
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS, WordLM
 
 
-def load(path, tag="best", device="cpu", threads=None):
+def load(path, tag="best", device="cpu", threads=None, epoch=None):
     """
     Loads a streaming CTC model: a .onnx file from speech.export, run
     with ONNX Runtime, or a directory saved by train.py, run with
@@ -21,9 +21,11 @@ def load(path, tag="best", device="cpu", threads=None):
     Arguments:
         path (str): The .onnx file or model directory.
         tag (str): For a directory, "best" for the model with the lowest
-            dev CER, or None for the last one.
+            dev CER, or None for the last one or the one of epoch.
         device (str): For a directory, the device to run the model on.
         threads (int, optional): The CPU threads to compute with.
+        epoch (int, optional): For a directory, the epoch, counted from
+            0, of the model saved after it, with the tag None.
 
     Returns an OnnxModel or TorchModel.
     """
@@ -40,7 +42,7 @@ def load(path, tag="best", device="cpu", threads=None):
 
     if threads is not None:
         torch.set_num_threads(threads)
-    model, preproc = speech.load(path, tag=tag)
+    model, preproc = speech.load(path, tag=tag, epoch=epoch)
     if not isinstance(model, CTC) or model.rnn.bidirectional:
         raise ValueError(f"{path} is not a unidirectional CTC model, which can stream")
     model.to(device)

@@ -9,10 +9,17 @@ MODEL = "model"
 PREPROC = "preproc.pyc"
 
 
-def get_names(path, tag):
+def get_names(path, tag="", epoch=None):
+    """
+    Returns the paths of the model and the preprocessor, such as
+    best_model and best_preproc.pyc for the tag "best", or model_epoch_3
+    and preproc_epoch_3.pyc for the model saved after epoch 3.
+    """
     tag = tag + "_" if tag else ""
-    model = os.path.join(path, tag + MODEL)
-    preproc = os.path.join(path, tag + PREPROC)
+    epoch = f"_epoch_{epoch}" if epoch is not None else ""
+    model = os.path.join(path, tag + MODEL + epoch)
+    stem, ext = os.path.splitext(PREPROC)
+    preproc = os.path.join(path, tag + stem + epoch + ext)
     return model, preproc
 
 
@@ -26,12 +33,12 @@ def atomic_write(path, write):
     os.replace(tmp, path)
 
 
-def save(model, preproc, path, tag=""):
+def save(model, preproc, path, tag="", epoch=None):
     """
     Saves the model weights and config, which with the preprocessor are
-    enough to rebuild the model.
+    enough to rebuild the model, under the names of get_names.
     """
-    model_n, preproc_n = get_names(path, tag)
+    model_n, preproc_n = get_names(path, tag, epoch)
     checkpoint = {
         "class": type(model).__name__,
         "config": model.config,
@@ -46,12 +53,12 @@ def save(model, preproc, path, tag=""):
     atomic_write(preproc_n, write_preproc)
 
 
-def load(path, tag=""):
+def load(path, tag="", epoch=None):
     """
     Loads a model and preprocessor saved with save. The model is on the
     CPU.
     """
-    model_n, preproc_n = get_names(path, tag)
+    model_n, preproc_n = get_names(path, tag, epoch)
     with open(preproc_n, "rb") as fid:
         preproc = pickle.load(fid)
     checkpoint = torch.load(model_n, map_location="cpu")
