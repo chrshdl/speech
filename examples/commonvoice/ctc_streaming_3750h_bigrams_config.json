@@ -9,11 +9,13 @@
             "examples/librispeech/data/LibriSpeech/train-clean-360.json",
             "examples/librispeech/data/LibriSpeech/train-other-500.json",
             "examples/commonvoice/data/train.json",
-            "examples/speech_commands/data/train.json"
+            "examples/speech_commands/data/train.json",
+            "examples/myst/data/train.json"
         ],
         "dev_set" : [
             "examples/librispeech/data/LibriSpeech/dev-clean.json",
-            "examples/commonvoice/data/dev.json"
+            "examples/commonvoice/data/dev.json",
+            "examples/librispeech/data/LibriSpeech/dev-other.json"
         ],
         "start_and_end" : false,
         "bigrams" : true,
@@ -47,7 +49,7 @@
         "batch_size" : 64,
         "accumulate" : 4,
         "grad_clip" : 400,
-        "epochs" : 6,
+        "epochs" : 8,
         "learning_rate" : 2e-4,
         "lr_anneal" : 1.2
     },

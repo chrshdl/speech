@@ -4,6 +4,10 @@ and reports, every 100 steps, the training loss per character, the greedy
 CER on fixed Common Voice and LibriSpeech dev clips and how many GRU gates
 are saturated. Ends with a summary table. Run it from the repository root
 on the machine with the data.
+
+Setups J to M compare learning rates for a run of bigram outputs, such as
+ctc_streaming_3750h_bigrams_config.json, set up as it trains: in random
+order, in batches of 256 clipped at a norm of 400.
 """
 
 import argparse
@@ -97,6 +101,18 @@ def setups(base, small):
             "sortagrad": False,
             "power_norm": True,
         },
+        **{
+            name: {
+                "desc": f"bigrams, {lr:.0e}, random order, batches of 256",
+                "model": big,
+                "lr": lr,
+                "sortagrad": False,
+                "bigrams": True,
+                "accumulate": 256 // base["optimizer"]["batch_size"],
+                "clip": 400,
+            }
+            for name, lr in [("J", 2e-4), ("K", 3e-4), ("L", 4e-4), ("M", 6e-4)]
+        },
     }
 
 
@@ -161,7 +177,9 @@ def run(name, setup, base, args, devs, device):
         os.environ.pop(POWER_NORM, None)
     data_cfg = base["data"]
     train_json = LS_TRAIN if setup.get("data") == "ls" else args.train
-    preproc = loader.Preprocessor(train_json, start_and_end=False)
+    preproc = loader.Preprocessor(
+        train_json, start_and_end=False, bigrams=setup.get("bigrams", False)
+    )
     augment = {}
     if setup.get("augment", True):
         augment = {
@@ -200,7 +218,9 @@ def run(name, setup, base, args, devs, device):
         with precision():
             loss = model.loss(batch)
         (loss / accumulate).backward()
-        per_char.append(loss.item() / np.mean([len(lab) for lab in batch[1]]))
+        # Per character also for bigram labels.
+        chars = np.mean([len(preproc.decode(lab)) for lab in batch[1]])
+        per_char.append(loss.item() / chars)
         if (i + 1) % accumulate:
             continue
         nn.utils.clip_grad_norm_(model.parameters(), setup.get("clip", 200))
@@ -234,7 +254,11 @@ def run(name, setup, base, args, devs, device):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--setups", default="A,B,C,D,E,F")
+    parser.add_argument(
+        "--setups",
+        default="A,B,C,D,E,F",
+        help="Such as J,K,L,M for the learning rates.",
+    )
     parser.add_argument("--steps", type=int, default=400)
     parser.add_argument("--every", type=int, default=100, help="Steps between reports.")
     parser.add_argument("--train", default=CV_TRAIN, help="The mixed training sample.")
