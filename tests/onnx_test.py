@@ -83,6 +83,25 @@ def test_export_matches_torch(name, tmp_path):
 
 
 @pytest.mark.parametrize("name", CONFIGS)
+def test_flush_without_new_frames(name, tmp_path):
+    # A stream can end with no audio left, as stream.py ends one, which
+    # gives the frames that wait for their lookahead.
+    model, preproc = make_model(CONFIGS[name])
+    audio, sample_rate = wave.array_from_wave("test0.wav")
+    features = log_specgram(audio, sample_rate)
+    expected = TorchModel(model, preproc).probs(features)
+
+    path = str(tmp_path / "model.onnx")
+    export.export(model, preproc, path, int8=False)
+    onnx_model = OnnxModel(path, threads=1)
+    probs, state = onnx_model.stream(features)
+    rest, _ = onnx_model.stream(features[:0], state, final=True)
+    context = model.lookahead.context if model.lookahead is not None else 0
+    assert len(rest) == context
+    assert np.allclose(np.concatenate([probs, rest]), expected, atol=1e-5)
+
+
+@pytest.mark.parametrize("name", CONFIGS)
 def test_receptive_field(name):
     model, _ = make_model(CONFIGS[name])
     stride, field = export.receptive_field(model)

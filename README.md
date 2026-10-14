@@ -246,9 +246,10 @@ can leave many above it, so it tries at most the 20 most likely, which
 `--top-k` changes in `eval.py`, `stream.py` and `tune_lm.py`. On a
 Raspberry Pi 4 at 1.0 GHz, the beam search with the LibriSpeech LM costs
 about 0.01 s per second of audio for each label it tries per frame, so 20
-labels bound it at about 0.2 s, with the model itself at about 0.3 s. For
-the 3,750 hour model of characters, the limit changed none of the
-transcripts of every fourth utterance of dev-clean with the LM.
+labels bound it at about 0.2 s. The exported 3,750 hour model streams at
+0.29 s per second of audio there, and 0.30 s with an output layer of 586
+labels. For the 3,750 hour model of characters, the limit changed none of
+the transcripts of every fourth utterance of dev-clean with the LM.
 
 ## Streaming
 

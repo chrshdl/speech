@@ -3,21 +3,24 @@ Exports a streaming CTC model to ONNX for speech.onnx_model, which runs
 it with ONNX Runtime and without PyTorch, such as on a Raspberry Pi.
 
 The graph encodes a window of feature frames that yields one or more
-encoder frames, carrying the GRU state from call to call:
+encoder frames, carrying the GRU state and the encoder frames that wait
+for their lookahead from call to call:
 
-    features (1, time, freq), hidden (layers, 1, dim)
-        -> terms (1, frames, lookahead + 1, labels), hidden_out
+    features (1, time, freq), hidden (layers, 1, dim),
+    pending (frames, dim), final (1,), encode (1,)
+        -> logits (1, frames, labels), hidden_out, pending_out
+
+The lookahead convolution mixes each encoder frame with the next ones,
+and the output layer then gives the logits of each frame whose future has
+arrived, once per frame. The frames that still wait are returned as
+pending_out. With final, the frames past the end are zeros, as the
+lookahead pads them, and every frame gets its logits. A stream can end
+with too few feature frames for another encoder frame, which the
+convolutions reject, so it flushes with a window of padding and encode
+false, whose encoder frame is dropped.
 
 At inference batch normalization is a fixed scale and shift, which is
-folded into the weights before it. The lookahead convolution and the
-output layer are linear, so the logits of frame t are
-
-    fc(sum_k w_k * y[t + k]) = b + sum_k W_k y[t + k]
-
-with W_k = fc.weight * w_k. The graph returns the terms W_k y[s] of each
-new frame s, with the bias in k = 0, and the runtime sums them as the
-future frames arrive. Their sum over the frames that exist at the end of
-a stream is the zero padding of the lookahead.
+folded into the weights before it.
 
 With int8 the GRU weights, nearly all of the model and of the memory read
 for each frame, are stored as 8 bit integers with a scale per output,
@@ -108,20 +111,15 @@ def gru_layers(model):
     return layers
 
 
-def head_terms(model):
+def lookahead_taps(model):
     """
-    Returns the weight with shape (dim, (lookahead + 1) * labels) and the
-    bias of the terms W_k y, see the module docstring.
+    The weights of the lookahead convolution with shape (lookahead + 1,
+    dim), the k-th weighting the encoder frame k frames ahead, or a single
+    tap of ones for a model without a lookahead.
     """
-    fc_w, fc_b = _as_numpy(model.fc.weight), _as_numpy(model.fc.bias)
     if model.lookahead is None:
-        taps = np.ones((fc_w.shape[1], 1))
-    else:
-        taps = _as_numpy(model.lookahead.conv.weight)[:, 0, :]
-    weight = np.concatenate([(fc_w * taps[:, k]).T for k in range(taps.shape[1])], 1)
-    bias = np.zeros((taps.shape[1], fc_w.shape[0]))
-    bias[0] = fc_b
-    return weight, bias.reshape(-1)
+        return np.ones((1, model.encoder_dim))
+    return _as_numpy(model.lookahead.conv.weight)[:, 0, :].T
 
 
 def receptive_field(model):
@@ -266,20 +264,33 @@ def build(model, preproc, int8=True):
         raise ValueError("A bidirectional model cannot stream, so it is not exported.")
 
     graph = _Graph(int8)
+    i64 = functools.partial(graph.const, dtype=np.int64)
+    layers = gru_layers(model)
+    dim = model.encoder_dim
+    hidden_shape = [len(layers), 1, dim]
+    stride, field = receptive_field(model)
+
+    def value(name, shape, dtype=TensorProto.FLOAT):
+        return helper.make_tensor_value_info(name, dtype, shape)
+
+    def zeros(nodes, shape, name):
+        """Zeros of the shape that an int64 tensor holds."""
+        zero = helper.make_tensor(name + "_value", TensorProto.FLOAT, [1], [0.0])
+        return graph.node(nodes, "ConstantOfShape", [shape], name, value=zero)
+
     nodes = []
     node = functools.partial(graph.node, nodes)
-    i64 = functools.partial(graph.const, dtype=np.int64)
 
     # Normalize the features and add a channel: (1, 1, time, freq).
     x = node("Sub", ["features", graph.const("mean", preproc.mean)], "centered")
     x = node("Mul", [x, graph.const("inv_std", 1 / preproc.std)], "normalized")
     x = node("Unsqueeze", [x, i64("axis_1", [1])], "conv_in")
-    for i, (weight, bias, stride, clip) in enumerate(conv_layers(model)):
+    for i, (weight, bias, conv_stride, clip) in enumerate(conv_layers(model)):
         x = node(
             "Conv",
             [x, graph.const(f"conv{i}_w", weight), graph.const(f"conv{i}_b", bias)],
             f"conv{i}",
-            strides=list(stride),
+            strides=list(conv_stride),
         )
         if clip is None:
             x = node("Relu", [x], f"conv{i}_relu")
@@ -291,8 +302,6 @@ def build(model, preproc, int8=True):
     rnn_in = model.rnn.weight_ih_l0.shape[1]
     x = node("Reshape", [x, i64("conv_shape", [-1, rnn_in])], "rnn_in")
 
-    layers = gru_layers(model)
-    dim = model.encoder_dim
     hiddens = [f"hidden{l}" for l in range(len(layers))]
     node("Split", ["hidden"], hiddens, axis=0, num_outputs=len(layers))
     finals = []
@@ -310,28 +319,64 @@ def build(model, preproc, int8=True):
         x = node("Reshape", [ys, i64("rnn_shape", [-1, dim])], f"gru{l}_out")
     node("Concat", finals, "hidden_out", axis=0)
 
-    # The head stays in float32. It is small, and the output probabilities
-    # decide the beam search.
-    weight, bias = head_terms(model)
-    terms = graph.matmul(nodes, x, weight, bias, "head", int8=False)
-    taps = len(bias) // (model.blank + 1)
-    node(
-        "Reshape", [terms, i64("terms_shape", [1, -1, taps, model.blank + 1])], "terms"
-    )
+    # A window of padding, which a stream that ends without a complete
+    # encoder frame flushes its pending frames with, gives no frames.
+    none = i64("none", [0])
+    axis_0 = i64("axis_0", [0])
+    count = node("Shape", [x], "encoded_count", start=0, end=1)
+    keep = node("Where", ["encode", count, none], "keep")
+    node("Slice", [x, none, keep, axis_0], "encoded")
 
-    def value(name, shape):
-        return helper.make_tensor_value_info(name, TensorProto.FLOAT, shape)
+    # The lookahead weights each encoder frame and the next ones, of the
+    # frames that waited for their future, the new frames and, at the end
+    # of a stream, zeros for the frames past it. The frames whose future
+    # has not arrived yet wait for the next call.
+    taps = lookahead_taps(model)
+    context = i64("context", [len(taps) - 1])
+    joined = node("Concat", ["pending", "encoded"], "joined", axis=0)
+    pad = node("Where", ["final", context, none], "pad")
+    pad_shape = node("Concat", [pad, i64("dim", [dim])], "pad_shape", axis=0)
+    padded = node(
+        "Concat", [joined, zeros(nodes, pad_shape, "padding")], "padded", axis=0
+    )
+    length = node("Shape", [padded], "length", start=0, end=1)
+    ready = node(
+        "Max",
+        [node("Sub", [length, context], "length_less_context"), none],
+        "ready",
+    )
+    mixed = []
+    for k, tap in enumerate(taps):
+        start = i64(f"tap{k}_start", [k])
+        end = node("Add", [ready, start], f"tap{k}_end")
+        frames = node("Slice", [padded, start, end, axis_0], f"tap{k}_frames")
+        mixed.append(
+            node("Mul", [frames, graph.const(f"tap{k}", tap)], f"tap{k}_mixed")
+        )
+    x = node("Sum", mixed, "lookahead")
+    last = i64("last", [np.iinfo(np.int64).max])
+    node("Slice", [joined, ready, last, axis_0], "pending_out")
+
+    # The output layer stays in float32. It is small, and the output
+    # probabilities decide the beam search.
+    fc_w, fc_b = _as_numpy(model.fc.weight), _as_numpy(model.fc.bias)
+    x = graph.matmul(nodes, x, fc_w.T, fc_b, "fc", int8=False)
+    node("Unsqueeze", [x, axis_0], "logits")
 
     onnx_graph = helper.make_graph(
         nodes,
         "streaming_ctc",
         [
             value("features", [1, "time", preproc.input_dim]),
-            value("hidden", [len(layers), 1, dim]),
+            value("hidden", hidden_shape),
+            value("pending", ["waiting", dim]),
+            value("final", [1], TensorProto.BOOL),
+            value("encode", [1], TensorProto.BOOL),
         ],
         [
-            value("terms", [1, "frames", taps, model.blank + 1]),
-            value("hidden_out", [len(layers), 1, dim]),
+            value("logits", [1, "frames", model.blank + 1]),
+            value("hidden_out", hidden_shape),
+            value("pending_out", ["still_waiting", dim]),
         ],
         graph.initializers,
     )
@@ -342,7 +387,6 @@ def build(model, preproc, int8=True):
     )
     onnx_model.ir_version = IR_VERSION
 
-    stride, field = receptive_field(model)
     labels = [preproc.int_to_char[i] for i in range(preproc.vocab_size)]
     metadata = {
         "format_version": FORMAT_VERSION,

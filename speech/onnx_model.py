@@ -14,12 +14,12 @@ from speech.features import SpecgramStream
 
 # The version of the graph's inputs, outputs and metadata that speech.export
 # writes, bumped when they change.
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 # Carries a stream across calls to OnnxModel.stream: the feature frames not
-# yet encoded, the GRU state, and the output terms of the frames whose
-# lookahead is not complete yet, see speech.export.
-OnnxState = collections.namedtuple("OnnxState", ["frames", "hidden", "terms"])
+# yet encoded, the GRU state, and the encoder frames whose lookahead is not
+# complete yet, see speech.export.
+OnnxState = collections.namedtuple("OnnxState", ["frames", "hidden", "pending"])
 
 
 def open_session(path, threads=None):
@@ -66,7 +66,7 @@ class OnnxModel:
         inputs = {i.name: i.shape for i in self.session.get_inputs()}
         self.input_dim = inputs["features"][2]
         self.hidden_shape = inputs["hidden"]
-        _, _, self.taps, self.output_dim = self.session.get_outputs()[0].shape
+        self.output_dim = self.session.get_outputs()[0].shape[2]
         hop = SpecgramStream(self.sample_rate).hop
         self.frame_seconds = self.stride * hop / self.sample_rate
 
@@ -92,10 +92,9 @@ class OnnxModel:
             state = OnnxState(
                 np.zeros((0, self.input_dim), np.float32),
                 np.zeros(self.hidden_shape, np.float32),
-                np.zeros((0, self.taps, self.output_dim), np.float32),
+                np.zeros((0, self.hidden_shape[2]), np.float32),
             )
         frames = np.concatenate([state.frames, features.astype(np.float32)])
-        hidden, terms = state.hidden, state.terms
 
         # Encoder frame j depends on the feature frames from stride * j to
         # stride * j + receptive_field, so encode all the frames that are
@@ -103,22 +102,27 @@ class OnnxModel:
         n = 0
         if len(frames) >= self.receptive_field:
             n = (len(frames) - self.receptive_field) // self.stride + 1
+        if n > 0:
             window = frames[: (n - 1) * self.stride + self.receptive_field]
-            new_terms, hidden = self.session.run(
-                None, {"features": window[None], "hidden": hidden}
-            )
-            terms = np.concatenate([terms, new_terms[0]])
-            frames = frames[n * self.stride :]
-
-        # A frame's logits sum its own term and those of the next taps - 1
-        # frames. At the end of the stream the missing frames are zeros.
-        ready = len(terms) if final else max(len(terms) - (self.taps - 1), 0)
-        logits = np.zeros((ready, self.output_dim), np.float32)
-        for k in range(self.taps):
-            rows = terms[k : k + ready, k]
-            logits[: len(rows)] += rows
-        state = OnnxState(frames, hidden, terms[ready:])
-        return softmax(logits), state
+        elif final:
+            # The pending frames are flushed with a window of padding, whose
+            # encoder frame the graph drops.
+            window = np.zeros((self.receptive_field, self.input_dim), np.float32)
+        else:
+            empty = np.zeros((0, self.output_dim), np.float32)
+            return empty, OnnxState(frames, state.hidden, state.pending)
+        logits, hidden, pending = self.session.run(
+            None,
+            {
+                "features": window[None],
+                "hidden": state.hidden,
+                "pending": state.pending,
+                "final": np.array([final]),
+                "encode": np.array([n > 0]),
+            },
+        )
+        state = OnnxState(frames[n * self.stride :], hidden, pending)
+        return softmax(logits[0]), state
 
     def probs(self, features):
         """The output probabilities for a whole input, see stream."""
