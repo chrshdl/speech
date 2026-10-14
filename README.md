@@ -147,7 +147,10 @@ does not cover them there.
 
 `train_set` and `dev_set` can be lists of dataset json files, to train on
 several datasets at once, such as LibriSpeech and Common Voice in
-`examples/commonvoice/ctc_streaming_3750h_gpu_config.json`.
+`examples/commonvoice/ctc_streaming_3750h_gpu_config.json`. After each epoch,
+each dev set's loss, CER and WER are printed and logged to TensorBoard apart,
+such as `dev_cer/librispeech/dev-clean`, and the loss and CER over all of
+them as `dev_loss` and `dev_cer`, which select the best model.
 
 ### Learning rate schedules
 

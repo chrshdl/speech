@@ -147,6 +147,42 @@ def test_bigrams(tmp_path):
     assert all(torch.isfinite(v).all() for v in model.state_dict().values())
 
 
+def test_dev_sets_reported_apart(tmp_path, capsys):
+    words = tmp_path / "words.json"
+    words.write_text('{"text": "hello", "duration": 1.101, "audio": "test0.wav"}\n' * 3)
+    config = make_config(tmp_path / "run", 1)
+    config["data"]["dev_set"] = ["test.json", str(words)]
+    train_run(config, seed=0)
+    out = capsys.readouterr().out
+    for name in ("test", "words"):
+        assert f"Dev {name}: Loss" in out and "WER" in out
+
+    from tensorboard.backend.event_processing.event_accumulator import (
+        EventAccumulator,
+    )
+
+    events = EventAccumulator(str(tmp_path / "run"))
+    events.Reload()
+    tags = set(events.Tags()["scalars"])
+    for metric in ("dev_loss", "dev_cer", "dev_wer"):
+        assert {f"{metric}/test", f"{metric}/words"} <= tags
+    # The CER over all dev sets selects the best model, as before.
+    assert {"dev_loss", "dev_cer"} <= tags
+
+
+def test_dev_set_names():
+    paths = [
+        "examples/librispeech/data/LibriSpeech/dev-clean.json",
+        "examples/commonvoice/data/dev.json",
+    ]
+    assert train.dev_set_names(paths) == ["librispeech/dev-clean", "commonvoice/dev"]
+    # Names that are not unique are the paths.
+    assert train.dev_set_names(["a/dev.json", "b/dev.json"]) == [
+        "a/dev.json",
+        "b/dev.json",
+    ]
+
+
 def test_lr_anneal(tmp_path, capsys):
     # The learning rate is divided by the factor after every epoch.
     config = make_config(tmp_path / "anneal", 3)
