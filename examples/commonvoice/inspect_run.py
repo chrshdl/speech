@@ -6,7 +6,7 @@ learned keeps its loss flat at about 210 to 230 and outputs blanks on
 nearly every frame. Trains nothing. Run it from the repository root:
 
     uv run examples/commonvoice/inspect_run.py \\
-        examples/commonvoice/models/ctc_streaming_3750h_bigrams --epoch 0
+        examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 0
 """
 
 import argparse
