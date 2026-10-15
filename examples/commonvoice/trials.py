@@ -5,10 +5,10 @@ CER on fixed Common Voice and LibriSpeech dev clips and how many GRU gates
 are saturated. Ends with a summary table. Run it from the repository root
 on the machine with the data.
 
-Setups J to O train a model of bigram outputs, such as
-ctc_streaming_3750h_bigrams_config.json, set up as it trains: in random
-order, in batches of 256 clipped at a norm of 400. Its run at 2e-4, as J,
-never learned to read the audio in its first epoch. J to M compare
+Setups J to O train a model of bigram outputs at a stride of 4, as a run
+of the 3,750 hour config with "bigrams" : true trained: in random order, in
+batches of 256 clipped at a norm of 400. That run, at 2e-4 as J, never
+learned to read the audio in its first epoch. J to M compare
 learning rates, as Deep Speech 2 chose each model's rate from 1e-4 to
 6e-4 for the fastest convergence. N adds a CTC loss of characters on a
 second output layer, which the run of characters learned from. O trains

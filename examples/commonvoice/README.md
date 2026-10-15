@@ -218,16 +218,16 @@ uv run train.py examples/commonvoice/ctc_streaming_3750h_gpu_config.json
 It has not been run yet, so measure its speed with `benchmark.py` before
 committing to a full run.
 
-### Bigrams
+### Stride 3
 
-`ctc_streaming_3750h_bigrams_config.json` is the config with
-`"bigrams" : true`, which outputs pairs of characters, so the transcripts
-fit the model's 40 ms frames better, see "Bigram outputs" in the main
-README. It also differs in:
+`ctc_streaming_3750h_stride3_config.json` strides 3 over time instead of
+4, a frame every 30 ms, so fast speech has frames to spare for its
+characters, see "Frames per character" in the main README. It also differs
+in:
 
 - **Epochs.** It trains for 8 epochs rather than 6, over which the
   learning rate falls from 2e-4 to 5.6e-5, the same rate in each epoch as
-  the run of characters.
+  the run at a stride of 4.
 - **VoxPopuli.** It also trains on the European Parliament speeches of
   VoxPopuli, with many accents and more spontaneous than audiobooks,
   which need preparing first, see `examples/voxpopuli/README.md`. The
@@ -236,45 +236,59 @@ README. It also differs in:
 - **dev-other.** LibriSpeech dev-other, the closest public stand-in for
   hard speech, is a third dev set, see setup step 2.
 
-Each dev set's loss, CER and WER are reported apart, such as
-`dev_wer/librispeech/dev-clean` in TensorBoard. Compare those with the run
-of characters epoch by epoch, as its `dev_cer` over all dev sets, which
-selects the best model, has no dev-other. It saves to its own directory:
+The GRU computes a third more frames, so measure the hours per epoch with
+`benchmark.py` first. Each dev set's loss, CER and WER are reported apart,
+such as `dev_wer/librispeech/dev-clean` in TensorBoard. Compare those with
+the run at a stride of 4 epoch by epoch, as its `dev_cer` over all dev
+sets, which selects the best model, has no dev-other. It saves to its own
+directory:
 
 ```
-caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_bigrams_config.json
+uv run benchmark.py examples/commonvoice/ctc_streaming_3750h_stride3_config.json
+caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_stride3_config.json
 ```
 
-The configs start at a learning rate of 2e-4, found with batches of 32,
-where 5e-4 saturated the gates of the GRU. The model of bigrams did not
-learn at that rate: after its first epoch its training loss was still
-about 200, as in its first steps, and it gave "th s the the the" for every
-dev clip, a CER of 0.76, where the run of characters reached 0.28. Deep
-Speech 2 trained bigrams the same way as characters, but chose each
-model's learning rate from 1e-4 to 6e-4 for the fastest convergence.
-`trials.py` compares setups of the model of bigrams, trained as the run
-trains, and reports the dev CER and the share of saturated gates every
-100 steps:
+`examples/commonvoice/inspect_run.py` shows whether a run learns, from
+its training loss and the output of a saved model on a few dev clips:
 
-| Setup | What |
-|---|---|
-| J, K, L, M | Learning rates of 2e-4, 3e-4, 4e-4 and 6e-4 |
-| N | 2e-4, with a CTC loss of characters on a second output layer added to the loss of the bigrams, which only training uses |
-| O | Deep Speech 2's optimizer: SGD with Nesterov momentum of 0.99, at 3e-4 |
+```
+uv run examples/commonvoice/inspect_run.py \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 0
+```
+
+### Bigram trials
+
+A model of bigrams at a stride of 4, the config at a stride of 4 with
+`"bigrams" : true` and the data of the stride 3 config, did not learn: after
+its first epoch its training loss was still about 200, as in its first
+steps, and it gave "th s the the the" for every dev clip, a CER of 0.76,
+where the run of characters reached 0.28. Deep Speech 2 trained bigrams
+the same way as characters, but chose each model's learning rate from
+1e-4 to 6e-4 for the fastest convergence. `trials.py` compares setups of
+the model of bigrams, trained as the run trained, and reports the dev CER
+and the share of saturated gates every 100 steps:
+
+| Setup | What | CER on Common Voice at step 800 | Saturated gates |
+|---|---|---|---|
+| J, K, L, M | Learning rates of 2e-4, 3e-4, 4e-4 and 6e-4 | 0.83, 0.81, 0.80, 0.81 | 43%, 53%, 53%, 60% |
+| N | 2e-4, with a CTC loss of characters on a second output layer added to the loss of the bigrams, which only training uses | 0.78 | 34% |
+| O | Deep Speech 2's optimizer: SGD with Nesterov momentum of 0.99, at 3e-4 | 0.78 | 24% |
 
 They train on `examples/commonvoice/data/trial_train_set.json`, the random
-sample of 96,000 training clips that `trial_noaug.py` writes. The run of
-characters began to learn after about 250 steps of 256 clips, so they
-train 800, which take the sample about twice, as 375 steps fit in it:
+sample of 96,000 training clips that `trial_noaug.py` writes, for 800
+steps of 256 clips, which take the sample about twice, as 375 steps fit in
+it. Each takes about 80 minutes on an M4 Max:
 
 ```
 uv run examples/commonvoice/trials.py --setups J,K,L,M,N,O --steps 800
 ```
 
-Each takes 3,200 batches of 64, about 80 minutes at the speed of the run
-of characters, 0.67 batches per second, so about 8 hours for all six.
-A setup whose CER falls and whose gates rarely saturate learns. Of those,
-choose the plainest, a learning rate before the second loss or SGD.
+None started: the loss of each stopped falling after about 300 steps,
+where the run of characters had lost 27% of its loss between steps 200
+and 800, and higher learning rates saturated more of the gates. SGD
+saturated the fewest. The trials had no setup of characters, though, which
+in an earlier trial in batches of 32 also reached a CER of 0.77 in 400
+steps.
 
 [Mozilla Common Voice]: https://commonvoice.mozilla.org
 [Mozilla Data Collective]: https://mozilladatacollective.com

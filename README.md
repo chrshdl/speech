@@ -212,29 +212,45 @@ to learn once the clips reached about six seconds. In random order it
 learned from the start, also with batches of 32: its CER on Common Voice
 fell to 0.77 in 400 steps, against 0.95 in sorted order.
 
-### Bigram outputs
+### Frames per character
 
 A CTC model needs an output frame for each label, and one more between
-two equal labels. The convolutions of the 3,750 hour configs stride 4 over
-time, a frame every 40 ms, and English has so many characters per second
-that a LibriSpeech dev-clean transcript of characters fills a median of 61%
-of its frames, 77% at the 95th percentile. Tempo augmentation, which speeds
-clips up by up to 10%, leaves some clips too few frames, and the loss
-skips them. [Deep Speech 2] found the same: at a stride of 4 its WER was
-26% worse than at a stride of 2 with characters, but as good with
-non-overlapping bigrams.
+two equal labels. Convolutions that stride 4 over time give a frame every
+40 ms, and English has so many characters per second that a transcript of
+characters fills a median of 60% of its frames on LibriSpeech dev-clean and
+train-clean-100, 75% at the 95th percentile. Tempo augmentation, which
+speeds clips up by up to 10%, leaves the fastest clips too few frames, and
+the loss skips them. [Deep Speech 2] found the same: with characters, its
+WER at a stride of 4 was 26% worse than at a stride of 2, while a stride of
+3 was nearly as good as 2.
 
-Set `"bigrams" : true` in a config's `data` to train on bigrams, as
-`examples/commonvoice/ctc_streaming_3750h_bigrams_config.json` does. Each
-word is split into pairs of characters from its start, with the last
+`examples/commonvoice/ctc_streaming_3750h_stride3_config.json` strides 3,
+a frame every 30 ms, with convolutions of `[32, 5, 41, 3]` and
+`[32, 5, 21, 1]`, which still give the GRU 21 frequency bins of 32
+channels, and a lookahead of 7 frames, 210 ms. The fraction of the frames
+the transcripts fill:
+
+| Stride | Median | 95th percentile | Most | Most, sped up 10% |
+|---|---|---|---|---|
+| 4 | 60% | 75% | 97% | 107% |
+| 3 | 45% | 56% | 73% | 81% |
+
+The GRU computes a third more frames. On a Raspberry Pi 4 at 1.0 GHz, the
+exported model streams at 0.41 s per second of audio at a stride of 3,
+against 0.34 s at 4 and 0.61 s at 2, without the beam search, whose cost
+also grows with the frames.
+
+#### Bigram outputs
+
+Deep Speech 2 kept the stride of 4 and output bigrams instead, which halve
+the labels. Set `"bigrams" : true` in a config's `data` to train on them.
+Each word is split into pairs of characters from its start, with the last
 character of a word of odd length and each space on their own, so "the cat
 sat" is th, e, space, ca, t, space, sa, t, see `speech/tokens.py`. That
-fills a median of 38% of the frames of dev-clean and at most 65%, about
-what characters fill at a stride of 2, without doubling the work of the
-GRU.
+fills a median of 38% of the frames of dev-clean at a stride of 4.
 
 - The labels are every character and every bigram of the training
-  transcripts, 585 for `train-clean-100`. A word with a bigram that
+  transcripts, 741 for the 3,750 hours. A word with a bigram that
   training never saw, such as in the dev set or a city name of an intent,
   is labeled by its characters.
 - Decoded labels are characters again, so the CER and WER, the word LM,
@@ -243,6 +259,17 @@ GRU.
 - The intents' `THRESHOLD` is a mean log probability per label, and a
   sample has about half as many labels, so check it for a model of
   bigrams, and tune the LM again with `tune_lm.py`.
+
+The 5x1024 model of bigrams did not learn from scratch on the 3,750 hours:
+after its first epoch it gave "th s the the the" for every clip, a CER of
+0.76, where the model of characters reached 0.28. Neither higher learning
+rates, nor Deep Speech 2's SGD, nor a second loss of characters on the same
+layer started it within 800 steps, see "Bigram trials" in
+`examples/commonvoice/README.md`. Baidu's [Gram-CTC] paper found outputs of
+several characters "inherently difficult to train", with unstable training
+curves, and trained them with a CTC loss of characters on a lower layer.
+
+[Gram-CTC]: https://arxiv.org/abs/1703.00096
 
 The beam search tries each label above the pruning threshold in a frame
 for each prefix in the beam. With hundreds of labels an uncertain frame
