@@ -246,21 +246,35 @@ caffeinate -i uv run train.py examples/commonvoice/ctc_streaming_3750h_bigrams_c
 ```
 
 The configs start at a learning rate of 2e-4, found with batches of 32,
-where 5e-4 saturated the gates of the GRU. With batches of 256 a higher
-rate may learn faster. Before a run, `trials.py` compares them: setups J,
-K, L and M train the model of bigrams at 2e-4, 3e-4, 4e-4 and 6e-4 for 400
-steps each, as the run trains, and report the dev CER and the share of
-saturated gates every 100 steps. They train on
-`examples/commonvoice/data/trial_train_set.json`, the random sample of the
-training clips that `trial_noaug.py` writes:
+where 5e-4 saturated the gates of the GRU. The model of bigrams did not
+learn at that rate: after its first epoch its training loss was still
+about 200, as in its first steps, and it gave "th s the the the" for every
+dev clip, a CER of 0.76, where the run of characters reached 0.28. Deep
+Speech 2 trained bigrams the same way as characters, but chose each
+model's learning rate from 1e-4 to 6e-4 for the fastest convergence.
+`trials.py` compares setups of the model of bigrams, trained as the run
+trains, and reports the dev CER and the share of saturated gates every
+100 steps:
+
+| Setup | What |
+|---|---|
+| J, K, L, M | Learning rates of 2e-4, 3e-4, 4e-4 and 6e-4 |
+| N | 2e-4, with a CTC loss of characters on a second output layer added to the loss of the bigrams, which only training uses |
+| O | Deep Speech 2's optimizer: SGD with Nesterov momentum of 0.99, at 3e-4 |
+
+They train on `examples/commonvoice/data/trial_train_set.json`, the random
+sample of the training clips that `trial_noaug.py` writes. The run of
+characters began to learn after about 250 steps of 256 clips, so they
+train 800:
 
 ```
-uv run examples/commonvoice/trials.py --setups J,K,L,M
+uv run examples/commonvoice/trials.py --setups J,K,L,M,N,O --steps 800
 ```
 
-Each trains on 1,600 batches of 64, about 40 minutes at the speed of the
-run of characters, 0.67 batches per second. Choose the highest rate whose
-CER falls fastest while few of its gates saturate.
+Each takes 3,200 batches of 64, about 80 minutes at the speed of the run
+of characters, 0.67 batches per second, so about 8 hours for all six.
+A setup whose CER falls and whose gates rarely saturate learns. Of those,
+choose the plainest, a learning rate before the second loss or SGD.
 
 [Mozilla Common Voice]: https://commonvoice.mozilla.org
 [Mozilla Data Collective]: https://mozilladatacollective.com

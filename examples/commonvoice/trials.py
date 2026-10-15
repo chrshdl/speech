@@ -5,9 +5,14 @@ CER on fixed Common Voice and LibriSpeech dev clips and how many GRU gates
 are saturated. Ends with a summary table. Run it from the repository root
 on the machine with the data.
 
-Setups J to M compare learning rates for a run of bigram outputs, such as
+Setups J to O train a model of bigram outputs, such as
 ctc_streaming_3750h_bigrams_config.json, set up as it trains: in random
-order, in batches of 256 clipped at a norm of 400.
+order, in batches of 256 clipped at a norm of 400. Its run at 2e-4, as J,
+never learned to read the audio in its first epoch. J to M compare
+learning rates, as Deep Speech 2 chose each model's rate from 1e-4 to
+6e-4 for the fastest convergence. N adds a CTC loss of characters on a
+second output layer, which the run of characters learned from. O trains
+with Deep Speech 2's optimizer, SGD with Nesterov momentum of 0.99.
 """
 
 import argparse
@@ -21,6 +26,7 @@ import time
 import numpy as np
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 import speech
 from speech import loader
@@ -113,6 +119,26 @@ def setups(base, small):
             }
             for name, lr in [("J", 2e-4), ("K", 3e-4), ("L", 4e-4), ("M", 6e-4)]
         },
+        "N": {
+            "desc": "J with a CTC loss of characters",
+            "model": big,
+            "lr": 2e-4,
+            "sortagrad": False,
+            "bigrams": True,
+            "char_loss": True,
+            "accumulate": 256 // base["optimizer"]["batch_size"],
+            "clip": 400,
+        },
+        "O": {
+            "desc": "bigrams, SGD, Nesterov 0.99, 3e-4",
+            "model": big,
+            "lr": 3e-4,
+            "sgd": True,
+            "sortagrad": False,
+            "bigrams": True,
+            "accumulate": 256 // base["optimizer"]["batch_size"],
+            "clip": 400,
+        },
     }
 
 
@@ -147,6 +173,49 @@ def dev_cer(model, ldr, preproc, precision):
             )
     model.set_train()
     return speech.compute_cer(results)
+
+
+def ctc_loss(logits, labels, lengths, blank):
+    """The CTC loss of logits for a batch of label lists, as CTC.loss."""
+    log_probs = F.log_softmax(logits.float(), dim=2).transpose(0, 1)
+    targets = torch.tensor([t for label in labels for t in label], dtype=torch.int32)
+    loss = F.ctc_loss(
+        log_probs,
+        targets.to(logits.device),
+        lengths,
+        torch.tensor([len(label) for label in labels], dtype=torch.int32),
+        blank=blank,
+        reduction="sum",
+        zero_infinity=True,
+    )
+    return loss / logits.size(0)
+
+
+class CharLoss(nn.Module):
+    """
+    A second output layer of the characters of a model of bigrams, whose
+    CTC loss is added to the model's, so the encoder learns from both.
+    """
+
+    def __init__(self, model, preproc):
+        super().__init__()
+        self.model, self.preproc = model, preproc
+        chars = sorted(c for c in preproc.char_to_int if len(c) == 1)
+        self.char_to_int = {c: i for i, c in enumerate(chars)}
+        self.fc = nn.Linear(model.encoder_dim, len(chars) + 1)
+
+    def forward(self, batch):
+        """Returns the loss of the bigrams and the sum of both losses."""
+        x, _, x_lens, _ = self.model.collate(*batch)
+        encoded = self.model.encode(x.to(self.model.device), x_lens)
+        lengths = self.model.encoded_lengths(x_lens)
+        bigrams = ctc_loss(self.model.fc(encoded), batch[1], lengths, self.model.blank)
+        chars = [
+            [self.char_to_int[c] for c in self.preproc.decode(label)]
+            for label in batch[1]
+        ]
+        blank = len(self.char_to_int)
+        return bigrams, bigrams + ctc_loss(self.fc(encoded), chars, lengths, blank)
 
 
 @torch.no_grad()
@@ -201,7 +270,17 @@ def run(name, setup, base, args, devs, device):
     probe = probe.unsqueeze(0).to(device)
 
     model = CTC(preproc.input_dim, preproc.vocab_size, setup["model"]).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=setup["lr"])
+    params = list(model.parameters())
+    char_loss = None
+    if setup.get("char_loss"):
+        char_loss = CharLoss(model, preproc).to(device)
+        params += list(char_loss.fc.parameters())
+    if setup.get("sgd"):
+        optimizer = torch.optim.SGD(
+            params, lr=setup["lr"], momentum=0.99, nesterov=True
+        )
+    else:
+        optimizer = torch.optim.Adam(params, lr=setup["lr"])
 
     def precision():
         return autocast(device, base.get("mixed_precision"))
@@ -216,14 +295,18 @@ def run(name, setup, base, args, devs, device):
     step = 0
     for i, batch in enumerate(ldr):
         with precision():
-            loss = model.loss(batch)
-        (loss / accumulate).backward()
+            if char_loss is None:
+                loss = total = model.loss(batch)
+            else:
+                # The reported loss is of the bigrams, as for the others.
+                loss, total = char_loss(batch)
+        (total / accumulate).backward()
         # Per character also for bigram labels.
         chars = np.mean([len(preproc.decode(lab)) for lab in batch[1]])
         per_char.append(loss.item() / chars)
         if (i + 1) % accumulate:
             continue
-        nn.utils.clip_grad_norm_(model.parameters(), setup.get("clip", 200))
+        nn.utils.clip_grad_norm_(params, setup.get("clip", 200))
         optimizer.step()
         optimizer.zero_grad()
         if device.type == "mps":
@@ -289,15 +372,17 @@ def main():
         results[name] = run(name, all_setups[name], base, args, devs, device)
 
     print("\nSummary at the last step:")
+    labels = {name: f"{name}: {all_setups[name]['desc']}" for name in results}
+    width = max(len(label) for label in labels.values())
     print(
-        f"{'setup':40s} {'loss/char':>9s}"
+        f"{'setup':{width}s} {'loss/char':>9s}"
         + "".join(f" {k + ' CER':>7s}" for k in devs)
         + f" {'gate sat':>8s}"
     )
     for name, rows in results.items():
         last = rows[-1]
         print(
-            f"{name}: {all_setups[name]['desc']:37s} {last['loss']:9.2f}"
+            f"{labels[name]:{width}s} {last['loss']:9.2f}"
             + "".join(f" {last[k]:7.3f}" for k in devs)
             + f" {last['sat']:8.0%}"
         )
