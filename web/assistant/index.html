@@ -18,15 +18,28 @@
   </head>
   <body data-state="IDLE" data-connection="connecting">
     <header class="bar">
-      <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
-        <svg class="theme-icon to-night" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" />
-        </svg>
-        <svg class="theme-icon to-day" viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="4.6" />
-          <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" />
-        </svg>
-      </button>
+      <div class="bar-start">
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
+          <svg class="theme-icon to-night" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M20.5 14.2A8.5 8.5 0 0 1 9.8 3.5a8.5 8.5 0 1 0 10.7 10.7z" />
+          </svg>
+          <svg class="theme-icon to-day" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="4.6" />
+            <path d="M12 2.5v2.3M12 19.2v2.3M2.5 12h2.3M19.2 12h2.3M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" />
+          </svg>
+        </button>
+        <!-- Wi-Fi, where the service can join a network. It shows whether
+             one is joined. -->
+        <button class="wifi-button" id="wifi-button" type="button" aria-label="Wi-Fi" title="Wi-Fi" hidden>
+          <svg class="wifi-icon" viewBox="0 0 24 24" aria-hidden="true">
+            <path class="wifi-arc wifi-arc-3" d="M2.8 9.6a13.5 13.5 0 0 1 18.4 0" />
+            <path class="wifi-arc wifi-arc-2" d="M6 13a9 9 0 0 1 12 0" />
+            <path class="wifi-arc wifi-arc-1" d="M9.2 16.4a4.4 4.4 0 0 1 5.6 0" />
+            <circle class="wifi-dot" cx="12" cy="19.6" r="1.8" />
+          </svg>
+          <span class="wifi-badge" aria-hidden="true"></span>
+        </button>
+      </div>
       <p class="status" id="status" role="status"></p>
       <button class="mic" id="mic" type="button" aria-label="Talk" title="Talk (Space)">
         <span class="mic-ring" aria-hidden="true"></span>
@@ -303,6 +316,85 @@
       </section>
     </main>
 
+    <!-- Joining a Wi-Fi network: pick one, type its password on the
+         keyboard, and wait while the service joins it. -->
+    <section class="wifi" id="wifi" data-page="networks" hidden>
+      <div class="wifi-sheet" role="dialog" aria-modal="true" aria-labelledby="wifi-title">
+        <header class="wifi-header">
+          <button class="wifi-back" id="wifi-back" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          </button>
+          <h2 class="wifi-title" id="wifi-title">
+            <svg class="wifi-title-sparkle" viewBox="-20 -20 40 40" aria-hidden="true"><use href="#sparkle" /></svg>
+            <span id="wifi-title-text">Let’s get online!</span>
+          </h2>
+          <button class="card-close" id="wifi-close" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </header>
+
+        <div class="wifi-page wifi-list-page" data-for="networks">
+          <ul class="wifi-networks" id="wifi-networks" aria-label="Wi-Fi networks"></ul>
+          <p class="wifi-note" id="wifi-networks-note"></p>
+          <div class="wifi-actions">
+            <button class="wifi-pill" id="wifi-rescan" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3M19.5 4.5v3.8h-3.8" /></svg>
+              Look again
+            </button>
+            <button class="wifi-pill" id="wifi-other" type="button">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              Other network
+            </button>
+          </div>
+        </div>
+
+        <div class="wifi-page wifi-password-page" data-for="password">
+          <form class="wifi-form" id="wifi-form" autocomplete="off">
+            <label class="wifi-field" id="wifi-ssid-field">
+              <span class="wifi-field-label">Network name</span>
+              <input class="wifi-input" id="wifi-ssid" type="text" inputmode="none" spellcheck="false" autocapitalize="off" maxlength="32" />
+            </label>
+            <label class="wifi-field" id="wifi-password-field">
+              <span class="wifi-field-label">Password</span>
+              <input class="wifi-input" id="wifi-password" type="password" inputmode="none" spellcheck="false" autocapitalize="off" maxlength="63" />
+              <button class="wifi-reveal" id="wifi-reveal" type="button" aria-label="Show the password" aria-pressed="false">
+                <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z" /><circle cx="12" cy="12" r="3" /></svg>
+                <svg class="eye-closed" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8.5S7 14 12 14s8.5-5.5 8.5-5.5M7 12.6l-1.6 2.6M12 14v3M17 12.6l1.6 2.6" /></svg>
+              </button>
+            </label>
+            <p class="wifi-error" id="wifi-error" role="alert"></p>
+          </form>
+          <p class="wifi-hint">
+            <svg viewBox="0 0 54 54" aria-hidden="true">
+              <rect x="5" y="24" width="44" height="20" rx="7" fill="#e9f6ff" stroke="#5cc0ff" stroke-width="3" />
+              <path d="M14 24V12M40 24V12" stroke="#5cc0ff" stroke-width="3" stroke-linecap="round" />
+              <circle cx="15" cy="34" r="2.6" fill="#6bd88f" /><circle cx="23" cy="34" r="2.6" fill="#ffd93d" />
+              <rect x="30" y="29" width="14" height="10" rx="2" fill="#fff0f7" stroke="#ff7ab8" stroke-width="2" transform="rotate(-6 37 34)" />
+            </svg>
+            <span>The password is often on a sticker on the router.</span>
+          </p>
+          <div class="keyboard" id="keyboard" aria-label="Keyboard"></div>
+        </div>
+
+        <div class="wifi-page wifi-wait-page" data-for="joining">
+          <span class="wifi-spinner" aria-hidden="true"></span>
+          <p class="wifi-big" id="wifi-joining-text"></p>
+          <p class="wifi-small">This can take a little while.</p>
+        </div>
+
+        <div class="wifi-page wifi-wait-page" data-for="joined">
+          <span class="wifi-done" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M6 12.5l4 4 8-9" /></svg>
+            <svg class="wifi-done-sparkle one" viewBox="-20 -20 40 40"><use href="#sparkle" /></svg>
+            <svg class="wifi-done-sparkle two" viewBox="-20 -20 40 40"><use href="#sparkle" /></svg>
+            <svg class="wifi-done-sparkle three" viewBox="-20 -20 40 40"><use href="#sparkle" /></svg>
+          </span>
+          <p class="wifi-big">Yay, you’re online!</p>
+          <p class="wifi-small" id="wifi-joined-text"></p>
+        </div>
+      </div>
+    </section>
+
     <template id="card-template">
       <article class="card">
         <header class="card-header">
@@ -317,6 +409,7 @@
 
     <script src="icons.js"></script>
     <script src="game.js"></script>
+    <script src="wifi.js"></script>
     <script src="app.js"></script>
   </body>
 </html>

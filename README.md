@@ -602,7 +602,9 @@ weather, and asked to "play superball", it starts a game steered by
 saying "left" and "right".
 At http://127.0.0.1:8080 it serves a client with a landing page and a
 microphone button. See [docs/backend-api.md](docs/backend-api.md) for the
-API, and `deploy/speech-backend.service` to start it with the Pi.
+API, and `deploy/speech-backend.service` to start it with the Pi. With
+`--wifi-interface wlan0` the client can also join a Wi-Fi network from the
+screen, see [Wi-Fi](docs/backend-api.md#wi-fi).
 
 [ONNX Runtime]: https://onnxruntime.ai
 

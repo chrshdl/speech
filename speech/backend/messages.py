@@ -8,7 +8,7 @@ import datetime
 import enum
 from typing import Annotated, ClassVar, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny
+from pydantic import BaseModel, ConfigDict, Field, SerializeAsAny, field_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -327,3 +327,78 @@ class Info(CamelModel):
     sample_rate: int
     audio_input: AudioInputKind
     language_model: str | None
+    # Whether the client can join a Wi-Fi network through /v1/wifi.
+    wifi: bool = False
+
+
+# Wi-Fi, see speech/backend/wifi.py.
+
+
+class WifiState(enum.StrEnum):
+    # Joined a network, with an IPv4 address.
+    CONNECTED = "CONNECTED"
+    # Joining a network, or joined and waiting for an address.
+    CONNECTING = "CONNECTING"
+    DISCONNECTED = "DISCONNECTED"
+    # wpa_supplicant does not answer, such as while it restarts.
+    UNAVAILABLE = "UNAVAILABLE"
+
+
+class WifiStatus(CamelModel):
+    state: WifiState
+    # The network joined or being joined.
+    ssid: str | None = None
+    ip_address: str | None = None
+    # Whether a network is saved, which the device joins when in reach.
+    configured: bool = False
+
+
+class WifiNetwork(CamelModel):
+    ssid: str
+    # Whether it needs a password.
+    secured: bool
+    # The signal strength in bars, from 0 to 4.
+    signal: int = Field(ge=0, le=4)
+
+
+class WifiNetworks(CamelModel):
+    # The networks in reach, the strongest first, one per name.
+    networks: list[WifiNetwork]
+
+
+class WifiConnectRequest(CamelModel):
+    ssid: str = Field(min_length=1)
+    # Empty for an open network.
+    password: str = ""
+
+    @field_validator("ssid")
+    @classmethod
+    def ssid_fits(cls, ssid):
+        if len(ssid.encode()) > 32:
+            raise ValueError("A network name has at most 32 bytes.")
+        return ssid
+
+    @field_validator("password")
+    @classmethod
+    def password_is_wpa(cls, password):
+        # WPA passphrases are 8 to 63 printable ASCII characters.
+        if password and not (
+            8 <= len(password) <= 63 and all(" " <= c <= "~" for c in password)
+        ):
+            raise ValueError("A Wi-Fi password has 8 to 63 ASCII characters.")
+        return password
+
+
+class WifiConnectError(enum.StrEnum):
+    # The network refused the password.
+    WRONG_PASSWORD = "WRONG_PASSWORD"
+    # The network was not joined in time, such as when it is out of reach.
+    NOT_JOINED = "NOT_JOINED"
+    # Joined, and the network is saved, but no address came in time.
+    NO_ADDRESS = "NO_ADDRESS"
+
+
+class WifiConnectResponse(CamelModel):
+    status: WifiStatus
+    # Why it did not connect, null when it did.
+    error: WifiConnectError | None = None

@@ -74,6 +74,9 @@ All bodies are JSON with camelCase names.
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
 | `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is not shown |
 | `WS /v1/audio/{streamId}` | Takes a capture's audio, see [Audio streaming](#audio-streaming) |
+| `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
+| `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
+| `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
 
 Errors have a `detail` with the reason, such as
 `{"detail": "Cannot start a capture while LISTENING."}`.
@@ -285,6 +288,69 @@ sent.
 A stream that no capture takes is refused with HTTP 403, and text
 messages close the WebSocket with code 1003.
 
+## Wi-Fi
+
+With `--wifi-interface wlan0`, the client can join a Wi-Fi network, so a
+device without a keyboard, such as a Pi with a touchscreen, gets online
+for the weather. `/v1/info` then has `"wifi": true`, and without the
+option the endpoints answer `404`. The service talks to wpa_supplicant
+through its control socket in `/run/wpa_supplicant`, or the directory
+`--wifi-control-dir` names, so its user must be in the group of
+wpa_supplicant's `ctrl_interface`, such as
+`ctrl_interface=DIR=/run/wpa_supplicant GROUP=netdev`. wpa_supplicant saves
+the network in its own config file, which needs `update_config=1`, and a
+DHCP client, such as systemd-networkd's, gets the address.
+
+`GET /v1/wifi` returns the status:
+
+```json
+{"state": "CONNECTED", "ssid": "Home", "ipAddress": "192.168.1.20", "configured": true}
+```
+
+| `state` | |
+|---|---|
+| `CONNECTED` | Joined a network, with an IPv4 address |
+| `CONNECTING` | Joining a network, or joined and waiting for an address |
+| `DISCONNECTED` | No network joined |
+| `UNAVAILABLE` | wpa_supplicant does not answer |
+
+`configured` says whether a network is saved, which the device joins when
+in reach.
+
+`POST /v1/wifi/scan` scans for the networks in reach, which takes up to
+some 10 seconds, the first time after wpa_supplicant started the
+longest. They come one per name, with the strongest signal of its access
+points, the strongest first, and hidden networks are left out:
+
+```json
+{"networks": [{"ssid": "Home", "secured": true, "signal": 4}]}
+```
+
+`signal` is in bars from 0 to 4. It answers `409` while a network is
+joined, and `503` when wpa_supplicant does not answer.
+
+`POST /v1/wifi/connect` joins a network, with an empty or missing
+`password` for an open one. A password has 8 to 63 printable ASCII
+characters, as WPA requires, and a name at most 32 bytes, or it answers
+`422`. It returns once the network is joined and has an address, or
+failed, which takes up to a minute, with the status and the error:
+
+| `error` | |
+|---|---|
+| `null` | Joined, with an address |
+| `WRONG_PASSWORD` | The network refused the password |
+| `NOT_JOINED` | The network was not joined in time, such as when it is out of reach |
+| `NO_ADDRESS` | Joined, but no address came in time |
+
+A network joined replaces the networks saved before, with its key, and for
+WPA3 its passphrase, which WPA3 needs. A network not joined is forgotten,
+and the networks saved before stay, so a mistyped password never loses a
+network that works. One network is joined at a time, and a second
+request answers `409`.
+
+Anyone who reaches the service can change its Wi-Fi, so only enable this
+on a service that only the device itself, or trusted networks, reach.
+
 ## Flows
 
 Tap to talk, with the microphone of the service's device:
@@ -377,6 +443,14 @@ every 10 points the next level begins, up to 5, and three flowers hit
 end the game, which then shows the score. Tapping the microphone button
 ends it sooner. While playing, the page listens with a `COMMANDS`
 capture, see `web/assistant/game.js`.
+
+Where the service can join a Wi-Fi network, a Wi-Fi button next to the
+day and night button shows whether one is joined, with a badge when not,
+and opens a sheet to join one: pick a network from the list, or name one
+that is not listed, type its password on the keyboard below it, as a
+touchscreen without a keyboard needs, and wait while the service joins
+it. The sheet opens by itself when no network is saved. See
+`web/assistant/wifi.js`.
 
 With audio input from the client the page records from the browser's
 microphone, which browsers only allow on `localhost` or over HTTPS. With

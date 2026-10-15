@@ -75,10 +75,17 @@ body {
   display: none;
 }
 
-/* The day and night button, in the upper left corner. It shows the theme
-   it switches to. */
-.theme-toggle {
+/* The upper left corner: the day and night button, and the Wi-Fi button
+   where the service can join a network. */
+.bar-start {
+  display: flex;
+  gap: 14px;
   margin-right: auto;
+}
+
+/* The day and night button shows the theme it switches to. */
+.theme-toggle,
+.wifi-button {
   display: grid;
   place-items: center;
   width: var(--toggle);
@@ -96,15 +103,18 @@ body {
     background-color var(--theme-fade);
 }
 
-.theme-toggle:hover {
+.theme-toggle:hover,
+.wifi-button:hover {
   transform: scale(1.06) rotate(-8deg);
 }
 
-.theme-toggle:active {
+.theme-toggle:active,
+.wifi-button:active {
   transform: scale(0.94);
 }
 
-.theme-toggle:focus-visible {
+.theme-toggle:focus-visible,
+.wifi-button:focus-visible {
   outline: 4px solid var(--pink);
   outline-offset: 5px;
 }
@@ -131,7 +141,8 @@ body {
   transform: rotate(-90deg) scale(0.5);
 }
 
-:root[data-theme="night"] .theme-toggle {
+:root[data-theme="night"] .theme-toggle,
+:root[data-theme="night"] .wifi-button {
   background: #2d2a6e;
 }
 
@@ -1042,6 +1053,700 @@ body.playing .bubble {
   }
 }
 
+/* The Wi-Fi button: full arcs when a network is joined, pulsing while one
+   is joined, and faint with a badge when offline. */
+.wifi-button {
+  position: relative;
+  color: var(--purple);
+}
+
+.wifi-button[hidden] {
+  display: none;
+}
+
+.wifi-icon {
+  width: 32px;
+  height: 32px;
+  overflow: visible;
+}
+
+.wifi-arc {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.6;
+  stroke-linecap: round;
+  transition: stroke 300ms ease;
+}
+
+.wifi-dot {
+  fill: currentColor;
+}
+
+.wifi-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 20px;
+  height: 20px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--pink);
+  scale: 0;
+  transition: scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.wifi-badge::after {
+  content: "!";
+  position: absolute;
+  inset: -2px 0 0;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 17px;
+  text-align: center;
+}
+
+.wifi-button[data-wifi="DISCONNECTED"] .wifi-arc,
+.wifi-button[data-wifi="UNAVAILABLE"] .wifi-arc {
+  stroke: #ddd0f2;
+}
+
+.wifi-button[data-wifi="DISCONNECTED"] .wifi-badge,
+.wifi-button[data-wifi="UNAVAILABLE"] .wifi-badge {
+  scale: 1;
+}
+
+.wifi-button[data-wifi="CONNECTING"] .wifi-arc {
+  animation: wifi-pulse 1.2s ease-in-out infinite;
+}
+
+.wifi-button[data-wifi="CONNECTING"] .wifi-arc-2 {
+  animation-delay: 0.15s;
+}
+
+.wifi-button[data-wifi="CONNECTING"] .wifi-arc-3 {
+  animation-delay: 0.3s;
+}
+
+@keyframes wifi-pulse {
+  50% {
+    stroke: #ddd0f2;
+  }
+}
+
+:root[data-theme="night"] .wifi-button {
+  color: #c9b8ff;
+}
+
+:root[data-theme="night"] .wifi-badge {
+  border-color: #2d2a6e;
+}
+
+:root[data-theme="night"] .wifi-button[data-wifi="DISCONNECTED"] .wifi-arc,
+:root[data-theme="night"] .wifi-button[data-wifi="UNAVAILABLE"] .wifi-arc {
+  stroke: #4c4690;
+}
+
+/* The Wi-Fi sheet, over the meadow. */
+.wifi {
+  --wifi-margin: 24px;
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-items: center;
+  padding: var(--wifi-margin);
+  background: rgba(75, 44, 110, 0.32);
+  animation: wifi-fade 250ms ease;
+}
+
+.wifi[hidden] {
+  display: none;
+}
+
+@keyframes wifi-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.wifi-sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(980px, 100%);
+  height: min(680px, calc(100vh - 2 * var(--wifi-margin)));
+  padding: 16px 26px 24px;
+  border: 4px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(75, 44, 110, 0.35);
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.wifi-header {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.wifi-header .card-close {
+  margin: 0;
+}
+
+.wifi-back {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #f3edff;
+  color: var(--purple);
+  cursor: pointer;
+  visibility: hidden;
+}
+
+.wifi[data-page="password"] .wifi-back {
+  visibility: visible;
+}
+
+.wifi-back svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wifi-title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  color: var(--purple);
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.wifi-title span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wifi-title-sparkle {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  fill: #ffc94d;
+  animation: twinkle 2.4s ease-in-out infinite;
+}
+
+/* One page shows at a time. */
+.wifi-page {
+  display: none;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.wifi[data-page="networks"] [data-for="networks"],
+.wifi[data-page="password"] [data-for="password"],
+.wifi[data-page="joining"] [data-for="joining"],
+.wifi[data-page="joined"] [data-for="joined"] {
+  display: flex;
+}
+
+/* The networks in reach. */
+.wifi-networks {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.wifi-network {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 68px;
+  padding: 0 22px;
+  border: 3px solid #efe6ff;
+  border-radius: 22px;
+  background: #fbf8ff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 24px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease;
+}
+
+.wifi-network:active {
+  transform: scale(0.98);
+  border-color: var(--pink);
+}
+
+.wifi-network.joined {
+  border-color: #bdeccf;
+  background: #f0fcf4;
+}
+
+.wifi-network-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wifi-signal {
+  flex: none;
+  width: 30px;
+  height: 30px;
+}
+
+.wifi-signal rect {
+  fill: #e6dcf5;
+}
+
+.wifi-signal rect.on {
+  fill: var(--purple);
+}
+
+.wifi-lock {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: var(--muted);
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+
+.wifi-tag {
+  flex: none;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: #d6f6e3;
+  color: #23955a;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.wifi-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 21px;
+  text-align: center;
+}
+
+.wifi-note:empty {
+  display: none;
+}
+
+.wifi.scanning .wifi-note::after {
+  content: " • • •";
+  color: var(--faint);
+  animation: twinkle 1.2s ease-in-out infinite;
+}
+
+.wifi-actions {
+  display: flex;
+  justify-content: center;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 16px;
+}
+
+.wifi-pill {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  padding: 0 26px;
+  border: 3px solid var(--card-border);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--pink);
+  font: inherit;
+  font-size: 20px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 120ms ease;
+}
+
+.wifi-pill:active {
+  transform: scale(0.95);
+}
+
+.wifi-pill svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wifi.scanning #wifi-rescan svg {
+  animation: spin 1s linear infinite;
+}
+
+/* The password, and the name of a network not in the list. */
+.wifi-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0 0 4px;
+}
+
+.wifi-field {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 62px;
+  padding: 0 9px 0 24px;
+  border: 3px solid #eadcff;
+  border-radius: 999px;
+  background: #fbf8ff;
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.wifi-field[hidden] {
+  display: none;
+}
+
+.wifi-field.focused {
+  border-color: var(--pink);
+  box-shadow: 0 0 0 5px rgba(255, 95, 162, 0.14);
+}
+
+.wifi-field-label {
+  flex: none;
+  width: 124px;
+  color: var(--muted);
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.wifi-input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  background: none;
+  color: var(--ink);
+  caret-color: var(--pink);
+  font: inherit;
+  font-size: 26px;
+  font-weight: 500;
+}
+
+/* Bigger dots, spaced out, so they can be counted. */
+.wifi-input[type="password"] {
+  font-size: 30px;
+  letter-spacing: 0.18em;
+}
+
+.wifi-reveal {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #f3edff;
+  color: var(--purple);
+  cursor: pointer;
+}
+
+.wifi-reveal svg {
+  grid-area: 1 / 1;
+  width: 26px;
+  height: 26px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wifi-reveal .eye-open,
+.wifi-reveal[aria-pressed="true"] .eye-closed {
+  display: none;
+}
+
+.wifi-reveal[aria-pressed="true"] .eye-open {
+  display: block;
+}
+
+/* Where to find the password, in the space above the keyboard, but for
+   a network not in the list, whose name takes that space. */
+.wifi.other .wifi-hint {
+  visibility: hidden;
+}
+
+.wifi-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  margin: auto 0;
+  color: var(--muted);
+  font-size: 20px;
+}
+
+.wifi-hint svg {
+  flex: none;
+  width: 54px;
+  height: 54px;
+}
+
+.wifi-error {
+  min-height: 26px;
+  margin: 0;
+  color: var(--pink);
+  font-size: 19px;
+  font-weight: 500;
+  text-align: center;
+}
+
+/* The keyboard, with candy colored keys for all but letters and numbers. */
+.keyboard {
+  --gap: 10px;
+  --key-height: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  margin-top: auto;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.key-row {
+  display: flex;
+  justify-content: center;
+  gap: var(--gap);
+}
+
+.key {
+  /* Ten keys fill a row. */
+  flex: 0 0 calc((100% - 9 * var(--gap)) / 10);
+  height: var(--key-height);
+  padding: 0;
+  border: 0;
+  border-radius: 18px;
+  background: #ffffff;
+  box-shadow:
+    inset 0 -4px 0 #e6dcf5,
+    0 0 0 2px #efe6ff;
+  color: var(--ink);
+  font: inherit;
+  font-size: 28px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.key:active {
+  translate: 0 2px;
+  background: #fff0f7;
+  box-shadow:
+    inset 0 -2px 0 #ffd1e8,
+    0 0 0 2px #ffd1e8;
+}
+
+.key svg {
+  width: 28px;
+  height: 28px;
+  margin-top: 3px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.key-shift,
+.key-erase,
+.key-numbers,
+.key-letters,
+.key-symbols {
+  flex-basis: calc((100% - 9 * var(--gap)) / 10 * 1.5 + var(--gap) / 2);
+  font-size: 21px;
+  font-weight: 600;
+}
+
+.key-shift {
+  background: #f3edff;
+  box-shadow:
+    inset 0 -4px 0 #ddd0f2,
+    0 0 0 2px #e6dcf5;
+  color: var(--purple);
+}
+
+.keyboard:not([data-shift="off"]) .key-shift {
+  background: var(--purple);
+  color: #ffffff;
+}
+
+.keyboard[data-shift="lock"] .key-shift svg {
+  fill: currentColor;
+}
+
+.key-erase {
+  background: #fff1e6;
+  box-shadow:
+    inset 0 -4px 0 #ffd8b8,
+    0 0 0 2px #ffe4cc;
+  color: #f0802a;
+}
+
+.key-numbers,
+.key-letters,
+.key-symbols {
+  background: #e9f6ff;
+  box-shadow:
+    inset 0 -4px 0 #c6e6ff,
+    0 0 0 2px #d6edff;
+  color: #2f8fdb;
+}
+
+.key-space {
+  flex: 1;
+  color: var(--faint);
+  font-size: 20px;
+}
+
+.key-enter {
+  flex-basis: calc((100% - 9 * var(--gap)) / 10 * 2.5 + var(--gap) * 1.5);
+  background: var(--pink);
+  box-shadow:
+    inset 0 -4px 0 #e0478a,
+    0 0 0 2px #ff8fbf;
+  color: #ffffff;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.key-enter:active {
+  background: #f2559a;
+  box-shadow:
+    inset 0 -2px 0 #e0478a,
+    0 0 0 2px #ff8fbf;
+}
+
+/* Joining, and joined. */
+.wifi-wait-page {
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.wifi-spinner {
+  width: 136px;
+  height: 136px;
+  margin-bottom: 26px;
+  border-radius: 50%;
+  background: var(--rainbow);
+  mask: radial-gradient(farthest-side, transparent calc(100% - 16px), #000 calc(100% - 15px));
+  animation: spin 1.4s linear infinite;
+}
+
+.wifi-big {
+  margin: 0;
+  color: var(--purple);
+  font-size: 36px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wifi-small {
+  margin: 0;
+  color: var(--muted);
+  font-size: 22px;
+  overflow-wrap: anywhere;
+}
+
+.wifi-done {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 136px;
+  height: 136px;
+  margin-bottom: 26px;
+  border-radius: 50%;
+  background: #6bd88f;
+  box-shadow: 0 12px 30px rgba(107, 216, 143, 0.45);
+  animation: card-in 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.wifi-done > svg:first-child {
+  width: 76px;
+  height: 76px;
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 3.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.wifi-done-sparkle {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  animation: twinkle 1.6s ease-in-out infinite;
+}
+
+.wifi-done-sparkle.one {
+  top: -14px;
+  left: -22px;
+  fill: #ffc94d;
+}
+
+.wifi-done-sparkle.two {
+  top: 6px;
+  right: -34px;
+  width: 26px;
+  height: 26px;
+  fill: #ff7ab8;
+  animation-delay: 0.4s;
+}
+
+.wifi-done-sparkle.three {
+  bottom: -10px;
+  left: -30px;
+  width: 22px;
+  height: 22px;
+  fill: #5cc0ff;
+  animation-delay: 0.8s;
+}
+
 /* Narrow screens: the score goes below the bar. */
 @media (max-width: 640px) {
   .game-hud {
@@ -1172,6 +1877,104 @@ body.playing .bubble {
 
   .game-banner.count .game-banner-title {
     font-size: 120px;
+  }
+
+  .wifi {
+    --wifi-margin: 10px;
+  }
+
+  .wifi-sheet {
+    padding: 8px 16px 14px;
+    border-width: 3px;
+  }
+
+  .wifi-header {
+    grid-template-columns: 40px 1fr 40px;
+    margin-bottom: 8px;
+  }
+
+  .wifi-back,
+  .wifi-header .card-close {
+    width: 40px;
+    height: 40px;
+  }
+
+  .wifi-title {
+    font-size: 22px;
+  }
+
+  .wifi-network {
+    min-height: 54px;
+    font-size: 20px;
+  }
+
+  .wifi-pill {
+    height: 46px;
+    font-size: 17px;
+  }
+
+  .wifi-form {
+    gap: 6px;
+  }
+
+  .wifi-field {
+    height: 48px;
+  }
+
+  .wifi-input {
+    font-size: 21px;
+  }
+
+  .wifi-reveal {
+    width: 36px;
+    height: 36px;
+  }
+
+  .wifi-error {
+    min-height: 22px;
+    font-size: 16px;
+  }
+
+  .wifi-hint {
+    display: none;
+  }
+
+  .keyboard {
+    --gap: 6px;
+    --key-height: 52px;
+  }
+
+  .key {
+    border-radius: 12px;
+    font-size: 21px;
+  }
+
+  .key-shift,
+  .key-erase,
+  .key-numbers,
+  .key-letters,
+  .key-symbols,
+  .key-space {
+    font-size: 17px;
+  }
+
+  .key-enter {
+    font-size: 19px;
+  }
+
+  .wifi-spinner,
+  .wifi-done {
+    width: 104px;
+    height: 104px;
+    margin-bottom: 18px;
+  }
+
+  .wifi-big {
+    font-size: 28px;
+  }
+
+  .wifi-small {
+    font-size: 18px;
   }
 }
 
