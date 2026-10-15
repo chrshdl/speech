@@ -25,7 +25,12 @@ from speech.backend.messages import (
     State,
     StopCaptureRequest,
     StopCaptureResponse,
+    WifiConnectRequest,
+    WifiConnectResponse,
+    WifiNetworks,
+    WifiStatus,
 )
+from speech.backend.wifi import Unavailable
 
 # The browser client in web/assistant, which shares web/recorder.js with
 # serve.py's page.
@@ -45,10 +50,11 @@ class RevalidatedFiles(StaticFiles):
         return response
 
 
-def create_app(recognizer, microphone=None):
+def create_app(recognizer, microphone=None, wifi=None):
     """
     Returns the service for the recognizer, an engine.Recognizer, which
     with a microphone, an engine.Microphone, listens to it while running.
+    With wifi, a wifi.Wifi, the client can join a Wi-Fi network.
 
     The endpoints are all async, so they run on the event loop, as the
     recognizer must.
@@ -81,6 +87,7 @@ def create_app(recognizer, microphone=None):
             sample_rate=recognizer.sample_rate,
             audio_input=recognizer.audio_input,
             language_model=recognizer.language_model,
+            wifi=wifi is not None,
         )
 
     @app.get("/v1/state")
@@ -212,6 +219,66 @@ def create_app(recognizer, microphone=None):
                 recognizer.deliver(np.frombuffer(data, dtype="<i2"), stream_id)
         finally:
             ended.cancel()
+
+    def require_wifi():
+        if wifi is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "The service has no Wi-Fi.")
+
+    @app.get("/v1/wifi", responses={404: {"description": "The service has no Wi-Fi"}})
+    async def wifi_status() -> WifiStatus:
+        """Whether a Wi-Fi network is joined, and which."""
+        require_wifi()
+        return await asyncio.to_thread(wifi.status)
+
+    @app.post(
+        "/v1/wifi/scan",
+        responses={
+            404: {"description": "The service has no Wi-Fi"},
+            409: {"description": "A network is being joined"},
+            503: {"description": "wpa_supplicant does not answer"},
+        },
+    )
+    async def wifi_scan() -> WifiNetworks:
+        """
+        Scans for the Wi-Fi networks in reach, which takes up to some 10
+        seconds.
+        """
+        require_wifi()
+        if wifi.joining.locked():
+            raise HTTPException(status.HTTP_409_CONFLICT, "A network is being joined.")
+        try:
+            networks = await asyncio.to_thread(wifi.scan)
+        except Unavailable as error:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, str(error)
+            ) from None
+        return WifiNetworks(networks=networks)
+
+    @app.post(
+        "/v1/wifi/connect",
+        responses={
+            404: {"description": "The service has no Wi-Fi"},
+            409: {"description": "Another network is being joined"},
+            422: {"description": "Not a network name or WPA password"},
+            503: {"description": "wpa_supplicant does not answer"},
+        },
+    )
+    async def wifi_connect(request: WifiConnectRequest) -> WifiConnectResponse:
+        """
+        Joins the network, which takes up to a minute, and saves it in place
+        of the others once it is joined. A network not joined is forgotten,
+        and the networks saved before stay. The error says why it did not
+        connect.
+        """
+        require_wifi()
+        try:
+            return await asyncio.to_thread(wifi.connect, request.ssid, request.password)
+        except RuntimeError as error:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
+        except Unavailable as error:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, str(error)
+            ) from None
 
     @app.get("/", include_in_schema=False)
     async def home():

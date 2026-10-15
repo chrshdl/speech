@@ -188,6 +188,7 @@ def test_info_and_state(model_path):
                 "sampleRate": 16000,
                 "audioInput": "CLIENT",
                 "languageModel": None,
+                "wifi": False,
             }
             assert await svc.get("/v1/state") == {
                 "dialogState": "IDLE",

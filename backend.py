@@ -10,7 +10,7 @@ import os
 import uvicorn
 
 from speech import streaming
-from speech.backend import game, weather
+from speech.backend import game, weather, wifi
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
@@ -48,8 +48,11 @@ def main(args):
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
         microphone = Microphone(recognizer, args.mic_device)
+    wifi_control = None
+    if args.wifi_interface:
+        wifi_control = wifi.Wifi(args.wifi_interface, args.wifi_control_dir)
     config = uvicorn.Config(
-        create_app(recognizer, microphone),
+        create_app(recognizer, microphone, wifi_control),
         host=args.host,
         port=args.port,
         # A last resort, should a connection still not close.
@@ -155,6 +158,17 @@ if __name__ == "__main__":
         "--weather-location",
         default="Berlin",
         help="The place to answer questions for the weather for.",
+    )
+    parser.add_argument(
+        "--wifi-interface",
+        help="Let the client join a Wi-Fi network on this network interface, such "
+        "as wlan0, through wpa_supplicant, see docs/backend-api.md. Anyone who "
+        "reaches the service can then change its Wi-Fi.",
+    )
+    parser.add_argument(
+        "--wifi-control-dir",
+        default=wifi.CONTROL_DIR,
+        help="The directory of wpa_supplicant's control sockets, its ctrl_interface.",
     )
     limits = parser.add_argument_group("time limits in seconds")
     defaults = Settings()

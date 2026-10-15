@@ -37,6 +37,7 @@ let lastCommands = null; // The last such id, also once that capture finished.
 let startingCommands = false; // Whether such a capture is being started.
 let listening = null; // The id of the capture listening, if any.
 let restarts = []; // When listening for commands restarted by itself.
+let wifi = null; // Joining a Wi-Fi network, where the service can, see wifi.js.
 
 // The landing page.
 
@@ -570,6 +571,12 @@ async function start() {
   ui.steerLeft.addEventListener("click", () => steer("LEFT"));
   ui.steerRight.addEventListener("click", () => steer("RIGHT"));
   document.addEventListener("keydown", (event) => {
+    if (wifi && wifi.isOpen) {
+      if (event.code === "Escape") {
+        wifi.back();
+      }
+      return;
+    }
     if (event.code === "Space" && !event.repeat && event.target === document.body) {
       event.preventDefault();
       toggleCapture();
@@ -588,6 +595,10 @@ async function start() {
     return;
   }
   connectEvents();
+  if (info.wifi) {
+    wifi = new WifiSetup({ root: $("wifi"), button: $("wifi-button") });
+    wifi.start();
+  }
 }
 
 start();
