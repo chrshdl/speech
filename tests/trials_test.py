@@ -32,3 +32,24 @@ def test_char_loss():
     total.backward()
     assert char_loss.fc.weight.grad.abs().sum() > 0
     assert model.fc.weight.grad.abs().sum() > 0
+
+
+class FakeDataset:
+    def __init__(self):
+        self.epochs = []
+
+    def set_epoch(self, epoch):
+        self.epochs.append(epoch)
+
+
+class FakeLoader(list):
+    def __init__(self, batches):
+        super().__init__(batches)
+        self.dataset = FakeDataset()
+
+
+def test_passes_repeat_the_data():
+    ldr = FakeLoader(["a", "b", "c"])
+    batches = trials.passes(ldr)
+    assert [next(batches) for _ in range(7)] == list("abcabca")
+    assert ldr.dataset.epochs == [0, 1, 2]

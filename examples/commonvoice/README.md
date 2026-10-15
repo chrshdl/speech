@@ -263,9 +263,9 @@ trains, and reports the dev CER and the share of saturated gates every
 | O | Deep Speech 2's optimizer: SGD with Nesterov momentum of 0.99, at 3e-4 |
 
 They train on `examples/commonvoice/data/trial_train_set.json`, the random
-sample of the training clips that `trial_noaug.py` writes. The run of
+sample of 96,000 training clips that `trial_noaug.py` writes. The run of
 characters began to learn after about 250 steps of 256 clips, so they
-train 800:
+train 800, which take the sample about twice, as 375 steps fit in it:
 
 ```
 uv run examples/commonvoice/trials.py --setups J,K,L,M,N,O --steps 800
