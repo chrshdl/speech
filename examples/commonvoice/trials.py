@@ -218,6 +218,18 @@ class CharLoss(nn.Module):
         return bigrams, bigrams + ctc_loss(self.fc(encoded), chars, lengths, blank)
 
 
+def passes(ldr):
+    """
+    The loader's batches, pass after pass over its data, as epochs, so a
+    trial can train for more steps than its sample holds.
+    """
+    epoch = 0
+    while True:
+        ldr.dataset.set_epoch(epoch)
+        yield from ldr
+        epoch += 1
+
+
 @torch.no_grad()
 def saturation(model, x):
     """The largest share of saturated update gates in any GRU layer."""
@@ -291,9 +303,18 @@ def run(name, setup, base, args, devs, device):
     per_char, rows = [], []
     start = time.time()
     print(f"[{name}] {setup['desc']}", flush=True)
+    clips = len(ldr.dataset)
+    steps_per_pass = clips // (base["optimizer"]["batch_size"] * accumulate)
+    if args.steps > steps_per_pass:
+        print(
+            f"[{name}] {clips:,} clips make {steps_per_pass} steps, so "
+            f"{args.steps} steps take {args.steps / steps_per_pass:.1f} passes "
+            "over them",
+            flush=True,
+        )
     optimizer.zero_grad()
     step = 0
-    for i, batch in enumerate(ldr):
+    for i, batch in enumerate(passes(ldr)):
         with precision():
             if char_loss is None:
                 loss = total = model.loss(batch)
