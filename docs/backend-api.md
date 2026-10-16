@@ -144,7 +144,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `TranscriptCard` | `title`, `text`, `isFinal` | The transcript, growing while `isFinal` is false. Show words that can still change as such. |
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
-| `SongCard` | `title`, `url`, `seconds` | Play the song at `url`, which lasts `seconds`. It stays until the client dismisses it when the song has played, or another card replaces it. |
+| `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
 
 The lifecycle of a capture's card:
@@ -464,8 +464,9 @@ it. The sheet opens by itself when no network is saved. See
 
 Asked to play a song, it shows the song's title with notes that dance
 while it plays and a rainbow that fills as it goes, plays it with Web
-Audio, and dismisses the card once it has played. Closing the card, or
-tapping the microphone button, stops it.
+Audio, and dismisses the card once it has played, or for a song that
+loops, plays it until the card is closed. Closing the card, or tapping
+the microphone button, stops it.
 
 With audio input from the client the page records from the browser's
 microphone, which browsers only allow on `localhost` or over HTTPS. With

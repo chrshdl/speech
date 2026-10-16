@@ -111,9 +111,27 @@ def test_writes_a_song_file(tmp_path):
     )
     data = json.loads(result.stdout)
     assert (data["title"], data["names"], data["tempo"]) == ("Test", ["test song"], 90)
+    assert "beats" not in data and "loop" not in data
     # A note per line.
     assert '      ["C4", 2.0],\n' in result.stdout
     out = tmp_path / "test.json"
     out.write_text(result.stdout)
     song = songs.load_song(out)
     assert len(song.notes) == 6
+
+
+def test_writes_a_loop_of_bars(tmp_path):
+    path = midi_file(tmp_path / "song.mid")
+    result = subprocess.run(
+        [sys.executable, SCRIPT, path, "--track", "MELODY", "--bars", "1-2", "--loop"]
+        + ["--title", "Test", "--name", "test song"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    data = json.loads(result.stdout)
+    # Two bars of three beats.
+    assert (data["beats"], data["loop"]) == (6, True)
+    out = tmp_path / "test.json"
+    out.write_text(result.stdout)
+    assert songs.load_song(out).seconds == 3

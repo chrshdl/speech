@@ -892,6 +892,10 @@ body.has-card .step-aside {
   animation: song-left linear forwards;
 }
 
+.looping .song-left {
+  animation-iteration-count: infinite;
+}
+
 @keyframes song-left {
   to {
     scale: 0 1;

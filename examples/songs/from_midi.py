@@ -10,6 +10,8 @@ Each --track is a track's name, or its index from 0, optionally with a
 volume after = and partials after :, for a voice of its own sound. The
 notes are moved to a grid of --grid beats, and notes of a track that sound
 together, such as a chord's, are split into as many voices as it takes.
+With --bars, the song lasts exactly those bars, and --loop plays it over
+and over.
 """
 
 import argparse
@@ -161,16 +163,23 @@ def main(args):
     with open(args.midi, "rb") as f:
         midi = Midi(f.read())
     first, _, last = args.bars.partition("-") if args.bars else ("1", "", "100000")
-    data = {"title": args.title, "names": args.name}
-    data |= song(
+    first, last = int(first), int(last or first)
+    played = song(
         midi,
         args.track,
-        (int(first), int(last or first)),
+        (first, last),
         args.grid,
         args.tempo,
         args.transpose,
         [float(p) for p in args.partials.split(",")],
     )
+    data = {"title": args.title, "names": args.name, "tempo": played["tempo"]}
+    if args.bars:
+        # The bars, also a rest at their end, so a loop keeps to the beat.
+        data["beats"] = (last - first + 1) * midi.beats_per_bar
+    if args.loop:
+        data["loop"] = True
+    data |= played
     print(dumps(data))
 
 
@@ -216,6 +225,9 @@ if __name__ == "__main__":
     parser.add_argument("--transpose", type=int, default=0, help="In semitones.")
     parser.add_argument(
         "--partials", default="1", help="The song's, such as 1,0.4,0.2."
+    )
+    parser.add_argument(
+        "--loop", action="store_true", help="Play it over and over until closed."
     )
     parser.add_argument("--title", required=True)
     parser.add_argument(

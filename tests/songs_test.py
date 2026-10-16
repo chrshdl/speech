@@ -111,6 +111,45 @@ def test_voices_with_their_own_sound():
     assert level(2 * songs.frequency("C4")) / level(440) == pytest.approx(0.5, rel=0.1)
 
 
+def test_beats_cut_the_notes(tmp_path):
+    # Four beats of two at 120 beats per minute: the third note goes on
+    # past the second second, and is cut there.
+    voices = [[["C4", 1], ["D4", 1], ["E4", 3]]]
+    song = songs.load_song(song_file(tmp_path, "cut", voices=voices, beats=4))
+    assert [n.seconds for n in song.notes] == [0.5, 0.5, 1.0]
+    assert song.seconds == pytest.approx(2 + songs.ENVELOPE_SECONDS, abs=1e-4)
+    with pytest.raises(ValueError, match="starts after"):
+        songs.load_song(song_file(tmp_path, "late", voices=voices, beats=2))
+
+
+def test_loop_is_seamless(tmp_path):
+    # Played over and over, the song lasts exactly its beats, also a rest
+    # at its end.
+    voices = [[["A4", 3], [None, 1]]]
+    path = song_file(tmp_path, "loop", voices=voices, beats=4, loop=True, tempo=60)
+    song = songs.load_song(path)
+    assert song.seconds == 4
+    with wave.open(io.BytesIO(song.render())) as f:
+        assert f.getnframes() == 4 * SR
+    # After a rest nothing sounds on at the start, so it starts as when
+    # played once.
+    once = songs.render(song.notes, loop=False, seconds=4)
+    looped = songs.render(song.notes, loop=True, seconds=4)
+    assert np.array_equal(looped, once[: 4 * SR])
+    # Without one, the last note has died away by the end, as each is let
+    # go a release before it ends, so nothing is lost at the seam.
+    notes = songs.notes([[["A4", 4]]], 60)
+    once, looped = songs.render(notes), songs.render(notes, loop=True)
+    assert len(looped) == 4 * SR
+    assert np.array_equal(looped, once[: 4 * SR])
+    assert np.abs(once[4 * SR :]).max() == 0
+
+
+def test_loop_is_true_or_false(tmp_path):
+    with pytest.raises(ValueError, match="loop"):
+        songs.load_song(song_file(tmp_path, "bad", loop="yes"))
+
+
 def test_load(tmp_path):
     song_file(tmp_path, "twinkle")
     (tmp_path / "notes.txt").write_text("not a song")
@@ -196,6 +235,11 @@ def test_card(tmp_path):
     )
     assert card.seconds == pytest.approx(2.03, abs=0.01)
     assert card.UNTIL_DISMISSED
+    assert not card.loop
+    song_file(tmp_path, "lullaby", names=["lullaby"], loop=True)
+    jukebox = songs.Songs(songs.load(tmp_path))
+    card = asyncio.run(jukebox.card("id", {"song": "lullaby"}))
+    assert (card.loop, card.seconds) == (True, 2)
 
 
 def test_audio_is_served(tmp_path):

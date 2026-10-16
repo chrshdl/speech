@@ -357,8 +357,9 @@ function toneSeconds({ notes }) {
 }
 
 // Songs: a SongCard plays the song the service rendered, on the tones'
-// context, and is dismissed once it has played. The card going, such as
-// when it is closed or replaced, stops the song.
+// context, and is dismissed once it has played, or plays it over and over
+// until it is closed, for a song that loops. The card going, such as when
+// it is closed or replaced, stops the song.
 
 let song = null; // The song card playing, and its audio source once loaded.
 
@@ -406,6 +407,7 @@ async function playSong(songCard) {
     }
     const source = tones.createBufferSource();
     source.buffer = audio;
+    source.loop = songCard.data.loop;
     source.connect(tones.destination);
     source.onended = () => {
       if (song === playing) {
@@ -417,9 +419,11 @@ async function playSong(songCard) {
     };
     playing.source = source;
     source.start();
-    // The rainbow shows as the song plays, from when it starts.
+    // The rainbow shows as the song plays, from when it starts, and again
+    // each time a looping song starts over.
     const left = songCard.element.querySelector(".song-left");
     left.style.animationDuration = `${audio.duration}s`;
+    songCard.element.classList.toggle("looping", songCard.data.loop);
     songCard.element.classList.add("playing");
   } catch (error) {
     console.error("Could not play the song:", error);

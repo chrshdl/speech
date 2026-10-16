@@ -147,7 +147,8 @@ class GameCard(CamelModel):
 class SongCard(CamelModel):
     """
     Play a song: the client plays the audio at the url, which the service
-    rendered, and dismisses the card when it has played. The card stays
+    rendered, and dismisses the card when it has played, or with loop,
+    plays it over and over until the user closes the card. The card stays
     until then, or until another card replaces it.
     """
 
@@ -157,8 +158,9 @@ class SongCard(CamelModel):
     title: str
     # The song's WAV file, see GET /v1/songs/{song_id}.
     url: str
-    # How long the song plays.
+    # How long the song plays, once round for a loop.
     seconds: float
+    loop: bool = False
 
 
 Card = Annotated[

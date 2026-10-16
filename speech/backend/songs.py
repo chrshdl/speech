@@ -25,6 +25,11 @@ bubbles set them. Each voice is played from the start, a note after the
 other: a pitch, such as "Bb3" or "F#4", or null for a rest, and its length
 in beats. A voice can also be an object with its notes and its own
 partials, and a volume, 1 by default, such as for quieter chords.
+Optionally, beats is how long the song lasts, which cuts notes that last
+longer, and loop, if true, plays it over and over until the card is
+closed: a looping song lasts exactly its beats, or until its last note
+ends. As every note is let go before it ends, nothing sounds on past the
+end, so the loop has no seam.
 examples/songs/from_midi.py makes a song file from a MIDI file.
 """
 
@@ -182,21 +187,26 @@ def sine(frequency, phase, t):
 RELEASE_SAMPLES = round(ENVELOPE_SECONDS * SAMPLE_RATE)
 
 
-def song_samples(notes):
-    """How many samples the notes take, with the last one's release."""
-    end = max(note.start + note.seconds for note in notes)
-    return round(end * SAMPLE_RATE) + RELEASE_SAMPLES
+def song_samples(notes, seconds=None):
+    """
+    How many samples the notes take, for seconds or else until the last
+    one ends, with the release after it.
+    """
+    if seconds is None:
+        seconds = max(note.start + note.seconds for note in notes)
+    return round(seconds * SAMPLE_RATE) + RELEASE_SAMPLES
 
 
-def render(notes):
+def render(notes, loop=False, seconds=None):
     """
     The samples of the notes, played with the synthesizer's voice, each
-    with its partials and volume, with a peak of PEAK.
+    with its partials and volume, with a peak of PEAK, for seconds or else
+    until the last note ends, and then, unless to loop, a release.
     """
     # Each key is let go a release before its note ends, so the next note,
     # also of the same key, starts from silence, as when played by hand.
     release = RELEASE_SAMPLES
-    mix = np.zeros(song_samples(notes))
+    mix = np.zeros(song_samples(notes, seconds))
     for note in notes:
         start = round(note.start * SAMPLE_RATE)
         samples = round(note.seconds * SAMPLE_RATE)
@@ -210,6 +220,8 @@ def render(notes):
             if amplitude > 0
         )
         mix[start : start + samples] += note.volume * envelope(samples, gate) * voice
+    if loop:
+        mix = mix[:-release]
     mixed = np.tanh(mix * HEADROOM)
     return mixed * (PEAK / np.abs(mixed).max())
 
@@ -232,14 +244,19 @@ class Song:
     title: str
     names: tuple[str, ...]
     notes: tuple[Note, ...] = dataclasses.field(repr=False)
+    loop: bool = False
+    # How long the song lasts, None until its last note ends.
+    length: float | None = None
 
     @property
     def seconds(self):
-        return song_samples(self.notes) / SAMPLE_RATE
+        """How long the song plays, once round for a loop."""
+        samples = song_samples(self.notes, self.length)
+        return (samples - RELEASE_SAMPLES * self.loop) / SAMPLE_RATE
 
     def render(self):
         """The song's WAV file."""
-        return wav(render(self.notes))
+        return wav(render(self.notes, self.loop, self.length))
 
 
 def load_song(path):
@@ -251,6 +268,13 @@ def load_song(path):
         song_notes = tuple(notes(data["voices"], data["tempo"], partials))
         if not song_notes:
             raise ValueError("A song needs a note")
+        length = None
+        if "beats" in data:
+            length = data["beats"] * 60 / data["tempo"]
+            song_notes = cut(song_notes, length)
+        loop = data.get("loop", False)
+        if not isinstance(loop, bool):
+            raise TypeError(f"loop is true or false, not {loop!r}")
         names = tuple(data["names"])
         if not names:
             raise ValueError("A song needs a name to ask for it by")
@@ -259,9 +283,21 @@ def load_song(path):
             title=data["title"],
             names=names,
             notes=song_notes,
+            loop=loop,
+            length=length,
         )
     except (KeyError, TypeError, ValueError) as error:
         raise ValueError(f"{path}: {error!r}") from None
+
+
+def cut(notes, seconds):
+    """The notes, cut to end by seconds, raising ValueError for one after it."""
+    if any(note.start >= seconds for note in notes):
+        raise ValueError(f"A note starts after the song's {seconds:g} seconds")
+    return tuple(
+        dataclasses.replace(note, seconds=min(note.seconds, seconds - note.start))
+        for note in notes
+    )
 
 
 def load(directory):
@@ -328,6 +364,7 @@ class Songs:
             title=song.title,
             url=f"/v1/songs/{song.id}",
             seconds=round(song.seconds, 2),
+            loop=song.loop,
         )
 
     async def close(self):
