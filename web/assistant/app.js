@@ -293,6 +293,16 @@ function hideCard() {
   }
   ui.asked.hidden = true;
   document.body.classList.remove("has-card");
+  // It fades where it is, but out of the stage's layout, so a card that
+  // replaces it, and what was asked above that, are laid out where they
+  // stay, rather than below it and then jumping once it is gone.
+  const { offsetTop, offsetLeft, offsetWidth } = element;
+  Object.assign(element.style, {
+    position: "absolute",
+    top: `${offsetTop}px`,
+    left: `${offsetLeft}px`,
+    width: `${offsetWidth}px`,
+  });
   element.classList.add("leaving");
   element.addEventListener("animationend", () => element.remove(), { once: true });
   // Without animations, as with reduced motion, remove it at once.
