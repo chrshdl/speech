@@ -183,6 +183,10 @@ class SongNote(CamelModel):
     # The amplitudes of its harmonics, the fundamental first.
     partials: list[float]
     volume: float
+    # How many seconds it takes to swell and to fade, the fading also on
+    # past its end.
+    attack: float
+    release: float
 
 
 class SongScore(CamelModel):

@@ -135,3 +135,11 @@ def test_writes_a_loop_of_bars(tmp_path):
     out = tmp_path / "test.json"
     out.write_text(result.stdout)
     assert songs.load_song(out).seconds == 3
+
+
+def test_track_sound(tmp_path):
+    midi = from_midi.Midi(midi_file(tmp_path / "song.mid").read_bytes())
+    song = from_midi.song(midi, ["MELODY=::0.1:0.4"], (1, 2), 0.5, None, 0, [1.0])
+    [melody] = song["voices"]
+    assert (melody["attack"], melody["release"]) == (0.1, 0.4)
+    assert "volume" not in melody and "partials" not in melody

@@ -7,7 +7,8 @@ MIDI file, such as one exported from a score:
         --title "My Song" --name "my song" > my-song.json
 
 Each --track is a track's name, or its index from 0, optionally with a
-volume after = and partials after :, for a voice of its own sound. The
+voice of its own sound after =: VOLUME:PARTIALS:ATTACK:RELEASE, each part
+optional, such as "WARM PAD=0.2:1,0.1:0.6:1.5" for soft chords. The
 notes are moved to a grid of --grid beats, and notes of a track that sound
 together, such as a chord's, are split into as many voices as it takes.
 With --bars, the song lasts exactly those bars, and --loop plays it over
@@ -130,7 +131,8 @@ def song(midi, tracks, bars, grid, tempo, transpose, partials):
     out = []
     for spec in tracks:
         name, _, sound = spec.partition("=")
-        volume, _, track_partials = sound.partition(":")
+        # VOLUME:PARTIALS:ATTACK:RELEASE, each optional.
+        volume, track_partials, attack, release = (sound.split(":") + [""] * 4)[:4]
         index = by_name[name] if name in by_name else int(name)
         _, notes = midi.tracks[index]
         notes = [
@@ -145,12 +147,16 @@ def song(midi, tracks, bars, grid, tempo, transpose, partials):
         if not notes:
             raise ValueError(f"Track {name} has no notes in bars {first}-{last}")
         for voice in voices(notes, grid):
-            if volume or track_partials:
+            if volume or track_partials or attack or release:
                 voice = {"notes": voice}
                 if track_partials:
                     voice["partials"] = [float(p) for p in track_partials.split(",")]
                 if volume:
                     voice["volume"] = float(volume)
+                if attack:
+                    voice["attack"] = float(attack)
+                if release:
+                    voice["release"] = float(release)
             out.append(voice)
     return {
         "tempo": tempo or round(midi.tempo, 2),
@@ -179,6 +185,9 @@ def main(args):
         data["beats"] = (last - first + 1) * midi.beats_per_bar
     if args.loop:
         data["loop"] = True
+    for name in ("attack", "release"):
+        if getattr(args, name) is not None:
+            data[name] = getattr(args, name)
     data |= played
     print(dumps(data))
 
@@ -214,8 +223,9 @@ if __name__ == "__main__":
         "--track",
         action="append",
         required=True,
-        help="A track to play, by name or index, as NAME, NAME=VOLUME or "
-        "NAME=VOLUME:PARTIALS, such as 'WARM PAD=0.35:1,0.15'.",
+        help="A track to play, by name or index, as NAME or "
+        "NAME=VOLUME:PARTIALS:ATTACK:RELEASE, each part optional, such as "
+        "'WARM PAD=0.2:1,0.1:0.6:1.5'.",
     )
     parser.add_argument("--bars", help="The bars to play, such as 5-20, from 1.")
     parser.add_argument("--grid", type=float, default=0.5, help="In beats.")
@@ -228,6 +238,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--loop", action="store_true", help="Play it over and over until closed."
+    )
+    parser.add_argument(
+        "--attack", type=float, help="Seconds a note takes to swell, 0.025 by default."
+    )
+    parser.add_argument(
+        "--release", type=float, help="Seconds a note takes to fade, 0.025 by default."
     )
     parser.add_argument("--title", required=True)
     parser.add_argument(

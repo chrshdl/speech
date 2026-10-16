@@ -25,8 +25,8 @@ ENVELOPE_SECONDS = 0.025
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="needs Node")
 
 
-def score(voices, tempo=60, partials=(1.0,), beats=None, loop=False):
-    notes = tuple(songs.notes(voices, tempo, partials))
+def score(voices, tempo=60, partials=(1.0,), beats=None, loop=False, sound=None):
+    notes = tuple(songs.notes(voices, tempo, partials, sound))
     length = None
     if beats is not None:
         length = beats * 60 / tempo
@@ -93,6 +93,38 @@ def test_envelope_rests_and_repeats(tmp_path):
     # Silent while resting, and the same note again starts from silence.
     assert np.abs(samples[SR : 2 * SR]).max() == 0
     assert np.abs(samples[2 * SR : 2 * SR + 10]).max() < 0.01
+
+
+def test_slow_attack(tmp_path):
+    # Swelling over half a second, a note is still quiet after 25 ms.
+    fast, _, _ = play(tmp_path, score([[["A4", 2]]]), 1)
+    slow, _, _ = play(tmp_path, score([[["A4", 2]]], sound={"attack": 0.5}), 1)
+    window = slice(round(0.02 * SR), round(0.05 * SR))
+    assert rms(slow[window]) < 0.2 * rms(fast[window])
+    late = slice(round(0.6 * SR), None)
+    assert rms(slow[late]) == pytest.approx(rms(fast[late]), rel=0.05)
+
+
+def test_release_fades_past_the_end(tmp_path):
+    # A note of a second, fading over one more, and the song ends then.
+    data = score([[["A4", 1]]], sound={"release": 1.0})
+    samples, posted, returned_false = play(tmp_path, data, 3)
+    tail = slice(round(1.3 * SR), round(1.5 * SR))
+    assert 0.01 < rms(samples[tail]) < rms(samples[: SR // 2])
+    [(end, message)] = posted
+    assert message == "ended" and 1.9 * SR < end < 2.1 * SR
+    assert np.abs(samples[returned_false:]).max() == 0
+
+
+def test_release_carries_over_the_loop(tmp_path):
+    # A note ending the song fades on into the next time round, rather than
+    # being cut where the song starts over.
+    voices = [[[None, 1], ["A4", 1]]]
+    data = score(voices, beats=2, loop=True, sound={"release": 0.5})
+    samples, _, _ = play(tmp_path, data, 3)
+    # The first second of the song is a rest, the first time round silent.
+    assert np.abs(samples[: SR - 10]).max() == 0
+    assert rms(samples[2 * SR : round(2.2 * SR)]) > 0.01
 
 
 def test_loud_as_the_tones(tmp_path):

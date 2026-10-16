@@ -3,10 +3,14 @@
 // the synthesizer's C++ engine plays its keys. Each harmonic of a note is
 // a sine with two quieter ones detuned by 3 Hz plus 1 Hz per harmonic,
 // which thickens it like a chorus, read from a table as the engine reads
-// its wavetables, and each note fades in and out linearly. The voices are
-// mixed through tanh, as the engine mixes, so loud chords saturate softly.
+// its wavetables, and each note fades in and out linearly, by default as
+// fast as the engine's keys do, or as slowly as its voice says. The voices
+// are mixed through tanh, as the engine mixes, so loud chords saturate softly.
 
 const DETUNE = 0.4; // The level of each detuned sine.
+// How long before its end a note's key is let go, so the next note, also of
+// the same key, starts afresh, as when played by hand; and the synthesizer's
+// attack and release.
 const ENVELOPE_SECONDS = 0.025;
 const TABLE_SIZE = 4096;
 // The level of a song's loudest moments, as loud as the client's tones.
@@ -42,7 +46,8 @@ function phases(frequency, partial) {
 // and its oscillators, each a frequency in cycles per frame, a level and a
 // phase in cycles, in typed arrays for the loops of the audio thread.
 function voice(note, rate) {
-  const ramp = ENVELOPE_SECONDS * rate;
+  const attack = (note.attack ?? ENVELOPE_SECONDS) * rate;
+  const release = (note.release ?? ENVELOPE_SECONDS) * rate;
   const frames = Math.round(note.seconds * rate);
   const steps = [];
   const levels = [];
@@ -58,16 +63,18 @@ function voice(note, rate) {
     levels.push(level, level * DETUNE, level * DETUNE);
     starts.push(...phases(note.frequency, partial));
   });
-  // Let go a release before it ends, so the next note, also of the same
-  // key, starts from silence, as when played by hand.
-  const gate = Math.max(frames - ramp, frames / 2);
+  // Let go just before it ends, and then fading for its release, also on
+  // past its end, into the next note.
+  const gate = Math.max(frames - ENVELOPE_SECONDS * rate, frames / 2);
   return {
     start: Math.round(note.start * rate),
-    frames,
-    ramp,
+    // How long it sounds, with its release.
+    frames: Math.ceil(gate + release),
+    attack,
+    release,
     gate,
     // The level it was let go at, less than 1 for a note shorter than the attack.
-    held: Math.min(gate / ramp, 1),
+    held: Math.min(gate / attack, 1),
     steps: Float64Array.from(steps),
     levels: Float32Array.from(levels),
     phases: Float64Array.from(starts),
@@ -75,13 +82,14 @@ function voice(note, rate) {
 }
 
 // How loud the notes could get, at most: every harmonic sounding at once
-// at the busiest moment.
+// at the busiest moment, also of notes still fading.
 function loudest(notes) {
   let most = 0;
   for (const { start } of notes) {
     let sum = 0;
     for (const note of notes) {
-      if (note.start <= start && start < note.start + note.seconds) {
+      const fading = Math.max((note.release ?? ENVELOPE_SECONDS) - ENVELOPE_SECONDS, 0);
+      if (note.start <= start && start < note.start + note.seconds + fading) {
         sum += note.volume * note.partials.reduce((a, b) => a + b, 0);
       }
     }
@@ -121,22 +129,25 @@ class Song extends AudioWorkletProcessor {
     // The block in parts, each up to where a note starts or the song ends.
     let at = 0;
     while (at < out.length) {
-      if (this.frame === this.frames) {
-        if (!this.loop) {
+      if (this.frame >= this.frames) {
+        if (this.loop) {
+          // The song starts over, while the notes still fading sound on.
+          this.frame = 0;
+          this.next = 0;
+        } else if (!this.sounding.length) {
           this.port.postMessage("ended");
           this.finish(out, at, channels);
           return false;
         }
-        // Each note has died away by the end, so the song starts over.
-        this.frame = 0;
-        this.next = 0;
-        this.sounding = [];
       }
       while (this.next < this.voices.length && this.voices[this.next].start === this.frame) {
         const started = this.voices[this.next++];
         this.sounding.push({ voice: started, at: 0, phases: started.phases.slice() });
       }
-      let end = Math.min(out.length, at + this.frames - this.frame);
+      let end = out.length;
+      if (this.frame < this.frames) {
+        end = Math.min(end, at + this.frames - this.frame);
+      }
       if (this.next < this.voices.length) {
         end = Math.min(end, at + this.voices[this.next].start - this.frame);
       }
@@ -187,10 +198,10 @@ class Song extends AudioWorkletProcessor {
       }
       phases[k] = phase;
     }
-    const { ramp, gate, held } = voice;
+    const { attack, release, gate, held } = voice;
     for (let j = 0; j < count; j++) {
       const at = playing.at + j;
-      const envelope = at < gate ? Math.min(at / ramp, 1) : Math.max(held - (at - gate) / ramp, 0);
+      const envelope = at < gate ? Math.min(at / attack, 1) : Math.max(held - (at - gate) / release, 0);
       out[from + j] += envelope * wave[j];
     }
     playing.at += count;

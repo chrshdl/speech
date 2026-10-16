@@ -53,6 +53,28 @@ def test_voices_with_their_own_sound():
     assert (chord.partials, chord.volume) == ((0.0, 1.0), 0.5)
 
 
+def test_envelopes(tmp_path):
+    # The song's for its voices, a voice's own, and the synthesizer's
+    # otherwise.
+    voices = [
+        [["A4", 1]],
+        {"attack": 0.5, "release": 1.5, "notes": [["C4", 1]]},
+    ]
+    melody, chord = songs.load_song(
+        song_file(tmp_path, "soft", voices=voices, release=0.4)
+    ).notes
+    assert (melody.attack, melody.release) == (songs.ENVELOPE_SECONDS, 0.4)
+    assert (chord.attack, chord.release) == (0.5, 1.5)
+    [plain] = songs.notes([[["A4", 1]]], 60)
+    assert plain.attack == plain.release == songs.ENVELOPE_SECONDS
+
+
+@pytest.mark.parametrize("fields", [{"attack": 0}, {"release": 11}, {"attack": "slow"}])
+def test_bad_envelope(tmp_path, fields):
+    with pytest.raises(ValueError, match="bad.json"):
+        songs.load_song(song_file(tmp_path, "bad", **fields))
+
+
 def test_beats_cut_the_notes(tmp_path):
     # Four beats of two at 120 beats per minute: the third note goes on
     # past the second second, and is cut there.
@@ -180,5 +202,7 @@ def test_score_is_served(tmp_path):
         "frequency",
         "partials",
         "volume",
+        "attack",
+        "release",
     }
     assert asyncio.run(get("/v1/songs/other")).status_code == 404

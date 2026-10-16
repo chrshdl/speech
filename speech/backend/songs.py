@@ -24,7 +24,11 @@ amplitudes of the harmonics, the fundamental first, as the synthesizer's
 bubbles set them. Each voice is played from the start, a note after the
 other: a pitch, such as "Bb3" or "F#4", or null for a rest, and its length
 in beats. A voice can also be an object with its notes and its own
-partials, and a volume, 1 by default, such as for quieter chords.
+partials, and a volume, 1 by default, such as for quieter chords. attack
+and release, for the song or a voice, are how many seconds a note takes to
+swell and to fade, by default the synthesizer's 0.025, which sounds
+struck; a release longer than that fades on past the note's end, into the
+next, as for a lullaby.
 Optionally, beats is how long the song lasts, which cuts notes that last
 longer, and loop, if true, plays it over and over until the card is
 closed: a looping song lasts exactly its beats, or until its last note
@@ -57,6 +61,9 @@ SAMPLES = (
 
 # The synthesizer's harmonics, its bubbles.
 MAX_PARTIALS = 8
+# The synthesizer's attack and release, and the longest a song may ask for.
+ENVELOPE_SECONDS = 0.025
+MAX_ENVELOPE_SECONDS = 10.0
 
 PITCH = re.compile(r"([A-G])(#|b)?(-?\d)")
 STEPS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
@@ -78,9 +85,12 @@ class Note:
     start: float
     seconds: float
     frequency: float
-    # The amplitudes of the voice's harmonics, and its volume.
+    # The amplitudes of the voice's harmonics, its volume, and how many
+    # seconds its notes take to swell and to fade.
     partials: tuple[float, ...] = (1.0,)
     volume: float = 1.0
+    attack: float = ENVELOPE_SECONDS
+    release: float = ENVELOPE_SECONDS
 
 
 def check_partials(partials):
@@ -91,18 +101,30 @@ def check_partials(partials):
     return tuple(partials)
 
 
-def notes(voices, tempo, partials=(1.0,)):
+def check_envelope(seconds, name):
+    if not ENVELOPE_SECONDS / 5 <= seconds <= MAX_ENVELOPE_SECONDS:
+        raise ValueError(
+            f"{name} is {ENVELOPE_SECONDS / 5:g} to {MAX_ENVELOPE_SECONDS:g} seconds"
+        )
+    return float(seconds)
+
+
+def notes(voices, tempo, partials=(1.0,), sound=None):
     """
-    The notes of the voices, with their times in seconds, and partials for
-    the voices without their own.
+    The notes of the voices, with their times in seconds, and partials and
+    a sound, the attack and release, for the voices without their own.
     """
     beat = 60 / tempo
+    sound = {"attack": ENVELOPE_SECONDS, "release": ENVELOPE_SECONDS} | (sound or {})
     notes = []
     for voice in voices:
-        voice_partials, volume = partials, 1.0
+        voice_partials, volume, envelope = partials, 1.0, dict(sound)
         if isinstance(voice, dict):
             voice_partials = check_partials(voice.get("partials", partials))
             volume = voice.get("volume", 1.0)
+            for name in envelope:
+                if name in voice:
+                    envelope[name] = check_envelope(voice[name], name)
             voice = voice["notes"]
         time = 0.0
         for pitch, beats in voice:
@@ -116,6 +138,7 @@ def notes(voices, tempo, partials=(1.0,)):
                         frequency(pitch),
                         voice_partials,
                         volume,
+                        **envelope,
                     )
                 )
             time += beats
@@ -162,6 +185,8 @@ class Song:
                     frequency=note.frequency,
                     partials=list(note.partials),
                     volume=note.volume,
+                    attack=note.attack,
+                    release=note.release,
                 )
                 for note in self.notes
             ],
@@ -174,7 +199,12 @@ def load_song(path):
         data = json.load(f)
     try:
         partials = check_partials(data.get("partials", [1.0]))
-        song_notes = tuple(notes(data["voices"], data["tempo"], partials))
+        sound = {
+            name: check_envelope(data[name], name)
+            for name in ("attack", "release")
+            if name in data
+        }
+        song_notes = tuple(notes(data["voices"], data["tempo"], partials, sound))
         if not song_notes:
             raise ValueError("A song needs a note")
         length = None
