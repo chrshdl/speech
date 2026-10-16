@@ -332,6 +332,29 @@ function unlockTones() {
   }
 }
 
+// Readies Web Audio when the page loads: the tones' context, silent until a
+// tap allows sound, with the synthesizer of songs added to it. Added only
+// when the first song came, to a context already playing, it took WPE
+// WebKit on a Raspberry Pi 4 about 5 seconds, which the song waited for,
+// and a third of a second before.
+function prepareSound() {
+  try {
+    tones ??= new AudioContext();
+    loadSynth().catch(() => {});
+  } catch {
+    // Without Web Audio there are no tones or songs.
+  }
+}
+
+// The tones' context adding synth.js, tried again after it failed.
+function loadSynth() {
+  synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
+    synth = null;
+    throw error;
+  });
+  return synth;
+}
+
 // Plays the tone, and resolves once it has played, at once without one.
 async function playTone({ notes, volume }) {
   if (!tones) {
@@ -403,11 +426,7 @@ async function playSong(songCard) {
   song = playing;
   try {
     unlockTones();
-    synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
-      synth = null; // Tried again with the next song.
-      throw error;
-    });
-    const [response] = await Promise.all([fetch(url), synth]);
+    const [response] = await Promise.all([fetch(url), loadSynth()]);
     if (!response.ok) {
       throw new Error(`${url}: ${response.status}`);
     }
@@ -703,6 +722,7 @@ async function openMicrophone(rate) {
 // Start.
 
 async function start() {
+  prepareSound();
   updateClock();
   setInterval(updateClock, 1000);
   setTheme(document.documentElement.dataset.theme === "night" ? "night" : "day");
