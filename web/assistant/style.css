@@ -61,10 +61,12 @@ body {
   z-index: 2;
 }
 
+/* A pill, or on narrow screens, where it wraps, a rounded box. */
 .status {
   margin: 0;
   padding: 6px 14px;
-  border-radius: 999px;
+  border-radius: 22px;
+  text-align: center;
   background: rgba(255, 255, 255, 0.85);
   color: var(--ink);
   font-size: 17px;
@@ -160,6 +162,8 @@ body {
   position: relative;
   display: grid;
   place-items: center;
+  /* Round however long the status beside it is. */
+  flex: none;
   width: var(--mic);
   height: var(--mic);
   padding: 0;
