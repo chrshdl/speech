@@ -1,7 +1,7 @@
 """
 Superball, a game steered by voice: asked to "play superball", the service
-shows a GameCard, whose client lets flowers fall toward the unicorn and
-steers it with the commands of a COMMANDS capture, "left" and "right".
+shows a GameCard, whose client lets flowers fall for the unicorn to catch
+and steers it with the commands of a COMMANDS capture, "left" and "right".
 """
 
 from speech.backend.messages import GameCard

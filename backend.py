@@ -10,7 +10,7 @@ import os
 import uvicorn
 
 from speech import streaming
-from speech.backend import game, weather, wifi
+from speech.backend import brightness, game, songs, weather, wifi
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
@@ -30,7 +30,13 @@ def main(args):
         card_timeout=args.card_timeout,
         answer_card_timeout=args.answer_card_timeout,
     )
-    new_transcriber, sample_rate, intents, commands = load(args)
+    # Read before the model loads, so a bad song file fails at once.
+    jukebox = songs.Songs(songs.load(args.songs) if args.songs else [])
+    screen = None
+    if args.backlight:
+        state = os.path.join(args.state_dir, "brightness") if args.state_dir else None
+        screen = brightness.Brightness(brightness.find(args.backlight), state)
+    new_transcriber, sample_rate, intents, commands = load(args, jukebox, screen)
     recognizer = Recognizer(
         new_transcriber,
         sample_rate,
@@ -42,6 +48,8 @@ def main(args):
         handlers={
             weather.INTENT.name: weather.Weather(args.weather_location),
             game.INTENT.name: game.Game(),
+            songs.NAME: jukebox,
+            brightness.INTENT.name: screen,
         },
         commands=commands,
     )
@@ -52,7 +60,7 @@ def main(args):
     if args.wifi_interface:
         wifi_control = wifi.Wifi(args.wifi_interface, args.wifi_control_dir)
     config = uvicorn.Config(
-        create_app(recognizer, microphone, wifi_control),
+        create_app(recognizer, microphone, wifi_control, jukebox),
         host=args.host,
         port=args.port,
         # A last resort, should a connection still not close.
@@ -61,17 +69,24 @@ def main(args):
     Server(config, recognizer).run()
 
 
-def load(args):
+def load(args, jukebox, screen):
     """
     Loads the streaming CTC model and returns a function that creates the
     transcriber of a capture, the sample rate, and the recognizers of the
-    intents and of the game's commands, which match the model's output.
+    intents, with asking for one of the songs, a songs.Songs, and with a
+    screen, a brightness.Brightness, for its brightness, and of the game's
+    commands, which match the model's output.
     """
     model = streaming.load(args.model, "best", "cpu", args.threads)
     new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
 
+    intents = [*INTENTS]
+    if jukebox.intent is not None:
+        intents.append(jukebox.intent)
+    if screen is not None:
+        intents.append(brightness.INTENT)
     intents = IntentRecognizer(
-        INTENTS,
+        intents,
         model.char_to_int,
         model.blank,
         model.frame_seconds,
@@ -158,6 +173,22 @@ if __name__ == "__main__":
         "--weather-location",
         default="Berlin",
         help="The place to answer questions for the weather for.",
+    )
+    parser.add_argument(
+        "--songs",
+        help='A directory of songs to play when asked, such as "play twinkle '
+        'twinkle", .json files, see speech/backend/songs.py.',
+    )
+    parser.add_argument(
+        "--backlight",
+        help="Let the user set the screen's brightness, as in \"set the brightness "
+        'to fifty percent", with this backlight in /sys/class/backlight, or "auto" '
+        "for the only one.",
+    )
+    parser.add_argument(
+        "--state-dir",
+        help="A directory the service keeps settings in, such as the brightness, "
+        "to set them again when it starts.",
     )
     parser.add_argument(
         "--wifi-interface",

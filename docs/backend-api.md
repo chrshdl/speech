@@ -77,6 +77,7 @@ All bodies are JSON with camelCase names.
 | `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
+| `GET /v1/songs/{songId}` | A song's notes, `{"seconds": …, "loop": …, "notes": [{"start", "seconds", "frequency", "partials", "volume"}, …]}` in seconds and Hz, which a `SongCard` plays, `404` for no such song |
 
 Errors have a `detail` with the reason, such as
 `{"detail": "Cannot start a capture while LISTENING."}`.
@@ -143,6 +144,8 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `TranscriptCard` | `title`, `text`, `isFinal` | The transcript, growing while `isFinal` is false. Show words that can still change as such. |
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
+| `BrightnessCard` | `title`, `percent` | The brightness of the screen, just set, in percent |
+| `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
 
 The lifecycle of a capture's card:
@@ -156,7 +159,7 @@ The lifecycle of a capture's card:
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
    for an answer, which takes longer to read, but never for a
-   `GameCard`. A new capture replaces the card sooner, except a
+   `GameCard` or a `SongCard`. A new capture replaces the card sooner, except a
    `COMMANDS` capture, which shows no cards.
 
 When the user dismisses the card, such as by tapping its X, tell the
@@ -202,6 +205,8 @@ does not match.
 | Intent | Answer |
 |---|---|
 | `PlayGame` | A `GameCard` at the level asked for, such as "play superball level three", or else 1 |
+| `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
+| `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
 | `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, which `--weather-location` can name any place for. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. |
 
 `places.tsv` lists the towns of Germany, Austria and Switzerland with
@@ -209,6 +214,18 @@ does not match.
 or more, with the names people say for them, from
 [GeoNames](https://www.geonames.org) under CC BY 4.0. `speech/backend/places.py`
 regenerates it.
+
+`--songs` names a directory of songs, JSON files of their notes, see
+`speech/backend/songs.py` and `examples/songs`, where
+`examples/songs/from_midi.py` makes one from a MIDI file. The client
+plays them live with the voice of an additive synthesizer, each harmonic
+a sine with a detuned pair, which thickens it like a chorus, see
+`web/assistant/synth.js`. Without songs, `PlaySong` is not recognized.
+
+`--backlight` names the screen's backlight in `/sys/class/backlight`, or
+`auto` for the only one, which the service then needs to be allowed to
+write. With `--state-dir`, it keeps the brightness there and sets it again
+when it starts, see `speech/backend/brightness.py`.
 
 To add an intent, give `speech.intents.Intent` its samples, in the
 model's characters, and the values of its slots, and pass a handler whose
@@ -435,12 +452,14 @@ weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka fo
 no internet.
 
 Asked to "play superball", it plays a game on the meadow: the unicorn
-trots to the bottom, a countdown starts, and flowers fall toward it,
-faster from level to level. Saying "left" or "right" moves the unicorn
-one of five lanes, as do the arrow keys and the big buttons at the sides,
-which light up when a command is heard. Each flower dodged is a point,
-every 10 points the next level begins, up to 5, and three flowers hit
-end the game, which then shows the score. Tapping the microphone button
+trots to the bottom, a countdown starts, and flowers fall for it to
+catch, faster from level to level. Saying "left" or "right" moves the
+unicorn one of five lanes, as do the arrow keys and the big buttons at the
+sides, which light up when a command is heard. Each flower caught is a
+point, every 10 points the next level begins, up to 5, and three flowers
+missed end the game, which then shows the score. A flower falls no
+farther from the one before than the unicorn can move in time, so each
+can be caught. Tapping the microphone button
 ends it sooner. While playing, the page listens with a `COMMANDS`
 capture, see `web/assistant/game.js`.
 
@@ -451,6 +470,13 @@ that is not listed, type its password on the keyboard below it, as a
 touchscreen without a keyboard needs, and wait while the service joins
 it. The sheet opens by itself when no network is saved. See
 `web/assistant/wifi.js`.
+
+Asked to play a song, it shows the song's title with notes that dance
+while it plays and a rainbow that fills as it goes, plays it live with a
+synthesizer on Web Audio's audio thread, an AudioWorklet, and dismisses
+the card once it has played, or for a song that
+loops, plays it until the card is closed. Closing the card, or tapping
+the microphone button, stops it.
 
 With audio input from the client the page records from the browser's
 microphone, which browsers only allow on `localhost` or over HTTPS. With

@@ -1,7 +1,7 @@
-// Superball: flowers fall toward the unicorn, which the player steers left
-// and right by voice, or with the arrow keys or buttons, to dodge them.
-// Each flower dodged is a point, every 10 points the next level makes the
-// flowers fall faster, and three flowers end the game.
+// Superball: flowers fall onto the meadow, and the player steers the
+// unicorn left and right by voice, or with the arrow keys or buttons, to
+// catch them. Each flower caught is a point, every 10 points the next level
+// makes the flowers fall faster, and three flowers missed end the game.
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
@@ -12,19 +12,21 @@ const SCENE = { width: 1600, height: 900 };
 const UNICORN = { x: 1132.6, y: 739.4, width: 391, height: 396 };
 
 const LANES = 5;
-// For each level: the seconds a flower takes to fall to the unicorn, the
-// seconds between flowers, and how often one falls toward the unicorn.
+// For each level: the seconds a flower takes to fall to the unicorn, and
+// the seconds between flowers.
 const LEVELS = [
-  { fall: 6.5, every: 2.6, aim: 0.5 },
-  { fall: 5.2, every: 2.2, aim: 0.55 },
-  { fall: 4.2, every: 1.85, aim: 0.6 },
-  { fall: 3.4, every: 1.55, aim: 0.65 },
-  { fall: 2.7, every: 1.3, aim: 0.7 },
+  { fall: 6.5, every: 2.6 },
+  { fall: 5.2, every: 2.2 },
+  { fall: 4.2, every: 1.85 },
+  { fall: 3.4, every: 1.55 },
+  { fall: 2.7, every: 1.3 },
 ];
+// About how long it takes to say "left" or "right" and see the unicorn
+// move a lane. A flower falls at most as many lanes from the one before as
+// the player can move it in the time between them, so each can be caught.
+const COMMAND_SECONDS = 1.2;
 const POINTS_PER_LEVEL = 10;
 const HEARTS = 3;
-// After a flower hits, the unicorn blinks and cannot be hit again.
-const HURT_SECONDS = 1.4;
 // The flower drawing's radius, and its scale beside a lane of this width.
 const FLOWER = { radius: 20, scale: 2, lane: 230 };
 const COLORS = ["#ff7ab8", "#b18cff", "#ffa94d", "#5cc0ff", "#ffffff", "#ff6b6b"];
@@ -36,12 +38,13 @@ const SCORE_MS = 6000;
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 class Superball {
-  // The elements: the meadow's svg, the unicorn's group in it, a group to
-  // draw the flowers in, and the overlay with the score and the buttons.
+  // The elements: the one the meadow fills, the unicorn on the meadow, a
+  // group to draw the flowers in, and the overlay with the score and the
+  // buttons.
   // onOver is called when the game is over and needs no more commands,
   // onEnd once its score was shown.
-  constructor({ scene, unicorn, layer, overlay, onOver, onEnd }) {
-    this.scene = scene;
+  constructor({ view, unicorn, layer, overlay, onOver, onEnd }) {
+    this.view = view;
     this.unicorn = unicorn;
     this.layer = layer;
     this.overlay = overlay;
@@ -64,7 +67,8 @@ class Superball {
     this.hearts = HEARTS;
     this.lane = Math.floor(LANES / 2);
     this.facing = -1; // The unicorn looks left, as drawn.
-    this.hurtUntil = 0;
+    // The lane of the last flower, which the next falls near.
+    this.lastLane = this.lane;
     this.frame = null;
     this.timers = new Set();
     // Counts the trots, so a new one stops the one before.
@@ -87,7 +91,7 @@ class Superball {
     // The unicorn can move already, but no flowers fall yet.
     this.last = performance.now();
     this.frame = requestAnimationFrame((now) => this.tick(now));
-    this.showBanner("Superball!", "Say “left” or “right” to dodge the flowers");
+    this.showBanner("Superball!", "Say “left” or “right” to catch the flowers");
     await this.sleep(2600);
     for (const count of ["3", "2", "1", "Go!"]) {
       if (this.phase === "gone") {
@@ -146,7 +150,6 @@ class Superball {
     this.overlay.hidden = true;
     this.hideBanner();
     document.body.classList.remove("playing");
-    this.unicorn.classList.remove("hurt");
     this.trot(false);
   }
 
@@ -161,10 +164,12 @@ class Superball {
 
   // Geometry.
 
-  // The part of the meadow on screen, which the lanes fit in.
+  // The part of the meadow on screen, which the lanes fit in, and the size
+  // of one of the meadow's units on screen.
   measure() {
-    const box = this.scene.getBoundingClientRect();
+    const box = this.view.getBoundingClientRect();
     const scale = Math.max(box.width / SCENE.width, box.height / SCENE.height);
+    this.scale = scale;
     const width = box.width / scale;
     const height = box.height / scale;
     this.top = SCENE.height - height;
@@ -184,8 +189,8 @@ class Superball {
   // Draws the unicorn at x, at its game size, facing where it last moved.
   place(x = this.x, y = this.ground, size = this.size, facing = this.facing) {
     const flip = facing > 0 ? -1 : 1;
-    const dx = x - flip * size * UNICORN.x;
-    const dy = y - size * UNICORN.y;
+    const dx = (x - flip * size * UNICORN.x) * this.scale;
+    const dy = (y - size * UNICORN.y) * this.scale;
     this.unicorn.style.transform = `translate(${dx}px, ${dy}px) scale(${flip * size}, ${size})`;
   }
 
@@ -249,27 +254,22 @@ class Superball {
       }
     }
     for (const flower of this.flowers) {
-      this.fall(flower, dt, now);
+      this.fall(flower, dt);
     }
     this.flowers = this.flowers.filter((flower) => flower.element.isConnected);
     this.frame = requestAnimationFrame((time) => this.tick(time));
   }
 
-  // Drops a flower, often toward the unicorn, never onto another that has
-  // only just started to fall.
+  // Drops a flower in a lane the unicorn can reach in time from the last
+  // flower's.
   drop() {
-    const { aim } = LEVELS[this.level - 1];
-    const fresh = new Set(
-      this.flowers.filter((f) => f.y < this.top + 260).map((f) => f.lane),
+    const { every } = LEVELS[this.level - 1];
+    const reach = Math.max(1, Math.floor(every / COMMAND_SECONDS));
+    const lanes = [...Array(LANES).keys()].filter(
+      (lane) => Math.abs(lane - this.lastLane) <= reach,
     );
-    let lanes = [...Array(LANES).keys()].filter((lane) => !fresh.has(lane));
-    if (lanes.length === 0) {
-      return;
-    }
-    if (lanes.includes(this.lane) && Math.random() < aim) {
-      lanes = [this.lane];
-    }
     const lane = lanes[Math.floor(Math.random() * lanes.length)];
+    this.lastLane = lane;
     const element = document.createElementNS(SVG_NS, "use");
     element.setAttribute("href", "#flower");
     element.setAttribute("fill", COLORS[Math.floor(Math.random() * COLORS.length)]);
@@ -285,7 +285,7 @@ class Superball {
     });
   }
 
-  fall(flower, dt, now) {
+  fall(flower, dt) {
     const { fall } = LEVELS[this.level - 1];
     const speed = (this.ground - this.top) / fall;
     const x = this.laneX(flower.lane);
@@ -298,14 +298,13 @@ class Superball {
         flower.y + this.radius * 0.6 > body &&
         flower.y < this.ground - 10 &&
         Math.abs(x - this.x) < this.spacing * 0.5 &&
-        this.phase === "playing" &&
-        now >= this.hurtUntil
+        this.phase === "playing"
       ) {
-        this.hit(flower, now);
+        this.caught(flower, x);
       } else if (flower.y - this.radius > this.ground - height * 0.35) {
         flower.state = "landed";
         if (this.phase === "playing") {
-          this.dodged(x, flower.y);
+          this.missed();
         }
       }
     } else if (flower.state === "landed") {
@@ -321,26 +320,14 @@ class Superball {
     );
   }
 
-  hit(flower, now) {
+  // The unicorn catches the flower: it bursts, and a "+1" rises from it.
+  caught(flower, x) {
     flower.state = "popped";
     flower.element.classList.add("pop");
     const element = flower.element;
     this.later(() => element.remove(), 500);
-    this.hearts -= 1;
-    this.hurtUntil = now + HURT_SECONDS * 1000;
-    this.unicorn.classList.remove("hurt");
-    void this.unicorn.getBoundingClientRect();
-    this.unicorn.classList.add("hurt");
-    this.later(() => this.unicorn.classList.remove("hurt"), HURT_SECONDS * 1000);
-    this.updateHud();
-    if (this.hearts === 0) {
-      this.gameOver();
-    }
-  }
-
-  dodged(x, y) {
     this.score += 1;
-    this.sparkle(x, y);
+    this.sparkle(x, flower.y);
     if (this.score % POINTS_PER_LEVEL === 0 && this.level < LEVELS.length) {
       this.level += 1;
       this.showBanner(`Level ${this.level}!`, "The flowers fall faster", "flash");
@@ -349,7 +336,16 @@ class Superball {
     this.updateHud();
   }
 
-  // A "+1" rises where a flower was dodged.
+  // A flower falls past the unicorn into the grass, which costs a heart.
+  missed() {
+    this.hearts -= 1;
+    this.updateHud();
+    if (this.hearts === 0) {
+      this.gameOver();
+    }
+  }
+
+  // A "+1" rises where a flower was caught.
   sparkle(x, y) {
     const text = document.createElementNS(SVG_NS, "text");
     text.setAttribute("x", x);
@@ -374,7 +370,7 @@ class Superball {
       }
     }
     const flowers = this.score === 1 ? "flower" : "flowers";
-    this.showBanner("Great game!", `You dodged ${this.score} ${flowers}`, "score");
+    this.showBanner("Great game!", `You caught ${this.score} ${flowers}`, "score");
     this.later(() => {
       this.destroy();
       this.onEnd();

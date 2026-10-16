@@ -52,232 +52,267 @@
 
     <main>
       <!-- The landing page: a meadow with a rainbow and a unicorn, drawn on a
-           1600 by 900 grid that fills the screen, by day or by night. -->
-      <svg class="scene" viewBox="0 0 1600 900" preserveAspectRatio="xMidYMax slice" aria-hidden="true">
-        <defs>
-          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#8fd3ff" />
-            <stop offset="0.55" stop-color="#cdeeff" />
-            <stop offset="1" stop-color="#ffe3f3" />
-          </linearGradient>
-          <linearGradient id="night-sky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#141a46" />
-            <stop offset="0.55" stop-color="#2d2a6e" />
-            <stop offset="1" stop-color="#5a4690" />
-          </linearGradient>
-          <radialGradient id="moon-glow">
-            <stop offset="0.45" stop-color="#fff4c9" stop-opacity="0.18" />
-            <stop offset="1" stop-color="#fff4c9" stop-opacity="0" />
-          </radialGradient>
-          <mask id="crescent">
-            <rect x="-150" y="-150" width="300" height="300" fill="#fff" />
-            <circle cx="34" cy="-20" r="58" fill="#000" />
-          </mask>
-          <radialGradient id="horn-glow">
-            <stop offset="0" stop-color="#fff6b0" stop-opacity="0.9" />
-            <stop offset="1" stop-color="#fff6b0" stop-opacity="0" />
-          </radialGradient>
-          <radialGradient id="firefly">
-            <stop offset="0" stop-color="#fffbd1" />
-            <stop offset="0.35" stop-color="#e9ff7a" stop-opacity="0.9" />
-            <stop offset="1" stop-color="#e9ff7a" stop-opacity="0" />
-          </radialGradient>
-          <linearGradient id="shooting-tail" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0" stop-color="#ffffff" stop-opacity="0" />
-            <stop offset="1" stop-color="#ffffff" stop-opacity="0.95" />
-          </linearGradient>
-          <g id="cloud">
-            <circle cx="0" cy="0" r="46" />
-            <circle cx="52" cy="-22" r="58" />
-            <circle cx="112" cy="0" r="44" />
-            <rect x="0" y="-10" width="112" height="54" rx="27" />
-          </g>
-          <path id="sparkle" d="M0 -18 C3 -4 4 -3 18 0 C4 3 3 4 0 18 C-3 4 -4 3 -18 0 C-4 -3 -3 -4 0 -18 Z" />
-          <g id="flower">
-            <circle cx="0" cy="-11" r="9" /><circle cx="10.5" cy="-3.4" r="9" />
-            <circle cx="6.5" cy="9" r="9" /><circle cx="-6.5" cy="9" r="9" />
-            <circle cx="-10.5" cy="-3.4" r="9" />
-            <circle r="7" fill="#ffd93d" />
-          </g>
-        </defs>
+           1600 by 900 grid that fills the screen, by day or by night. What
+           moves is drawn apart from the rest, each in an svg of its own with
+           its box on the grid as its viewBox, so the browser moves and fades
+           it without drawing the meadow again. -->
+      <div class="scene" aria-hidden="true">
+        <svg class="scene-art" viewBox="0 0 1600 900">
+          <defs>
+            <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#8fd3ff" />
+              <stop offset="0.55" stop-color="#cdeeff" />
+              <stop offset="1" stop-color="#ffe3f3" />
+            </linearGradient>
+            <linearGradient id="night-sky" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0" stop-color="#141a46" />
+              <stop offset="0.55" stop-color="#2d2a6e" />
+              <stop offset="1" stop-color="#5a4690" />
+            </linearGradient>
+            <radialGradient id="moon-glow">
+              <stop offset="0.45" stop-color="#fff4c9" stop-opacity="0.18" />
+              <stop offset="1" stop-color="#fff4c9" stop-opacity="0" />
+            </radialGradient>
+            <mask id="crescent">
+              <rect x="-150" y="-150" width="300" height="300" fill="#fff" />
+              <circle cx="34" cy="-20" r="58" fill="#000" />
+            </mask>
+            <radialGradient id="horn-glow">
+              <stop offset="0" stop-color="#fff6b0" stop-opacity="0.9" />
+              <stop offset="1" stop-color="#fff6b0" stop-opacity="0" />
+            </radialGradient>
+            <radialGradient id="firefly">
+              <stop offset="0" stop-color="#fffbd1" />
+              <stop offset="0.35" stop-color="#e9ff7a" stop-opacity="0.9" />
+              <stop offset="1" stop-color="#e9ff7a" stop-opacity="0" />
+            </radialGradient>
+            <linearGradient id="shooting-tail" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stop-color="#ffffff" stop-opacity="0" />
+              <stop offset="1" stop-color="#ffffff" stop-opacity="0.95" />
+            </linearGradient>
+            <g id="cloud">
+              <circle cx="0" cy="0" r="46" />
+              <circle cx="52" cy="-22" r="58" />
+              <circle cx="112" cy="0" r="44" />
+              <rect x="0" y="-10" width="112" height="54" rx="27" />
+            </g>
+            <path id="sparkle" d="M0 -18 C3 -4 4 -3 18 0 C4 3 3 4 0 18 C-3 4 -4 3 -18 0 C-4 -3 -3 -4 0 -18 Z" />
+            <g id="flower">
+              <circle cx="0" cy="-11" r="9" /><circle cx="10.5" cy="-3.4" r="9" />
+              <circle cx="6.5" cy="9" r="9" /><circle cx="-6.5" cy="9" r="9" />
+              <circle cx="-10.5" cy="-3.4" r="9" />
+              <circle r="7" fill="#ffd93d" />
+            </g>
+          </defs>
 
-        <rect width="1600" height="900" fill="url(#sky)" />
-        <rect class="night-only" width="1600" height="900" fill="url(#night-sky)" />
+          <rect width="1600" height="900" fill="url(#sky)" />
+          <rect class="night-only" width="1600" height="900" fill="url(#night-sky)" />
+
+          <g class="day-only sun" transform="translate(300 190)">
+            <circle r="62" fill="#ffd93d" />
+            <circle cx="-22" cy="-6" r="7" fill="#7a4a1e" />
+            <circle cx="22" cy="-6" r="7" fill="#7a4a1e" />
+            <circle cx="-36" cy="14" r="10" fill="#ff9e7a" opacity="0.7" />
+            <circle cx="36" cy="14" r="10" fill="#ff9e7a" opacity="0.7" />
+            <path d="M-20 18 Q0 36 20 18" fill="none" stroke="#7a4a1e" stroke-width="6" stroke-linecap="round" />
+          </g>
+        </svg>
 
         <!-- Stars and a shooting star at night. -->
-        <g class="night-only stars" fill="#ffffff">
-          <circle cx="420" cy="90" r="3" /><circle cx="560" cy="210" r="2.5" />
-          <circle cx="1110" cy="40" r="2" /><circle cx="1300" cy="250" r="3" />
-          <circle cx="1060" cy="250" r="2.5" /><circle cx="1240" cy="110" r="2" />
-          <circle cx="1390" cy="60" r="3" /><circle cx="1530" cy="200" r="2.5" />
-          <circle cx="90" cy="320" r="2.5" /><circle cx="330" cy="420" r="2" />
-          <circle cx="1460" cy="420" r="2" /><circle cx="760" cy="370" r="2" />
-          <circle cx="480" cy="40" r="1.6" /><circle cx="1180" cy="330" r="1.8" />
-          <circle cx="40" cy="80" r="2" /><circle cx="1570" cy="330" r="1.6" />
-        </g>
-        <g class="night-only">
-          <g class="shooting-star">
+        <div class="night-only stars">
+          <svg class="sprite" viewBox="415 85 10 10" style="--x: 415; --y: 85; --w: 10; --h: 10"><circle cx="420" cy="90" r="3" /></svg>
+          <svg class="sprite" viewBox="555 205 10 10" style="--x: 555; --y: 205; --w: 10; --h: 10"><circle cx="560" cy="210" r="2.5" /></svg>
+          <svg class="sprite" viewBox="1105 35 10 10" style="--x: 1105; --y: 35; --w: 10; --h: 10"><circle cx="1110" cy="40" r="2" /></svg>
+          <svg class="sprite" viewBox="1295 245 10 10" style="--x: 1295; --y: 245; --w: 10; --h: 10"><circle cx="1300" cy="250" r="3" /></svg>
+          <svg class="sprite" viewBox="1055 245 10 10" style="--x: 1055; --y: 245; --w: 10; --h: 10"><circle cx="1060" cy="250" r="2.5" /></svg>
+          <svg class="sprite" viewBox="1235 105 10 10" style="--x: 1235; --y: 105; --w: 10; --h: 10"><circle cx="1240" cy="110" r="2" /></svg>
+          <svg class="sprite" viewBox="1385 55 10 10" style="--x: 1385; --y: 55; --w: 10; --h: 10"><circle cx="1390" cy="60" r="3" /></svg>
+          <svg class="sprite" viewBox="1525 195 10 10" style="--x: 1525; --y: 195; --w: 10; --h: 10"><circle cx="1530" cy="200" r="2.5" /></svg>
+          <svg class="sprite" viewBox="85 315 10 10" style="--x: 85; --y: 315; --w: 10; --h: 10"><circle cx="90" cy="320" r="2.5" /></svg>
+          <svg class="sprite" viewBox="325 415 10 10" style="--x: 325; --y: 415; --w: 10; --h: 10"><circle cx="330" cy="420" r="2" /></svg>
+          <svg class="sprite" viewBox="1455 415 10 10" style="--x: 1455; --y: 415; --w: 10; --h: 10"><circle cx="1460" cy="420" r="2" /></svg>
+          <svg class="sprite" viewBox="755 365 10 10" style="--x: 755; --y: 365; --w: 10; --h: 10"><circle cx="760" cy="370" r="2" /></svg>
+          <svg class="sprite" viewBox="475 35 10 10" style="--x: 475; --y: 35; --w: 10; --h: 10"><circle cx="480" cy="40" r="1.6" /></svg>
+          <svg class="sprite" viewBox="1175 325 10 10" style="--x: 1175; --y: 325; --w: 10; --h: 10"><circle cx="1180" cy="330" r="1.8" /></svg>
+          <svg class="sprite" viewBox="35 75 10 10" style="--x: 35; --y: 75; --w: 10; --h: 10"><circle cx="40" cy="80" r="2" /></svg>
+          <svg class="sprite" viewBox="1565 325 10 10" style="--x: 1565; --y: 325; --w: 10; --h: 10"><circle cx="1570" cy="330" r="1.6" /></svg>
+        </div>
+        <div class="night-only">
+          <svg class="sprite shooting-star" viewBox="-165 -5 170 10" style="--x: -165; --y: -5; --w: 170; --h: 10">
             <line x1="-160" y1="0" x2="0" y2="0" stroke="url(#shooting-tail)" stroke-width="4" stroke-linecap="round" />
             <circle r="4" fill="#ffffff" />
-          </g>
-        </g>
+          </svg>
+        </div>
 
-        <g class="day-only sun" transform="translate(300 190)">
-          <g class="sun-rays" stroke="#ffc94d" stroke-width="12" stroke-linecap="round">
+        <!-- The rainbow, the hills and the flowers, above the stars as before
+             they moved: the moonbow passes over one. -->
+        <svg class="sprite" viewBox="0 355 1600 545" style="--x: 0; --y: 355; --w: 1600; --h: 545">
+          <g class="rainbow" fill="none" stroke-width="37">
+            <path d="M218 960 A582 582 0 0 1 1382 960" stroke="#ff6b6b" />
+            <path d="M254 960 A546 546 0 0 1 1346 960" stroke="#ffa94d" />
+            <path d="M290 960 A510 510 0 0 1 1310 960" stroke="#ffd93d" />
+            <path d="M326 960 A474 474 0 0 1 1274 960" stroke="#6bd88f" />
+            <path d="M362 960 A438 438 0 0 1 1238 960" stroke="#5cc0ff" />
+            <path d="M398 960 A402 402 0 0 1 1202 960" stroke="#7c8cff" />
+            <path d="M434 960 A366 366 0 0 1 1166 960" stroke="#b18cff" />
+          </g>
+
+          <ellipse class="hill-back" cx="380" cy="940" rx="640" ry="210" />
+          <ellipse class="hill-front" cx="1150" cy="975" rx="780" ry="245" />
+
+          <g class="flowers">
+            <use href="#flower" fill="#ff7ab8" transform="translate(140 820)" />
+            <use href="#flower" fill="#b18cff" transform="translate(330 790) scale(0.8)" />
+            <use href="#flower" fill="#ffffff" transform="translate(560 850) scale(0.9)" />
+            <use href="#flower" fill="#5cc0ff" transform="translate(760 812) scale(0.75)" />
+            <use href="#flower" fill="#ffa94d" transform="translate(1420 812)" />
+            <use href="#flower" fill="#ff7ab8" transform="translate(1530 862) scale(0.8)" />
+            <use href="#flower" fill="#ffffff" transform="translate(1320 870) scale(0.7)" />
+          </g>
+        </svg>
+
+        <svg class="sprite day-only sun-rays" viewBox="190 80 220 220" style="--x: 190; --y: 80; --w: 220; --h: 220">
+          <g transform="translate(300 190)" stroke="#ffc94d" stroke-width="12" stroke-linecap="round">
             <line x1="0" y1="-78" x2="0" y2="-100" /><line x1="0" y1="78" x2="0" y2="100" />
             <line x1="-78" y1="0" x2="-100" y2="0" /><line x1="78" y1="0" x2="100" y2="0" />
             <line x1="55" y1="55" x2="71" y2="71" /><line x1="-55" y1="55" x2="-71" y2="71" />
             <line x1="55" y1="-55" x2="71" y2="-71" /><line x1="-55" y1="-55" x2="-71" y2="-71" />
           </g>
-          <circle r="62" fill="#ffd93d" />
-          <circle cx="-22" cy="-6" r="7" fill="#7a4a1e" />
-          <circle cx="22" cy="-6" r="7" fill="#7a4a1e" />
-          <circle cx="-36" cy="14" r="10" fill="#ff9e7a" opacity="0.7" />
-          <circle cx="36" cy="14" r="10" fill="#ff9e7a" opacity="0.7" />
-          <path d="M-20 18 Q0 36 20 18" fill="none" stroke="#7a4a1e" stroke-width="6" stroke-linecap="round" />
-        </g>
+        </svg>
 
-        <!-- Luna, a sleepy crescent moon with a nightcap. -->
-        <g class="night-only moon" transform="translate(300 190)">
-          <circle r="125" fill="url(#moon-glow)" />
-          <g mask="url(#crescent)">
-            <circle r="72" fill="#fff3c4" />
-            <circle cx="-26" cy="56" r="7" fill="#f5e19a" />
-            <circle cx="-62" cy="-18" r="5" fill="#f5e19a" />
+        <!-- Luna, a sleepy crescent moon with a nightcap. She stays still,
+             but is drawn above the sun's rays, as before they moved. -->
+        <svg class="sprite night-only" viewBox="175 65 250 250" style="--x: 175; --y: 65; --w: 250; --h: 250">
+          <g transform="translate(300 190)">
+            <circle r="125" fill="url(#moon-glow)" />
+            <g mask="url(#crescent)">
+              <circle r="72" fill="#fff3c4" />
+              <circle cx="-26" cy="56" r="7" fill="#f5e19a" />
+              <circle cx="-62" cy="-18" r="5" fill="#f5e19a" />
+            </g>
+            <path d="M-56 4 Q-46 14 -36 4" fill="none" stroke="#7a5a2e" stroke-width="5" stroke-linecap="round" />
+            <circle cx="-54" cy="24" r="8" fill="#ffb3c7" opacity="0.75" />
+            <path d="M-41 35 Q-36 39 -31 35" fill="none" stroke="#7a5a2e" stroke-width="4" stroke-linecap="round" />
+            <path d="M-40 -54 Q-30 -104 30 -96 Q52 -86 58 -60 L36 -76 Q2 -80 -40 -54 Z" fill="#8b7cf6" />
+            <path d="M-44 -52 Q-14 -76 22 -72" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" />
+            <circle cx="60" cy="-56" r="10" fill="#ffffff" />
           </g>
-          <path d="M-56 4 Q-46 14 -36 4" fill="none" stroke="#7a5a2e" stroke-width="5" stroke-linecap="round" />
-          <circle cx="-54" cy="24" r="8" fill="#ffb3c7" opacity="0.75" />
-          <path d="M-41 35 Q-36 39 -31 35" fill="none" stroke="#7a5a2e" stroke-width="4" stroke-linecap="round" />
-          <path d="M-40 -54 Q-30 -104 30 -96 Q52 -86 58 -60 L36 -76 Q2 -80 -40 -54 Z" fill="#8b7cf6" />
-          <path d="M-44 -52 Q-14 -76 22 -72" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" />
-          <circle cx="60" cy="-56" r="10" fill="#ffffff" />
-        </g>
+        </svg>
 
-        <g class="rainbow" fill="none" stroke-width="37">
-          <path d="M218 960 A582 582 0 0 1 1382 960" stroke="#ff6b6b" />
-          <path d="M254 960 A546 546 0 0 1 1346 960" stroke="#ffa94d" />
-          <path d="M290 960 A510 510 0 0 1 1310 960" stroke="#ffd93d" />
-          <path d="M326 960 A474 474 0 0 1 1274 960" stroke="#6bd88f" />
-          <path d="M362 960 A438 438 0 0 1 1238 960" stroke="#5cc0ff" />
-          <path d="M398 960 A402 402 0 0 1 1202 960" stroke="#7c8cff" />
-          <path d="M434 960 A366 366 0 0 1 1166 960" stroke="#b18cff" />
-        </g>
+        <div class="clouds">
+          <svg class="sprite drift drift-slow" viewBox="255 205 190 120" style="--x: 255; --y: 205; --w: 190; --h: 120"><use href="#cloud" transform="translate(300 280) scale(0.9)" /></svg>
+          <svg class="sprite drift" viewBox="1125 120 230 145" style="--x: 1125; --y: 120; --w: 230; --h: 145"><use href="#cloud" transform="translate(1180 210) scale(1.1)" /></svg>
+          <svg class="sprite drift drift-slower" viewBox="10 510 125 80" style="--x: 10; --y: 510; --w: 125; --h: 80"><use href="#cloud" transform="translate(40 560) scale(0.6)" /></svg>
+        </div>
 
-        <g class="clouds">
-          <use href="#cloud" class="drift drift-slow" transform="translate(300 280) scale(0.9)" />
-          <use href="#cloud" class="drift" transform="translate(1180 210) scale(1.1)" />
-          <use href="#cloud" class="drift drift-slower" transform="translate(40 560) scale(0.6)" />
-        </g>
+        <div class="sparkles">
+          <svg class="sprite" viewBox="450 160 40 40" style="--x: 450; --y: 160; --w: 40; --h: 40"><use href="#sparkle" fill="#ffffff" transform="translate(470 180)" /></svg>
+          <svg class="sprite" viewBox="1085 95 50 50" style="--x: 1085; --y: 95; --w: 50; --h: 50"><use href="#sparkle" fill="#ffe066" transform="translate(1110 120) scale(1.3)" /></svg>
+          <svg class="sprite" viewBox="1440 310 40 40" style="--x: 1440; --y: 310; --w: 40; --h: 40"><use href="#sparkle" fill="#ffffff" transform="translate(1460 330) scale(0.9)" /></svg>
+          <svg class="sprite" viewBox="90 400 40 40" style="--x: 90; --y: 400; --w: 40; --h: 40"><use href="#sparkle" fill="#ffe066" transform="translate(110 420) scale(1.1)" /></svg>
+          <svg class="sprite" viewBox="845 315 30 30" style="--x: 845; --y: 315; --w: 30; --h: 30"><use href="#sparkle" fill="#ffffff" transform="translate(860 330) scale(0.8)" /></svg>
+          <svg class="sprite" viewBox="1280 500 40 40" style="--x: 1280; --y: 500; --w: 40; --h: 40"><use href="#sparkle" fill="#ff9ecf" transform="translate(1300 520) scale(1.1)" /></svg>
+        </div>
 
-        <g class="sparkles">
-          <use href="#sparkle" fill="#ffffff" transform="translate(470 180)" />
-          <use href="#sparkle" fill="#ffe066" transform="translate(1110 120) scale(1.3)" />
-          <use href="#sparkle" fill="#ffffff" transform="translate(1460 330) scale(0.9)" />
-          <use href="#sparkle" fill="#ffe066" transform="translate(110 420) scale(1.1)" />
-          <use href="#sparkle" fill="#ffffff" transform="translate(860 330) scale(0.8)" />
-          <use href="#sparkle" fill="#ff9ecf" transform="translate(1300 520) scale(1.1)" />
-        </g>
+        <div class="night-only fireflies">
+          <svg class="sprite" viewBox="195 745 30 30" style="--x: 195; --y: 745; --w: 30; --h: 30"><circle cx="210" cy="760" r="14" fill="url(#firefly)" /></svg>
+          <svg class="sprite" viewBox="455 705 30 30" style="--x: 455; --y: 705; --w: 30; --h: 30"><circle cx="470" cy="720" r="12" fill="url(#firefly)" /></svg>
+          <svg class="sprite" viewBox="675 765 30 30" style="--x: 675; --y: 765; --w: 30; --h: 30"><circle cx="690" cy="780" r="14" fill="url(#firefly)" /></svg>
+          <svg class="sprite" viewBox="995 725 30 30" style="--x: 995; --y: 725; --w: 30; --h: 30"><circle cx="1010" cy="740" r="12" fill="url(#firefly)" /></svg>
+          <svg class="sprite" viewBox="1465 725 30 30" style="--x: 1465; --y: 725; --w: 30; --h: 30"><circle cx="1480" cy="740" r="14" fill="url(#firefly)" /></svg>
+          <svg class="sprite" viewBox="1335 785 30 30" style="--x: 1335; --y: 785; --w: 30; --h: 30"><circle cx="1350" cy="800" r="11" fill="url(#firefly)" /></svg>
+        </div>
 
-        <ellipse class="hill-back" cx="380" cy="940" rx="640" ry="210" />
-        <ellipse class="hill-front" cx="1150" cy="975" rx="780" ry="245" />
-
-        <g class="flowers">
-          <use href="#flower" fill="#ff7ab8" transform="translate(140 820)" />
-          <use href="#flower" fill="#b18cff" transform="translate(330 790) scale(0.8)" />
-          <use href="#flower" fill="#ffffff" transform="translate(560 850) scale(0.9)" />
-          <use href="#flower" fill="#5cc0ff" transform="translate(760 812) scale(0.75)" />
-          <use href="#flower" fill="#ffa94d" transform="translate(1420 812)" />
-          <use href="#flower" fill="#ff7ab8" transform="translate(1530 862) scale(0.8)" />
-          <use href="#flower" fill="#ffffff" transform="translate(1320 870) scale(0.7)" />
-        </g>
-
-        <g class="night-only fireflies">
-          <circle cx="210" cy="760" r="14" fill="url(#firefly)" />
-          <circle cx="470" cy="720" r="12" fill="url(#firefly)" />
-          <circle cx="690" cy="780" r="14" fill="url(#firefly)" />
-          <circle cx="1010" cy="740" r="12" fill="url(#firefly)" />
-          <circle cx="1480" cy="740" r="14" fill="url(#firefly)" />
-          <circle cx="1350" cy="800" r="11" fill="url(#firefly)" />
-        </g>
-
-        <g class="step-aside"><g class="unicorn" transform="translate(877 341) scale(1.2)"><g class="bob">
-            <defs>
-              <rect id="u-leg-1" x="146" y="250" width="32" height="82" rx="16"/>
-              <rect id="u-leg-2" x="258" y="250" width="32" height="82" rx="16"/>
-              <rect id="u-leg-3" x="180" y="246" width="30" height="80" rx="15"/>
-              <rect id="u-leg-4" x="290" y="246" width="30" height="80" rx="15"/>
-              <clipPath id="u-clip-1"><use href="#u-leg-1"/></clipPath>
-              <clipPath id="u-clip-2"><use href="#u-leg-2"/></clipPath>
-              <clipPath id="u-clip-3"><use href="#u-leg-3"/></clipPath>
-              <clipPath id="u-clip-4"><use href="#u-leg-4"/></clipPath>
-              <g id="u-far-legs"><use href="#u-leg-3"/><use href="#u-leg-4"/></g>
-              <g id="u-shape">
-                <use href="#u-leg-1"/>
-                <use href="#u-leg-2"/>
-                <ellipse cx="236" cy="232" rx="94" ry="58"/>
-                <path d="M144 240 C138 210 142 176 150 150 L204 146 C204 172 210 194 228 210 Z"/>
-                <ellipse cx="138" cy="110" rx="62" ry="56"/>
-                <ellipse cx="94" cy="142" rx="44" ry="33"/>
-                <path d="M156 66 L176 20 L194 74 Z"/>
+        <!-- The unicorn, in three layers: below its horn's glow at night, the
+             glow, and above it. -->
+        <div class="sprite step-aside" style="--x: 925; --y: 310; --w: 410; --h: 440">
+          <div class="bob">
+            <svg viewBox="925 310 410 440"><g transform="translate(877 341) scale(1.2)">
+              <defs>
+                <rect id="u-leg-1" x="146" y="250" width="32" height="82" rx="16"/>
+                <rect id="u-leg-2" x="258" y="250" width="32" height="82" rx="16"/>
+                <rect id="u-leg-3" x="180" y="246" width="30" height="80" rx="15"/>
+                <rect id="u-leg-4" x="290" y="246" width="30" height="80" rx="15"/>
+                <clipPath id="u-clip-1"><use href="#u-leg-1"/></clipPath>
+                <clipPath id="u-clip-2"><use href="#u-leg-2"/></clipPath>
+                <clipPath id="u-clip-3"><use href="#u-leg-3"/></clipPath>
+                <clipPath id="u-clip-4"><use href="#u-leg-4"/></clipPath>
+                <g id="u-far-legs"><use href="#u-leg-3"/><use href="#u-leg-4"/></g>
+                <g id="u-shape">
+                  <use href="#u-leg-1"/>
+                  <use href="#u-leg-2"/>
+                  <ellipse cx="236" cy="232" rx="94" ry="58"/>
+                  <path d="M144 240 C138 210 142 176 150 150 L204 146 C204 172 210 194 228 210 Z"/>
+                  <ellipse cx="138" cy="110" rx="62" ry="56"/>
+                  <ellipse cx="94" cy="142" rx="44" ry="33"/>
+                  <path d="M156 66 L176 20 L194 74 Z"/>
+                </g>
+              </defs>
+              <g class="u-tail">
+                <circle cx="326" cy="204" r="22" fill="#a98bff"/>
+                <circle cx="344" cy="226" r="21" fill="#5cc0ff"/>
+                <circle cx="354" cy="252" r="20" fill="#6bd88f"/>
+                <circle cx="354" cy="278" r="18" fill="#ffd93d"/>
+                <circle cx="346" cy="300" r="16" fill="#ffa94d"/>
+                <circle cx="334" cy="317" r="13" fill="#ff7ab8"/>
               </g>
-            </defs>
-            <g class="u-tail">
-              <circle cx="326" cy="204" r="22" fill="#a98bff"/>
-              <circle cx="344" cy="226" r="21" fill="#5cc0ff"/>
-              <circle cx="354" cy="252" r="20" fill="#6bd88f"/>
-              <circle cx="354" cy="278" r="18" fill="#ffd93d"/>
-              <circle cx="346" cy="300" r="16" fill="#ffa94d"/>
-              <circle cx="334" cy="317" r="13" fill="#ff7ab8"/>
-            </g>
-            <use href="#u-far-legs" fill="#b9a3dc" stroke="#b9a3dc" stroke-width="12" stroke-linejoin="round"/>
-            <use href="#u-far-legs" fill="#efe6fa"/>
-            <rect x="180" y="306" width="30" height="20" fill="#ff9ecf" clip-path="url(#u-clip-3)"/>
-            <rect x="290" y="306" width="30" height="20" fill="#ff9ecf" clip-path="url(#u-clip-4)"/>
-            <use href="#u-shape" fill="#b9a3dc" stroke="#b9a3dc" stroke-width="12" stroke-linejoin="round"/>
-            <use href="#u-shape" fill="#ffffff"/>
-            <rect x="146" y="312" width="32" height="20" fill="#ff9ecf" clip-path="url(#u-clip-1)"/>
-            <rect x="258" y="312" width="32" height="20" fill="#ff9ecf" clip-path="url(#u-clip-2)"/>
-            <path d="M166 64 L176 38 L185 68 Z" fill="#ffc2dd" stroke="#ffc2dd" stroke-width="4" stroke-linejoin="round"/>
-            <g class="u-mane">
-              <circle cx="170" cy="62" r="21" fill="#ff7ab8"/>
-              <circle cx="194" cy="84" r="24" fill="#ffa94d"/>
-              <circle cx="204" cy="114" r="24" fill="#ffd93d"/>
-              <circle cx="208" cy="146" r="23" fill="#6bd88f"/>
-              <circle cx="216" cy="176" r="22" fill="#5cc0ff"/>
-              <circle cx="234" cy="198" r="20" fill="#a98bff"/>
-            </g>
-            <g class="night-only">
-              <circle class="horn-glow" cx="118" cy="30" r="52" fill="url(#horn-glow)" />
-            </g>
-            <g class="u-horn">
-              <path d="M114 62 L106 2 L142 58 Z" fill="#ffd166" stroke="#f0a83c" stroke-width="5" stroke-linejoin="round"/>
-              <path d="M113 44 L130 38 M110 26 L120 22" stroke="#f0a83c" stroke-width="4" stroke-linecap="round"/>
-            </g>
-            <ellipse cx="132" cy="106" rx="11" ry="14" fill="#3b2a4d"/>
-            <circle cx="136" cy="100" r="4" fill="#fff"/>
-            <circle cx="128" cy="113" r="2" fill="#fff"/>
-            <path d="M126 92 L121 84 M133 90 L133 80 M140 93 L145 85" stroke="#3b2a4d" stroke-width="3" stroke-linecap="round"/>
-            <circle cx="112" cy="136" r="11" fill="#ffb3d1" opacity="0.8"/>
-            <ellipse cx="68" cy="136" rx="4" ry="3" fill="#c9a6d9"/>
-            <path d="M74 158 Q90 168 106 157" fill="none" stroke="#b9a3dc" stroke-width="4" stroke-linecap="round"/>
-          </g></g></g>
+              <use href="#u-far-legs" fill="#b9a3dc" stroke="#b9a3dc" stroke-width="12" stroke-linejoin="round"/>
+              <use href="#u-far-legs" fill="#efe6fa"/>
+              <rect x="180" y="306" width="30" height="20" fill="#ff9ecf" clip-path="url(#u-clip-3)"/>
+              <rect x="290" y="306" width="30" height="20" fill="#ff9ecf" clip-path="url(#u-clip-4)"/>
+              <use href="#u-shape" fill="#b9a3dc" stroke="#b9a3dc" stroke-width="12" stroke-linejoin="round"/>
+              <use href="#u-shape" fill="#ffffff"/>
+              <rect x="146" y="312" width="32" height="20" fill="#ff9ecf" clip-path="url(#u-clip-1)"/>
+              <rect x="258" y="312" width="32" height="20" fill="#ff9ecf" clip-path="url(#u-clip-2)"/>
+              <path d="M166 64 L176 38 L185 68 Z" fill="#ffc2dd" stroke="#ffc2dd" stroke-width="4" stroke-linejoin="round"/>
+              <g class="u-mane">
+                <circle cx="170" cy="62" r="21" fill="#ff7ab8"/>
+                <circle cx="194" cy="84" r="24" fill="#ffa94d"/>
+                <circle cx="204" cy="114" r="24" fill="#ffd93d"/>
+                <circle cx="208" cy="146" r="23" fill="#6bd88f"/>
+                <circle cx="216" cy="176" r="22" fill="#5cc0ff"/>
+                <circle cx="234" cy="198" r="20" fill="#a98bff"/>
+              </g>
+            </g></svg>
+            <div class="night-only">
+              <svg class="horn-glow" viewBox="925 310 410 440"><g transform="translate(877 341) scale(1.2)">
+                <circle cx="118" cy="30" r="52" fill="url(#horn-glow)" />
+              </g></svg>
+            </div>
+            <svg viewBox="925 310 410 440"><g transform="translate(877 341) scale(1.2)">
+              <g class="u-horn">
+                <path d="M114 62 L106 2 L142 58 Z" fill="#ffd166" stroke="#f0a83c" stroke-width="5" stroke-linejoin="round"/>
+                <path d="M113 44 L130 38 M110 26 L120 22" stroke="#f0a83c" stroke-width="4" stroke-linecap="round"/>
+              </g>
+              <ellipse cx="132" cy="106" rx="11" ry="14" fill="#3b2a4d"/>
+              <circle cx="136" cy="100" r="4" fill="#fff"/>
+              <circle cx="128" cy="113" r="2" fill="#fff"/>
+              <path d="M126 92 L121 84 M133 90 L133 80 M140 93 L145 85" stroke="#3b2a4d" stroke-width="3" stroke-linecap="round"/>
+              <circle cx="112" cy="136" r="11" fill="#ffb3d1" opacity="0.8"/>
+              <ellipse cx="68" cy="136" rx="4" ry="3" fill="#c9a6d9"/>
+              <path d="M74 158 Q90 168 106 157" fill="none" stroke="#b9a3dc" stroke-width="4" stroke-linecap="round"/>
+            </g></svg>
+          </div>
+        </div>
 
         <!-- Superball's falling flowers, drawn by game.js. -->
-        <g class="game-layer" id="game-layer"></g>
+        <svg class="scene-game" viewBox="0 0 1600 900">
+          <g class="game-layer" id="game-layer"></g>
+        </svg>
 
-        <g class="greeting-text" text-anchor="middle">
+        <svg class="sprite greeting-text" viewBox="400 50 800 250" style="--x: 400; --y: 50; --w: 800; --h: 250" text-anchor="middle">
           <text id="greeting" x="800" y="118" class="greeting"></text>
           <text id="clock" x="800" y="222" class="clock"></text>
           <text id="date" x="800" y="276" class="date"></text>
-        </g>
 
-        <!-- <g class="bubble">
-          <path d="M424 404 H896 A44 44 0 0 1 940 448 V468 L976 510 L940 494 V496 A44 44 0 0 1 896 540 H424 A44 44 0 0 1 380 496 V448 A44 44 0 0 1 424 404 Z"
-            fill="#ffffff" stroke="#ff9ecf" stroke-width="6" stroke-linejoin="round" />
-          <text x="660" y="460" text-anchor="middle" class="bubble-line">Tap the magic button</text>
-          <text x="660" y="510" text-anchor="middle" class="bubble-line">and ask: <tspan class="bubble-ask">What’s the weather?</tspan></text>
-        </g> -->
-      </svg>
+          <!-- <g class="bubble">
+            <path d="M424 404 H896 A44 44 0 0 1 940 448 V468 L976 510 L940 494 V496 A44 44 0 0 1 896 540 H424 A44 44 0 0 1 380 496 V448 A44 44 0 0 1 424 404 Z"
+              fill="#ffffff" stroke="#ff9ecf" stroke-width="6" stroke-linejoin="round" />
+            <text x="660" y="460" text-anchor="middle" class="bubble-line">Tap the magic button</text>
+            <text x="660" y="510" text-anchor="middle" class="bubble-line">and ask: <tspan class="bubble-ask">What’s the weather?</tspan></text>
+          </g> -->
+        </svg>
+      </div>
 
       <section class="stage" id="stage" aria-live="polite">
         <p class="asked" id="asked" hidden>
@@ -291,7 +326,7 @@
       <section class="game" id="game" hidden>
         <div class="game-hud" role="status">
           <span class="game-level">Level 1</span>
-          <span class="game-score" aria-label="Flowers dodged">
+          <span class="game-score" aria-label="Flowers caught">
             <svg viewBox="-22 -22 44 44" aria-hidden="true"><use href="#flower" fill="#ff7ab8" /></svg>
             <span class="game-score-value">0</span>
           </span>
