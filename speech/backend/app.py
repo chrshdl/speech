@@ -50,11 +50,12 @@ class RevalidatedFiles(StaticFiles):
         return response
 
 
-def create_app(recognizer, microphone=None, wifi=None):
+def create_app(recognizer, microphone=None, wifi=None, songs=None):
     """
     Returns the service for the recognizer, an engine.Recognizer, which
     with a microphone, an engine.Microphone, listens to it while running.
-    With wifi, a wifi.Wifi, the client can join a Wi-Fi network.
+    With wifi, a wifi.Wifi, the client can join a Wi-Fi network. With
+    songs, a songs.Songs, it serves the audio its SongCards play.
 
     The endpoints are all async, so they run on the event loop, as the
     recognizer must.
@@ -279,6 +280,21 @@ def create_app(recognizer, microphone=None, wifi=None):
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE, str(error)
             ) from None
+
+    @app.get(
+        "/v1/songs/{song_id}",
+        response_class=Response,
+        responses={
+            200: {"content": {"audio/wav": {}}, "description": "The song's audio"},
+            404: {"description": "No such song"},
+        },
+    )
+    async def song(song_id: str):
+        """A song's audio, which a SongCard plays, as a WAV file."""
+        audio = await songs.audio(song_id) if songs is not None else None
+        if audio is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such song.")
+        return Response(audio, media_type="audio/wav")
 
     @app.get("/", include_in_schema=False)
     async def home():

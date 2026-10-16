@@ -196,6 +196,22 @@ const RENDERERS = {
   },
 };
 
+// A note of music, on a 32 by 48 grid, in its own svg so that each can
+// move without the card being drawn again.
+const SONG_NOTE = `<svg class="song-note" viewBox="0 0 32 48" aria-hidden="true">
+  <ellipse cx="11" cy="38" rx="9" ry="7" transform="rotate(-20 11 38)"/>
+  <rect x="17" y="6" width="4" height="32" rx="2"/>
+  <path d="M19 6 C27 9 31 17 25 26 C26 18 24 15 19 14 Z"/>
+</svg>`;
+
+RENDERERS.SongCard = (data, body) => {
+  body.innerHTML = `
+    <div class="song">
+      <div class="song-notes">${SONG_NOTE.repeat(3)}</div>
+      <div class="song-progress"><span class="song-left"></span></div>
+    </div>`;
+};
+
 const TITLES = {
   WeatherCard: (data) => `Weather in ${data.location}`,
 };
@@ -218,12 +234,16 @@ function showCard(data) {
   // Another card, such as the answer to a question, ends the game.
   endGame();
   // A card with the id of the card shown updates it in place.
-  if (!card || card.data.id !== data.id || card.data.type !== data.type) {
+  const fresh = !card || card.data.id !== data.id || card.data.type !== data.type;
+  if (fresh) {
     hideCard();
     const element = ui.cardTemplate.content.firstElementChild.cloneNode(true);
     element.querySelector(".card-close").addEventListener("click", () => dismissCard());
     ui.stage.append(element);
     card = { data, element };
+  } else if (data.type === "SongCard") {
+    // Shown again, as when the events reconnect, the song plays on.
+    return;
   }
   card.data = data;
   const title = TITLES[data.type] ? TITLES[data.type](data) : data.title;
@@ -233,6 +253,9 @@ function showCard(data) {
   render(data, body);
   showAsked(data);
   document.body.classList.add("has-card");
+  if (data.type === "SongCard") {
+    playSong(card);
+  }
 }
 
 // Above an answer, such as the weather, what was asked for it. A
@@ -252,6 +275,9 @@ function hideCard() {
   if (data.type === "GameCard") {
     endGame();
     return;
+  }
+  if (data.type === "SongCard") {
+    stopSong();
   }
   ui.asked.hidden = true;
   document.body.classList.remove("has-card");
@@ -328,6 +354,94 @@ async function playTone({ notes, volume }) {
 
 function toneSeconds({ notes }) {
   return (notes.length - 1) * NOTE_STEP + NOTE_LENGTH;
+}
+
+// Songs: a SongCard plays the song the service rendered, on the tones'
+// context, and is dismissed once it has played. The card going, such as
+// when it is closed or replaced, stops the song.
+
+let song = null; // The song card playing, and its audio source once loaded.
+
+// Whether the song card was started before, and remembers it was. The page
+// keeps this across a reload, so a card that the service shows again after
+// one, such as when the page crashed playing it, is not played again.
+function startedBefore(id) {
+  try {
+    if (sessionStorage.getItem("song") === id) {
+      return true;
+    }
+    sessionStorage.setItem("song", id);
+  } catch {
+    // Without storage, every card plays.
+  }
+  return false;
+}
+
+async function playSong(songCard) {
+  stopSong();
+  const { url, id } = songCard.data;
+  if (startedBefore(id)) {
+    dismissCard();
+    return;
+  }
+  const playing = { card: songCard, source: null };
+  song = playing;
+  try {
+    unlockTones();
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`${url}: ${response.status}`);
+    }
+    const audio = await tones.decodeAudioData(await response.arrayBuffer());
+    if (tones.state !== "running") {
+      // Before a tap allows sound, such as right after the page loaded, it
+      // does not resume.
+      await Promise.race([tones.resume(), new Promise((resolve) => setTimeout(resolve, 1000))]);
+      if (tones.state !== "running") {
+        throw new Error("Sound is not allowed before a tap");
+      }
+    }
+    if (song !== playing) {
+      return; // Stopped while loading.
+    }
+    const source = tones.createBufferSource();
+    source.buffer = audio;
+    source.connect(tones.destination);
+    source.onended = () => {
+      if (song === playing) {
+        song = null;
+        if (card && card.data.id === id) {
+          dismissCard();
+        }
+      }
+    };
+    playing.source = source;
+    source.start();
+    // The rainbow shows as the song plays, from when it starts.
+    const left = songCard.element.querySelector(".song-left");
+    left.style.animationDuration = `${audio.duration}s`;
+    songCard.element.classList.add("playing");
+  } catch (error) {
+    console.error("Could not play the song:", error);
+    if (song === playing) {
+      song = null;
+      if (card && card.data.id === id) {
+        dismissCard();
+      }
+    }
+  }
+}
+
+function stopSong() {
+  if (!song) {
+    return;
+  }
+  const { source } = song;
+  song = null;
+  if (source) {
+    source.onended = null;
+    source.stop();
+  }
 }
 
 function isCommands(id) {
@@ -426,6 +540,8 @@ async function startCapture(initiator) {
     // Chime before listening, so the microphone opening never dulls the
     // tone, which is the cue to speak, and the microphone misses it.
     if (!startingCommands) {
+      // The song stops for the question, so it is neither heard nor talked over.
+      stopSong();
       chimed = true;
       await playTone(START_TONE);
     }

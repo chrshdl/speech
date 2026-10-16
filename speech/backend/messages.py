@@ -144,8 +144,26 @@ class GameCard(CamelModel):
     level: int
 
 
+class SongCard(CamelModel):
+    """
+    Play a song: the client plays the audio at the url, which the service
+    rendered, and dismisses the card when it has played. The card stays
+    until then, or until another card replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["SongCard"] = "SongCard"
+    id: str
+    title: str
+    # The song's WAV file, see GET /v1/songs/{song_id}.
+    url: str
+    # How long the song plays.
+    seconds: float
+
+
 Card = Annotated[
-    TranscriptCard | NoticeCard | WeatherCard | GameCard, Field(discriminator="type")
+    TranscriptCard | NoticeCard | WeatherCard | GameCard | SongCard,
+    Field(discriminator="type"),
 ]
 
 

@@ -10,7 +10,7 @@ import os
 import uvicorn
 
 from speech import streaming
-from speech.backend import game, weather, wifi
+from speech.backend import game, songs, weather, wifi
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
@@ -30,7 +30,9 @@ def main(args):
         card_timeout=args.card_timeout,
         answer_card_timeout=args.answer_card_timeout,
     )
-    new_transcriber, sample_rate, intents, commands = load(args)
+    # Read before the model loads, so a bad song file fails at once.
+    jukebox = songs.Songs(songs.load(args.songs) if args.songs else [])
+    new_transcriber, sample_rate, intents, commands = load(args, jukebox)
     recognizer = Recognizer(
         new_transcriber,
         sample_rate,
@@ -42,6 +44,7 @@ def main(args):
         handlers={
             weather.INTENT.name: weather.Weather(args.weather_location),
             game.INTENT.name: game.Game(),
+            songs.NAME: jukebox,
         },
         commands=commands,
     )
@@ -52,7 +55,7 @@ def main(args):
     if args.wifi_interface:
         wifi_control = wifi.Wifi(args.wifi_interface, args.wifi_control_dir)
     config = uvicorn.Config(
-        create_app(recognizer, microphone, wifi_control),
+        create_app(recognizer, microphone, wifi_control, jukebox),
         host=args.host,
         port=args.port,
         # A last resort, should a connection still not close.
@@ -61,17 +64,19 @@ def main(args):
     Server(config, recognizer).run()
 
 
-def load(args):
+def load(args, jukebox):
     """
     Loads the streaming CTC model and returns a function that creates the
     transcriber of a capture, the sample rate, and the recognizers of the
-    intents and of the game's commands, which match the model's output.
+    intents, with asking for one of the songs, a songs.Songs, and of the
+    game's commands, which match the model's output.
     """
     model = streaming.load(args.model, "best", "cpu", args.threads)
     new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
 
+    song_intent = jukebox.intent
     intents = IntentRecognizer(
-        INTENTS,
+        INTENTS + ([song_intent] if song_intent else []),
         model.char_to_int,
         model.blank,
         model.frame_seconds,
@@ -158,6 +163,11 @@ if __name__ == "__main__":
         "--weather-location",
         default="Berlin",
         help="The place to answer questions for the weather for.",
+    )
+    parser.add_argument(
+        "--songs",
+        help='A directory of songs to play when asked, such as "play twinkle '
+        'twinkle", .json files, see speech/backend/songs.py.',
     )
     parser.add_argument(
         "--wifi-interface",
