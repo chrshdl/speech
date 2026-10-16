@@ -45,7 +45,8 @@ function updateClock() {
   const now = new Date();
   const hour = now.getHours();
   // ui.greeting.textContent = hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-  ui.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  // A 24 hour clock, also where the language's default has AM and PM.
+  ui.clock.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
   ui.date.textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
 
