@@ -130,8 +130,8 @@ class WeatherCard(CamelModel):
 
 class GameCard(CamelModel):
     """
-    Play a game, Superball, at the level: the client lets flowers fall
-    toward the unicorn, which the user steers with the commands of a
+    Play a game, Superball, at the level: the client lets flowers fall for
+    the unicorn to catch, which the user steers with the commands of a
     COMMANDS capture. The card stays until the client dismisses it when
     the game ends, or another card replaces it.
     """

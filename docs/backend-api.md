@@ -452,12 +452,14 @@ weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka fo
 no internet.
 
 Asked to "play superball", it plays a game on the meadow: the unicorn
-trots to the bottom, a countdown starts, and flowers fall toward it,
-faster from level to level. Saying "left" or "right" moves the unicorn
-one of five lanes, as do the arrow keys and the big buttons at the sides,
-which light up when a command is heard. Each flower dodged is a point,
-every 10 points the next level begins, up to 5, and three flowers hit
-end the game, which then shows the score. Tapping the microphone button
+trots to the bottom, a countdown starts, and flowers fall for it to
+catch, faster from level to level. Saying "left" or "right" moves the
+unicorn one of five lanes, as do the arrow keys and the big buttons at the
+sides, which light up when a command is heard. Each flower caught is a
+point, every 10 points the next level begins, up to 5, and three flowers
+missed end the game, which then shows the score. A flower falls no
+farther from the one before than the unicorn can move in time, so each
+can be caught. Tapping the microphone button
 ends it sooner. While playing, the page listens with a `COMMANDS`
 capture, see `web/assistant/game.js`.
 
