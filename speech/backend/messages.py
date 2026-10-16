@@ -163,6 +163,15 @@ class SongCard(CamelModel):
     loop: bool = False
 
 
+class BrightnessCard(CamelModel):
+    """The brightness of the screen, just set, in percent."""
+
+    type: Literal["BrightnessCard"] = "BrightnessCard"
+    id: str
+    title: str
+    percent: int
+
+
 class SongNote(CamelModel):
     """A note of a song, played with the voice of an additive synthesizer."""
 
@@ -187,7 +196,7 @@ class SongScore(CamelModel):
 
 
 Card = Annotated[
-    TranscriptCard | NoticeCard | WeatherCard | GameCard | SongCard,
+    TranscriptCard | NoticeCard | WeatherCard | GameCard | SongCard | BrightnessCard,
     Field(discriminator="type"),
 ]
 

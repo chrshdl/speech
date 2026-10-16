@@ -213,6 +213,17 @@ RENDERERS.SongCard = (data, body) => {
     </div>`;
 };
 
+// The brightness just set: a sun, how full the bar is, and the percent.
+RENDERERS.BrightnessCard = (data, body) => {
+  body.innerHTML = `
+    <div class="brightness">
+      <svg class="brightness-icon" viewBox="0 0 64 64" aria-hidden="true">${sun()}</svg>
+      <div class="brightness-bar"><span class="brightness-level"></span></div>
+      <p class="brightness-percent">${data.percent}%</p>
+    </div>`;
+  body.querySelector(".brightness-level").style.width = `${data.percent}%`;
+};
+
 const TITLES = {
   WeatherCard: (data) => `Weather in ${data.location}`,
 };

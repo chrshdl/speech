@@ -823,6 +823,44 @@ body.has-card .step-aside {
   color: var(--faint);
 }
 
+/* The brightness card. */
+
+.brightness {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 20px;
+}
+
+.brightness-icon {
+  width: 72px;
+  height: 72px;
+}
+
+.brightness-bar {
+  height: 18px;
+  border-radius: 999px;
+  background: #fff3d1;
+  overflow: hidden;
+}
+
+.brightness-level {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #ffbf2e;
+}
+
+.brightness-percent {
+  margin: 0;
+  min-width: 3.2ch;
+  color: var(--ink);
+  font-size: 40px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 /* The song card: notes that dance while the song plays, and a rainbow
    that fills as it goes. */
 
