@@ -35,7 +35,7 @@ def main(args):
     screen = None
     if args.backlight:
         state = os.path.join(args.state_dir, "brightness") if args.state_dir else None
-        screen = brightness.Brightness(brightness.find(args.backlight), state)
+        screen = brightness.Brightness(args.backlight, state)
     new_transcriber, sample_rate, intents, commands = load(args, jukebox, screen)
     recognizer = Recognizer(
         new_transcriber,

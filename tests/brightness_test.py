@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 import pytest
 
@@ -36,9 +37,19 @@ def test_percent(slots, percent):
     assert brightness.percent(slots) == percent
 
 
-def test_card_sets_the_backlight(tmp_path):
-    path = backlight(tmp_path)
-    screen = brightness.Brightness(str(path))
+@pytest.fixture
+def backlights(tmp_path, monkeypatch):
+    """A /sys/class/backlight of its own."""
+    path = tmp_path / "backlights"
+    path.mkdir()
+    monkeypatch.setattr(brightness, "BACKLIGHTS", str(path))
+    monkeypatch.setattr(brightness, "RETRY_SECONDS", 0.01)
+    return path
+
+
+def test_card_sets_the_backlight(backlights):
+    path = backlight(backlights)
+    screen = brightness.Brightness("auto")
     card = asyncio.run(screen.card("id", {"percent": "fifty"}))
     assert (card.type, card.id, card.title, card.percent) == (
         "BrightnessCard",
@@ -52,32 +63,62 @@ def test_card_sets_the_backlight(tmp_path):
     assert raw(path) == 3
 
 
-def test_never_off(tmp_path):
+def test_never_off(backlights):
     # With few steps the minimum still lights the screen.
-    path = backlight(tmp_path, maximum=7)
-    brightness.Brightness(str(path)).set(brightness.MINIMUM)
+    path = backlight(backlights, maximum=7)
+    brightness.Brightness("10-0045").set(brightness.MINIMUM)
     assert raw(path) == 1
 
 
-def test_kept_and_set_again(tmp_path):
-    path = backlight(tmp_path)
-    state = tmp_path / "state" / "brightness"
-    state.parent.mkdir()
-    screen = brightness.Brightness(str(path), str(state))
+def test_kept_and_set_again(backlights, tmp_path):
+    path = backlight(backlights)
+    state = tmp_path / "brightness"
+    screen = brightness.Brightness("auto", str(state))
     asyncio.run(screen.card("id", {"percent": "seventy"}))
     assert state.read_text() == "70"
     # After a restart, as the backlight starts at full brightness.
     (path / "brightness").write_text("31")
-    brightness.Brightness(str(path), str(state))
+    screen = brightness.Brightness("auto", str(state))
+    assert screen.restored.wait(2)
     assert raw(path) == 22
 
 
-def test_kept_brightness_is_clamped(tmp_path):
-    path = backlight(tmp_path)
+def test_kept_brightness_is_clamped(backlights, tmp_path):
+    path = backlight(backlights)
     state = tmp_path / "brightness"
     state.write_text("0")
-    brightness.Brightness(str(path), str(state))
+    assert brightness.Brightness("auto", str(state)).restored.wait(2)
     assert raw(path) == 3
+
+
+def test_set_again_once_the_backlight_appears(backlights, tmp_path):
+    # The display's driver can load after the service starts.
+    state = tmp_path / "brightness"
+    state.write_text("50")
+    screen = brightness.Brightness("auto", str(state))
+    time.sleep(0.05)
+    assert not screen.restored.is_set()
+    path = backlight(backlights)
+    assert screen.restored.wait(2)
+    assert raw(path) == 16
+
+
+def test_gives_up_without_a_backlight(backlights, tmp_path):
+    state = tmp_path / "brightness"
+    state.write_text("50")
+    screen = brightness.Brightness("auto", str(state), wait=0.05)
+    assert screen.restored.wait(2)
+
+
+def test_the_users_brightness_wins(backlights, tmp_path):
+    # Set while the kept one waits for the backlight, it is not replaced.
+    state = tmp_path / "brightness"
+    state.write_text("50")
+    screen = brightness.Brightness("auto", str(state))
+    path = backlight(backlights)
+    screen.set(90)
+    time.sleep(0.05)
+    assert raw(path) == 28 and state.read_text() == "90"
 
 
 def test_find(tmp_path, monkeypatch):
