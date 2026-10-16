@@ -1,9 +1,9 @@
 """
 Plays songs asked for by name, such as "play twinkle twinkle". Each song is
 a JSON file in a directory (backend.py --songs), which the service reads
-when it starts and then renders in the background with the sound of an
-additive synthesizer, and serves as a WAV file, for the client to play
-with the SongCard that answers the request.
+when it starts. It answers with a SongCard, whose client fetches the
+song's notes from GET /v1/songs/{songId} and plays them live with the
+voice of an additive synthesizer, see web/assistant/synth.js.
 
 A song file:
 
@@ -28,29 +28,18 @@ partials, and a volume, 1 by default, such as for quieter chords.
 Optionally, beats is how long the song lasts, which cuts notes that last
 longer, and loop, if true, plays it over and over until the card is
 closed: a looping song lasts exactly its beats, or until its last note
-ends. As every note is let go before it ends, nothing sounds on past the
-end, so the loop has no seam.
+ends. The synthesizer lets every note go before it ends, so nothing
+sounds on past the end, and the loop has no seam.
 examples/songs/from_midi.py makes a song file from a MIDI file.
 """
 
-import asyncio
-import concurrent.futures
 import dataclasses
-import io
 import json
-import logging
 import os
 import re
-import threading
-import time
-import wave
 
-import numpy as np
-
-from speech.backend.messages import SongCard
+from speech.backend.messages import SongCard, SongNote, SongScore
 from speech.intents import Intent
-
-log = logging.getLogger(__name__)
 
 # The intent's name.
 NAME = "PlaySong"
@@ -66,18 +55,8 @@ SAMPLES = (
     "{song}",
 )
 
-SAMPLE_RATE = 44100
-# The synthesizer's voice: each harmonic a sine with two quieter ones
-# detuned by 3 Hz plus 1 Hz per harmonic, which thickens it like a chorus,
-# up to 8 harmonics, and a linear attack and release.
-DETUNE = 0.4
+# The synthesizer's harmonics, its bubbles.
 MAX_PARTIALS = 8
-ENVELOPE_SECONDS = 0.025
-# The synthesizer mixes its notes through tanh with this much headroom per
-# unit of master volume, so chords saturate softly rather than clip.
-HEADROOM = 1 / (MAX_PARTIALS * 2.5)
-# The loudest sample of a rendered song, as loud as the client's tones.
-PEAK = 0.3
 
 PITCH = re.compile(r"([A-G])(#|b)?(-?\d)")
 STEPS = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
@@ -143,103 +122,19 @@ def notes(voices, tempo, partials=(1.0,)):
     return notes
 
 
-def envelope(samples, gate):
-    """
-    The synthesizer's envelope of a key held for gate of the samples: up in
-    ENVELOPE_SECONDS, held, and down in as long once let go.
-    """
-    ramp = ENVELOPE_SECONDS * SAMPLE_RATE
-    index = np.arange(samples)
-    up = np.minimum(index / ramp, 1.0)
-    # Released from the level it reached, which is less than 1 for a note
-    # shorter than the attack.
-    released = np.minimum(gate / ramp, 1.0) - (index - gate) / ramp
-    return np.clip(np.where(index < gate, up, released), 0.0, 1.0)
-
-
-def partial_wave(frequency, partial, t):
-    """
-    A harmonic of the synthesizer's voice at the times t, in seconds: the
-    partial-th multiple of frequency, from 0, with its detuned pair, at
-    random phases that are the same each time, so a song renders the same.
-    """
-    f = frequency * (partial + 1)
-    detune = 3 + partial
-    phases = np.random.default_rng([round(frequency * 100), partial]).uniform(0, 1, 3)
-    wave = sine(f, phases[0], t)
-    wave += DETUNE * sine(f + detune, phases[1], t)
-    wave += DETUNE * sine(f - detune, phases[2], t)
-    return wave / (1 + 2 * DETUNE)
-
-
-def sine(frequency, phase, t):
-    """
-    A sine of the frequency at the times t, from the phase in cycles. The
-    cycles are wrapped in float64, as a minute's are millions of radians,
-    then the sine is taken in float32, which on a Raspberry Pi 4 is 1.4
-    times as fast.
-    """
-    cycles = frequency * t + phase
-    cycles -= np.floor(cycles)
-    return np.sin((2 * np.pi * cycles).astype(np.float32))
-
-
-RELEASE_SAMPLES = round(ENVELOPE_SECONDS * SAMPLE_RATE)
-
-
-def song_samples(notes, seconds=None):
-    """
-    How many samples the notes take, for seconds or else until the last
-    one ends, with the release after it.
-    """
-    if seconds is None:
-        seconds = max(note.start + note.seconds for note in notes)
-    return round(seconds * SAMPLE_RATE) + RELEASE_SAMPLES
-
-
-def render(notes, loop=False, seconds=None):
-    """
-    The samples of the notes, played with the synthesizer's voice, each
-    with its partials and volume, with a peak of PEAK, for seconds or else
-    until the last note ends, and then, unless to loop, a release.
-    """
-    # Each key is let go a release before its note ends, so the next note,
-    # also of the same key, starts from silence, as when played by hand.
-    release = RELEASE_SAMPLES
-    mix = np.zeros(song_samples(notes, seconds))
-    for note in notes:
-        start = round(note.start * SAMPLE_RATE)
-        samples = round(note.seconds * SAMPLE_RATE)
-        gate = max(samples - release, samples // 2)
-        # The time of the whole song, so a note's phase continues, as the
-        # synthesizer's wavetables loop with its clock.
-        t = (start + np.arange(samples)) / SAMPLE_RATE
-        voice = sum(
-            amplitude * partial_wave(note.frequency, partial, t)
-            for partial, amplitude in enumerate(note.partials)
-            if amplitude > 0
-        )
-        mix[start : start + samples] += note.volume * envelope(samples, gate) * voice
-    if loop:
-        mix = mix[:-release]
-    mixed = np.tanh(mix * HEADROOM)
-    return mixed * (PEAK / np.abs(mixed).max())
-
-
-def wav(samples):
-    """16 bit mono WAV of the samples, in -1 to 1."""
-    out = io.BytesIO()
-    with wave.open(out, "wb") as f:
-        f.setnchannels(1)
-        f.setsampwidth(2)
-        f.setframerate(SAMPLE_RATE)
-        f.writeframes((samples * 32767).round().astype("<i2").tobytes())
-    return out.getvalue()
+def cut(notes, seconds):
+    """The notes, cut to end by seconds, raising ValueError for one after it."""
+    if any(note.start >= seconds for note in notes):
+        raise ValueError(f"A note starts after the song's {seconds:g} seconds")
+    return tuple(
+        dataclasses.replace(note, seconds=min(note.seconds, seconds - note.start))
+        for note in notes
+    )
 
 
 @dataclasses.dataclass(frozen=True)
 class Song:
-    # The file's name without .json, which the URL of its audio has.
+    # The file's name without .json, which the URL of its notes has.
     id: str
     title: str
     names: tuple[str, ...]
@@ -251,12 +146,26 @@ class Song:
     @property
     def seconds(self):
         """How long the song plays, once round for a loop."""
-        samples = song_samples(self.notes, self.length)
-        return (samples - RELEASE_SAMPLES * self.loop) / SAMPLE_RATE
+        if self.length is not None:
+            return self.length
+        return max(note.start + note.seconds for note in self.notes)
 
-    def render(self):
-        """The song's WAV file."""
-        return wav(render(self.notes, self.loop, self.length))
+    def score(self):
+        """The notes the client plays, a SongScore."""
+        return SongScore(
+            seconds=self.seconds,
+            loop=self.loop,
+            notes=[
+                SongNote(
+                    start=note.start,
+                    seconds=note.seconds,
+                    frequency=note.frequency,
+                    partials=list(note.partials),
+                    volume=note.volume,
+                )
+                for note in self.notes
+            ],
+        )
 
 
 def load_song(path):
@@ -290,16 +199,6 @@ def load_song(path):
         raise ValueError(f"{path}: {error!r}") from None
 
 
-def cut(notes, seconds):
-    """The notes, cut to end by seconds, raising ValueError for one after it."""
-    if any(note.start >= seconds for note in notes):
-        raise ValueError(f"A note starts after the song's {seconds:g} seconds")
-    return tuple(
-        dataclasses.replace(note, seconds=min(note.seconds, seconds - note.start))
-        for note in notes
-    )
-
-
 def load(directory):
     """Reads the songs, the .json files in the directory."""
     paths = sorted(
@@ -311,12 +210,7 @@ def load(directory):
 
 
 class Songs:
-    """
-    Answers a request to play a song with the card that plays it, and
-    renders the songs on a thread of its own: on a Raspberry Pi 4 a minute
-    of song takes about 6 seconds, which the service's start need not wait
-    for.
-    """
+    """Answers a request to play a song with the card that plays it."""
 
     def __init__(self, songs):
         self.songs = {song.id: song for song in songs}
@@ -325,25 +219,6 @@ class Songs:
             for name in song.names:
                 if self.by_name.setdefault(name, song) is not song:
                     raise ValueError(f"Two songs are called {name!r}")
-        self.rendered = {song.id: concurrent.futures.Future() for song in songs}
-        if songs:
-            # A daemon, so stopping the service need not wait for it.
-            threading.Thread(target=self._render, daemon=True).start()
-
-    def _render(self):
-        for song in self.songs.values():
-            started = time.monotonic()
-            try:
-                self.rendered[song.id].set_result(song.render())
-            except Exception as error:
-                log.exception("Could not render the song %s", song.id)
-                self.rendered[song.id].set_exception(error)
-            else:
-                log.info(
-                    "Rendered the song %s in %.1f seconds",
-                    song.id,
-                    time.monotonic() - started,
-                )
 
     @property
     def intent(self):
@@ -352,10 +227,10 @@ class Songs:
             return None
         return Intent(NAME, SAMPLES, {"song": tuple(self.by_name)})
 
-    async def audio(self, song_id):
-        """The song's WAV file, once rendered, None for no such song."""
-        rendered = self.rendered.get(song_id)
-        return await asyncio.wrap_future(rendered) if rendered is not None else None
+    def score(self, song_id):
+        """The song's notes, a SongScore, None for no such song."""
+        song = self.songs.get(song_id)
+        return song.score() if song is not None else None
 
     async def card(self, card_id, slots):
         song = self.by_name[slots["song"]]

@@ -1,19 +1,12 @@
 import asyncio
-import dataclasses
-import io
 import json
-import math
-import wave
 
 import httpx
-import numpy as np
 import pytest
 
 from speech.backend import songs
 from speech.backend.app import create_app
 from speech.intents import IntentRecognizer
-
-SR = songs.SAMPLE_RATE
 
 
 def song_file(directory, name, **fields):
@@ -50,48 +43,6 @@ def test_notes():
     assert notes[1].frequency == pytest.approx(523.25, abs=0.01)
 
 
-def test_envelope():
-    ramp = math.ceil(songs.ENVELOPE_SECONDS * SR)
-    env = songs.envelope(4 * ramp, 2 * ramp)
-    assert env[0] == 0 and env[ramp // 2] == pytest.approx(0.5, abs=0.01)
-    assert env[ramp : 2 * ramp].min() == 1
-    # Let go, it falls as fast as it rose.
-    assert env[2 * ramp + ramp // 2] == pytest.approx(0.5, abs=0.01)
-    assert env[3 * ramp :].max() == 0
-
-
-def spectrum_peak(samples):
-    magnitudes = np.abs(np.fft.rfft(samples))
-    return np.fft.rfftfreq(len(samples), 1 / SR)[magnitudes.argmax()]
-
-
-def test_render_plays_the_pitch():
-    samples = songs.render(songs.notes([[["A4", 2]]], 60))
-    assert spectrum_peak(samples) == pytest.approx(440, abs=1)
-    assert np.abs(samples).max() == pytest.approx(songs.PEAK)
-    # A second of a note, and the release after it.
-    assert len(samples) == 2 * SR + round(songs.ENVELOPE_SECONDS * SR)
-
-
-def test_render_harmonics():
-    # With only the second partial, the octave sounds.
-    samples = songs.render(songs.notes([[["A4", 2]]], 60, (0.0, 1.0)))
-    assert spectrum_peak(samples) == pytest.approx(880, abs=1)
-
-
-def test_render_rests_and_repeats():
-    samples = songs.render(songs.notes([[["A4", 1], [None, 1], ["A4", 1]]], 60))
-    # Silent while resting, after the release.
-    assert np.abs(samples[round(1.03 * SR) : 2 * SR]).max() == 0
-    # The same note again starts from silence.
-    assert np.abs(samples[2 * SR]) < 1e-3 < np.abs(samples[2 * SR + 2000])
-
-
-def test_render_is_the_same_each_time():
-    notes = songs.notes([[["C4", 1], ["E4", 1]], [["G3", 2]]], 90, (1.0, 0.5, 0.25))
-    assert np.array_equal(songs.render(notes), songs.render(notes))
-
-
 def test_voices_with_their_own_sound():
     voices = [
         [["A4", 2]],
@@ -100,15 +51,6 @@ def test_voices_with_their_own_sound():
     melody, chord = songs.notes(voices, 60, (1.0, 0.2))
     assert (melody.partials, melody.volume) == ((1.0, 0.2), 1.0)
     assert (chord.partials, chord.volume) == ((0.0, 1.0), 0.5)
-    # The quieter voice, an octave above C4, is half as loud as the melody.
-    samples = songs.render([chord, dataclasses.replace(melody, partials=(1.0,))])
-    magnitudes = np.abs(np.fft.rfft(samples[:SR]))
-    hz = np.fft.rfftfreq(SR, 1 / SR)
-
-    def level(frequency):
-        return magnitudes[np.abs(hz - frequency).argmin()]
-
-    assert level(2 * songs.frequency("C4")) / level(440) == pytest.approx(0.5, rel=0.1)
 
 
 def test_beats_cut_the_notes(tmp_path):
@@ -117,32 +59,20 @@ def test_beats_cut_the_notes(tmp_path):
     voices = [[["C4", 1], ["D4", 1], ["E4", 3]]]
     song = songs.load_song(song_file(tmp_path, "cut", voices=voices, beats=4))
     assert [n.seconds for n in song.notes] == [0.5, 0.5, 1.0]
-    assert song.seconds == pytest.approx(2 + songs.ENVELOPE_SECONDS, abs=1e-4)
+    assert song.seconds == 2
     with pytest.raises(ValueError, match="starts after"):
         songs.load_song(song_file(tmp_path, "late", voices=voices, beats=2))
 
 
-def test_loop_is_seamless(tmp_path):
+def test_loop(tmp_path):
     # Played over and over, the song lasts exactly its beats, also a rest
     # at its end.
     voices = [[["A4", 3], [None, 1]]]
     path = song_file(tmp_path, "loop", voices=voices, beats=4, loop=True, tempo=60)
-    song = songs.load_song(path)
-    assert song.seconds == 4
-    with wave.open(io.BytesIO(song.render())) as f:
-        assert f.getnframes() == 4 * SR
-    # After a rest nothing sounds on at the start, so it starts as when
-    # played once.
-    once = songs.render(song.notes, loop=False, seconds=4)
-    looped = songs.render(song.notes, loop=True, seconds=4)
-    assert np.array_equal(looped, once[: 4 * SR])
-    # Without one, the last note has died away by the end, as each is let
-    # go a release before it ends, so nothing is lost at the seam.
-    notes = songs.notes([[["A4", 4]]], 60)
-    once, looped = songs.render(notes), songs.render(notes, loop=True)
-    assert len(looped) == 4 * SR
-    assert np.array_equal(looped, once[: 4 * SR])
-    assert np.abs(once[4 * SR :]).max() == 0
+    score = songs.load_song(path).score()
+    assert (score.seconds, score.loop) == (4, True)
+    [note] = score.notes
+    assert (note.start, note.seconds) == (0, 3)
 
 
 def test_loop_is_true_or_false(tmp_path):
@@ -155,11 +85,18 @@ def test_load(tmp_path):
     (tmp_path / "notes.txt").write_text("not a song")
     [song] = songs.load(tmp_path)
     assert (song.id, song.title) == ("twinkle", "Twinkle, Twinkle, Little Star")
-    # Four beats at 120 beats per minute, and the last release.
-    assert song.seconds == pytest.approx(2 + songs.ENVELOPE_SECONDS, abs=1e-4)
-    with wave.open(io.BytesIO(song.render())) as f:
-        assert (f.getnchannels(), f.getsampwidth(), f.getframerate()) == (1, 2, SR)
-        assert f.getnframes() / SR == pytest.approx(song.seconds)
+    # Four beats at 120 beats per minute.
+    assert song.seconds == 2
+    score = song.score()
+    assert (score.seconds, score.loop, len(score.notes)) == (2, False, 4)
+    first = score.notes[0]
+    assert (first.start, first.seconds, first.partials, first.volume) == (
+        0,
+        0.5,
+        [1.0],
+        1,
+    )
+    assert first.frequency == pytest.approx(261.63, abs=0.01)
 
 
 @pytest.mark.parametrize(
@@ -206,24 +143,6 @@ def test_names_are_unique(tmp_path):
         songs.Songs(songs.load(tmp_path))
 
 
-def test_songs_render_in_the_background(tmp_path):
-    song_file(tmp_path, "twinkle")
-    song_file(tmp_path, "star", names=["little star"], tempo=60)
-    found = songs.load(tmp_path)
-    jukebox = songs.Songs(found)
-
-    async def audio():
-        return [await jukebox.audio(song.id) for song in found] + [
-            await jukebox.audio("other")
-        ]
-
-    star, twinkle, other = asyncio.run(audio())
-    assert (star, twinkle) == (found[0].render(), found[1].render())
-    assert other is None
-    # Both are the same notes, at half the tempo for the star.
-    assert len(star) > len(twinkle)
-
-
 def test_card(tmp_path):
     jukebox = songs.Songs(songs.load(song_file(tmp_path, "twinkle").parent))
     card = asyncio.run(jukebox.card("id", {"song": "twinkle twinkle little star"}))
@@ -233,7 +152,7 @@ def test_card(tmp_path):
         "Twinkle, Twinkle, Little Star",
         "/v1/songs/twinkle",
     )
-    assert card.seconds == pytest.approx(2.03, abs=0.01)
+    assert card.seconds == 2
     assert card.UNTIL_DISMISSED
     assert not card.loop
     song_file(tmp_path, "lullaby", names=["lullaby"], loop=True)
@@ -242,7 +161,7 @@ def test_card(tmp_path):
     assert (card.loop, card.seconds) == (True, 2)
 
 
-def test_audio_is_served(tmp_path):
+def test_score_is_served(tmp_path):
     jukebox = songs.Songs(songs.load(song_file(tmp_path, "twinkle").parent))
     app = create_app(None, songs=jukebox)
 
@@ -253,7 +172,13 @@ def test_audio_is_served(tmp_path):
 
     response = asyncio.run(get("/v1/songs/twinkle"))
     assert response.status_code == 200
-    assert response.headers["content-type"] == "audio/wav"
-    assert response.content == asyncio.run(jukebox.audio("twinkle"))
+    score = response.json()
+    assert (score["seconds"], score["loop"], len(score["notes"])) == (2, False, 4)
+    assert set(score["notes"][0]) == {
+        "start",
+        "seconds",
+        "frequency",
+        "partials",
+        "volume",
+    }
     assert asyncio.run(get("/v1/songs/other")).status_code == 404
-    assert asyncio.run(get("/v1/songs/twinkle")).status_code == 200

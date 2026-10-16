@@ -356,12 +356,14 @@ function toneSeconds({ notes }) {
   return (notes.length - 1) * NOTE_STEP + NOTE_LENGTH;
 }
 
-// Songs: a SongCard plays the song the service rendered, on the tones'
-// context, and is dismissed once it has played, or plays it over and over
-// until it is closed, for a song that loops. The card going, such as when
-// it is closed or replaced, stops the song.
+// Songs: a SongCard plays the song's notes live, with the voice of the
+// additive synthesizer in synth.js, on the tones' context, and is
+// dismissed once the song has played, or plays it over and over until it is
+// closed, for a song that loops. The card going, such as when it is closed
+// or replaced, stops the song.
 
-let song = null; // The song card playing, and its audio source once loaded.
+let song = null; // The song card playing, and its synthesizer once started.
+let synth = null; // The tones' context loading synth.js.
 
 // Whether the song card was started before, and remembers it was. The page
 // keeps this across a reload, so a card that the service shows again after
@@ -385,15 +387,19 @@ async function playSong(songCard) {
     dismissCard();
     return;
   }
-  const playing = { card: songCard, source: null };
+  const playing = { card: songCard, node: null };
   song = playing;
   try {
     unlockTones();
-    const response = await fetch(url);
+    synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
+      synth = null; // Tried again with the next song.
+      throw error;
+    });
+    const [response] = await Promise.all([fetch(url), synth]);
     if (!response.ok) {
       throw new Error(`${url}: ${response.status}`);
     }
-    const audio = await tones.decodeAudioData(await response.arrayBuffer());
+    const score = await response.json();
     if (tones.state !== "running") {
       // Before a tap allows sound, such as right after the page loaded, it
       // does not resume.
@@ -405,25 +411,26 @@ async function playSong(songCard) {
     if (song !== playing) {
       return; // Stopped while loading.
     }
-    const source = tones.createBufferSource();
-    source.buffer = audio;
-    source.loop = songCard.data.loop;
-    source.connect(tones.destination);
-    source.onended = () => {
-      if (song === playing) {
-        song = null;
+    const node = new AudioWorkletNode(tones, "song", {
+      numberOfInputs: 0,
+      outputChannelCount: [1],
+      processorOptions: score,
+    });
+    node.port.onmessage = ({ data }) => {
+      if (data === "ended" && song === playing) {
+        stopSong();
         if (card && card.data.id === id) {
           dismissCard();
         }
       }
     };
-    playing.source = source;
-    source.start();
+    node.connect(tones.destination);
+    playing.node = node;
     // The rainbow shows as the song plays, from when it starts, and again
     // each time a looping song starts over.
     const left = songCard.element.querySelector(".song-left");
-    left.style.animationDuration = `${audio.duration}s`;
-    songCard.element.classList.toggle("looping", songCard.data.loop);
+    left.style.animationDuration = `${score.seconds}s`;
+    songCard.element.classList.toggle("looping", score.loop);
     songCard.element.classList.add("playing");
   } catch (error) {
     console.error("Could not play the song:", error);
@@ -440,11 +447,12 @@ function stopSong() {
   if (!song) {
     return;
   }
-  const { source } = song;
+  const { node } = song;
   song = null;
-  if (source) {
-    source.onended = null;
-    source.stop();
+  if (node) {
+    node.port.onmessage = null;
+    node.port.postMessage("stop");
+    node.disconnect();
   }
 }
 

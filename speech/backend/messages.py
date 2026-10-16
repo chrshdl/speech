@@ -146,21 +146,44 @@ class GameCard(CamelModel):
 
 class SongCard(CamelModel):
     """
-    Play a song: the client plays the audio at the url, which the service
-    rendered, and dismisses the card when it has played, or with loop,
-    plays it over and over until the user closes the card. The card stays
-    until then, or until another card replaces it.
+    Play a song: the client plays the notes at the url, and dismisses the
+    card when it has played, or with loop, plays it over and over until the
+    user closes the card. The card stays until then, or until another card
+    replaces it.
     """
 
     UNTIL_DISMISSED: ClassVar[bool] = True
     type: Literal["SongCard"] = "SongCard"
     id: str
     title: str
-    # The song's WAV file, see GET /v1/songs/{song_id}.
+    # The song's notes, a SongScore, see GET /v1/songs/{song_id}.
     url: str
     # How long the song plays, once round for a loop.
     seconds: float
     loop: bool = False
+
+
+class SongNote(CamelModel):
+    """A note of a song, played with the voice of an additive synthesizer."""
+
+    # In seconds from the song's start.
+    start: float
+    seconds: float
+    # In Hz.
+    frequency: float
+    # The amplitudes of its harmonics, the fundamental first.
+    partials: list[float]
+    volume: float
+
+
+class SongScore(CamelModel):
+    """The notes of a song, which a SongCard plays."""
+
+    # How long it plays, once round for a loop.
+    seconds: float
+    # Whether it plays over and over until the card is closed.
+    loop: bool
+    notes: list[SongNote]
 
 
 Card = Annotated[

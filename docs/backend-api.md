@@ -77,7 +77,7 @@ All bodies are JSON with camelCase names.
 | `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
-| `GET /v1/songs/{songId}` | A song's audio, a WAV file, which a `SongCard` plays, `404` for no such song |
+| `GET /v1/songs/{songId}` | A song's notes, `{"seconds": …, "loop": …, "notes": [{"start", "seconds", "frequency", "partials", "volume"}, …]}` in seconds and Hz, which a `SongCard` plays, `404` for no such song |
 
 Errors have a `detail` with the reason, such as
 `{"detail": "Cannot start a capture while LISTENING."}`.
@@ -144,7 +144,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `TranscriptCard` | `title`, `text`, `isFinal` | The transcript, growing while `isFinal` is false. Show words that can still change as such. |
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
-| `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
+| `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
 
 The lifecycle of a capture's card:
@@ -215,10 +215,10 @@ regenerates it.
 
 `--songs` names a directory of songs, JSON files of their notes, see
 `speech/backend/songs.py` and `examples/songs`, where
-`examples/songs/from_midi.py` makes one from a MIDI file. The service
-renders them in the background when it starts, with the voice of an
-additive synthesizer: each harmonic a sine with a detuned pair, which
-thickens it like a chorus. Without songs, `PlaySong` is not recognized.
+`examples/songs/from_midi.py` makes one from a MIDI file. The client
+plays them live with the voice of an additive synthesizer, each harmonic
+a sine with a detuned pair, which thickens it like a chorus, see
+`web/assistant/synth.js`. Without songs, `PlaySong` is not recognized.
 
 To add an intent, give `speech.intents.Intent` its samples, in the
 model's characters, and the values of its slots, and pass a handler whose
@@ -463,8 +463,9 @@ it. The sheet opens by itself when no network is saved. See
 `web/assistant/wifi.js`.
 
 Asked to play a song, it shows the song's title with notes that dance
-while it plays and a rainbow that fills as it goes, plays it with Web
-Audio, and dismisses the card once it has played, or for a song that
+while it plays and a rainbow that fills as it goes, plays it live with a
+synthesizer on Web Audio's audio thread, an AudioWorklet, and dismisses
+the card once it has played, or for a song that
 loops, plays it until the card is closed. Closing the card, or tapping
 the microphone button, stops it.
 
