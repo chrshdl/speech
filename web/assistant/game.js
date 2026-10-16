@@ -36,12 +36,13 @@ const SCORE_MS = 6000;
 const ease = (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
 
 class Superball {
-  // The elements: the meadow's svg, the unicorn's group in it, a group to
-  // draw the flowers in, and the overlay with the score and the buttons.
+  // The elements: the one the meadow fills, the unicorn on the meadow, a
+  // group to draw the flowers in, and the overlay with the score and the
+  // buttons.
   // onOver is called when the game is over and needs no more commands,
   // onEnd once its score was shown.
-  constructor({ scene, unicorn, layer, overlay, onOver, onEnd }) {
-    this.scene = scene;
+  constructor({ view, unicorn, layer, overlay, onOver, onEnd }) {
+    this.view = view;
     this.unicorn = unicorn;
     this.layer = layer;
     this.overlay = overlay;
@@ -161,10 +162,12 @@ class Superball {
 
   // Geometry.
 
-  // The part of the meadow on screen, which the lanes fit in.
+  // The part of the meadow on screen, which the lanes fit in, and the size
+  // of one of the meadow's units on screen.
   measure() {
-    const box = this.scene.getBoundingClientRect();
+    const box = this.view.getBoundingClientRect();
     const scale = Math.max(box.width / SCENE.width, box.height / SCENE.height);
+    this.scale = scale;
     const width = box.width / scale;
     const height = box.height / scale;
     this.top = SCENE.height - height;
@@ -184,8 +187,8 @@ class Superball {
   // Draws the unicorn at x, at its game size, facing where it last moved.
   place(x = this.x, y = this.ground, size = this.size, facing = this.facing) {
     const flip = facing > 0 ? -1 : 1;
-    const dx = x - flip * size * UNICORN.x;
-    const dy = y - size * UNICORN.y;
+    const dx = (x - flip * size * UNICORN.x) * this.scale;
+    const dy = (y - size * UNICORN.y) * this.scale;
     this.unicorn.style.transform = `translate(${dx}px, ${dy}px) scale(${flip * size}, ${size})`;
   }
 

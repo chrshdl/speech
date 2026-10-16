@@ -14,7 +14,7 @@ const ui = {
   cardTemplate: $("card-template"),
   asked: $("asked"),
   askedText: $("asked-text"),
-  scene: document.querySelector(".scene"),
+  meadow: document.querySelector("main"),
   unicorn: document.querySelector(".step-aside"),
   gameLayer: $("game-layer"),
   game: $("game"),
@@ -344,7 +344,7 @@ function startGame(data) {
   hideCard();
   card = { data, element: null };
   const superball = new Superball({
-    scene: ui.scene,
+    view: ui.meadow,
     unicorn: ui.unicorn,
     layer: ui.gameLayer,
     overlay: ui.game,
