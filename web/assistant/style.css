@@ -823,6 +823,123 @@ body.has-card .step-aside {
   color: var(--faint);
 }
 
+/* The brightness card. */
+
+.brightness {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  column-gap: 20px;
+}
+
+.brightness-icon {
+  width: 72px;
+  height: 72px;
+}
+
+.brightness-bar {
+  height: 18px;
+  border-radius: 999px;
+  background: #fff3d1;
+  overflow: hidden;
+}
+
+.brightness-level {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #ffbf2e;
+}
+
+.brightness-percent {
+  margin: 0;
+  min-width: 3.2ch;
+  color: var(--ink);
+  font-size: 40px;
+  font-weight: 600;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The song card: notes that dance while the song plays, and a rainbow
+   that fills as it goes. */
+
+.song {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+  padding: 4px 0 6px;
+}
+
+.song-notes {
+  display: flex;
+  gap: 22px;
+}
+
+.song-note {
+  width: 44px;
+  height: 66px;
+  fill: var(--pink);
+}
+
+.song-note:nth-child(2) {
+  fill: var(--purple);
+}
+
+.song-note:nth-child(3) {
+  fill: #5cc0ff;
+}
+
+.playing .song-note {
+  animation: dance 1.2s ease-in-out infinite;
+}
+
+.playing .song-note:nth-child(2) {
+  animation-delay: -0.4s;
+}
+
+.playing .song-note:nth-child(3) {
+  animation-delay: -0.8s;
+}
+
+@keyframes dance {
+  50% {
+    translate: 0 -12px;
+    rotate: -8deg;
+  }
+}
+
+/* The rainbow, which the part still to play covers. */
+.song-progress {
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ff6b6b, #ffa94d, #ffd93d, #6bd88f, #5cc0ff, #7c8cff, #b18cff);
+  overflow: hidden;
+}
+
+.song-left {
+  display: block;
+  height: 100%;
+  background: #fff0f7;
+  transform-origin: right;
+}
+
+/* app.js sets the duration, the song's. */
+.playing .song-left {
+  animation: song-left linear forwards;
+}
+
+.looping .song-left {
+  animation-iteration-count: infinite;
+}
+
+@keyframes song-left {
+  to {
+    scale: 0 1;
+  }
+}
+
 /* Superball. */
 
 /* While playing, the clock makes room for the falling flowers. */
@@ -841,7 +958,7 @@ body.playing .bubble {
   display: none;
 }
 
-/* The level, the flowers dodged and the hearts left, between the buttons
+/* The level, the flowers caught and the hearts left, between the buttons
    of the bar. */
 .game-hud {
   position: absolute;
@@ -1053,7 +1170,7 @@ body.playing .bubble {
   stroke-width: 1.5;
 }
 
-/* A flower that hits the unicorn bursts. */
+/* A flower the unicorn catches bursts. */
 .falling-flower.pop {
   animation: pop 450ms ease-out forwards;
   transform-box: fill-box;
@@ -1091,17 +1208,6 @@ body.playing .bubble {
   to {
     opacity: 0;
     translate: 0 -70px;
-  }
-}
-
-/* The unicorn blinks while it cannot be hit again. */
-.step-aside.hurt {
-  animation: hurt 280ms steps(2, jump-none) 5;
-}
-
-@keyframes hurt {
-  50% {
-    opacity: 0.25;
   }
 }
 

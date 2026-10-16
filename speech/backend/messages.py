@@ -130,8 +130,8 @@ class WeatherCard(CamelModel):
 
 class GameCard(CamelModel):
     """
-    Play a game, Superball, at the level: the client lets flowers fall
-    toward the unicorn, which the user steers with the commands of a
+    Play a game, Superball, at the level: the client lets flowers fall for
+    the unicorn to catch, which the user steers with the commands of a
     COMMANDS capture. The card stays until the client dismisses it when
     the game ends, or another card replaces it.
     """
@@ -144,8 +144,64 @@ class GameCard(CamelModel):
     level: int
 
 
+class SongCard(CamelModel):
+    """
+    Play a song: the client plays the notes at the url, and dismisses the
+    card when it has played, or with loop, plays it over and over until the
+    user closes the card. The card stays until then, or until another card
+    replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["SongCard"] = "SongCard"
+    id: str
+    title: str
+    # The song's notes, a SongScore, see GET /v1/songs/{song_id}.
+    url: str
+    # How long the song plays, once round for a loop.
+    seconds: float
+    loop: bool = False
+
+
+class BrightnessCard(CamelModel):
+    """The brightness of the screen, just set, in percent."""
+
+    type: Literal["BrightnessCard"] = "BrightnessCard"
+    id: str
+    title: str
+    percent: int
+
+
+class SongNote(CamelModel):
+    """A note of a song, played with the voice of an additive synthesizer."""
+
+    # In seconds from the song's start.
+    start: float
+    seconds: float
+    # In Hz.
+    frequency: float
+    # The amplitudes of its harmonics, the fundamental first.
+    partials: list[float]
+    volume: float
+    # How many seconds it takes to swell and to fade, the fading also on
+    # past its end.
+    attack: float
+    release: float
+
+
+class SongScore(CamelModel):
+    """The notes of a song, which a SongCard plays."""
+
+    # How long it plays, once round for a loop.
+    seconds: float
+    # Whether it plays over and over until the card is closed.
+    loop: bool
+    notes: list[SongNote]
+
+
 Card = Annotated[
-    TranscriptCard | NoticeCard | WeatherCard | GameCard, Field(discriminator="type")
+    TranscriptCard | NoticeCard | WeatherCard | GameCard | SongCard | BrightnessCard,
+    Field(discriminator="type"),
 ]
 
 
