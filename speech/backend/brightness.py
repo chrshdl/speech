@@ -2,15 +2,25 @@
 Sets the brightness of the screen when asked, such as "set the brightness
 to fifty percent", through its backlight in /sys/class/backlight. It never
 goes below MINIMUM, at which the screen is still readable, and is kept in a
-file, so that it is set again when the service starts.
+file, so that it is set again when the service starts, also when the
+backlight appears only after it.
 """
 
+import logging
 import os
+import threading
+import time
 
 from speech.backend.messages import BrightnessCard
 from speech.intents import Intent
 
+log = logging.getLogger(__name__)
+
 BACKLIGHTS = "/sys/class/backlight"
+# How long the kept brightness is tried to be set again, while the
+# backlight is not there or not writable yet, and how often.
+RESTORE_SECONDS = 60.0
+RETRY_SECONDS = 1.0
 # The lowest brightness in percent, below which the screen looks dark.
 MINIMUM = 10
 
@@ -85,29 +95,74 @@ def percent(slots):
 
 
 class Brightness:
-    """Answers a request to set the brightness with the card that shows it."""
+    """
+    Answers a request to set the brightness with the card that shows it.
+    The backlight can appear after the service starts, as the display's
+    driver loads, and only then be made writable, so it is looked up each
+    time it is set, and the kept brightness is set again as soon as it can
+    be, unless the user sets one first.
+    """
 
-    def __init__(self, backlight, state=None):
+    def __init__(self, name="auto", state=None, wait=RESTORE_SECONDS):
         """
         Arguments:
-            backlight (str): A backlight's directory in /sys/class/backlight.
+            name (str): The backlight in /sys/class/backlight, or "auto"
+                for the only one, see find().
             state (str, optional): The file that keeps the brightness, which
-                is set again from it now.
+                is set again from it, trying for up to wait seconds.
         """
-        self.backlight = backlight
+        self.name = name
         self.state = state
-        with open(os.path.join(backlight, "max_brightness")) as f:
-            self.max = int(f.read())
+        self.lock = threading.Lock()
+        # Set once the kept brightness was set again, given up on, or
+        # replaced by the user's.
+        self.restored = threading.Event()
+        level = None
         if state is not None and os.path.exists(state):
             with open(state) as f:
-                self.set(max(min(int(f.read()), 100), MINIMUM))
+                level = max(min(int(f.read()), 100), MINIMUM)
+        if level is None:
+            self.restored.set()
+        else:
+            # A daemon, so stopping the service need not wait for it.
+            threading.Thread(
+                target=self._restore, args=(level, wait), daemon=True
+            ).start()
+
+    def _restore(self, level, wait):
+        deadline = time.monotonic() + wait
+        while True:
+            with self.lock:
+                if self.restored.is_set():
+                    return
+                try:
+                    self._write(level)
+                except (OSError, ValueError) as error:
+                    if time.monotonic() >= deadline:
+                        log.warning("Could not set the brightness again: %s", error)
+                        self.restored.set()
+                        return
+                else:
+                    log.info("Set the brightness to %d%% again", level)
+                    self.restored.set()
+                    return
+            time.sleep(RETRY_SECONDS)
+
+    def _write(self, level):
+        backlight = find(self.name)
+        with open(os.path.join(backlight, "max_brightness")) as f:
+            maximum = int(f.read())
+        # At least 1, as 0 turns some backlights off.
+        raw = max(round(level / 100 * maximum), 1)
+        with open(os.path.join(backlight, "brightness"), "w") as f:
+            f.write(str(raw))
 
     def set(self, level):
         """Sets the brightness to level percent, and keeps it."""
-        # At least 1, as 0 turns some backlights off.
-        raw = max(round(level / 100 * self.max), 1)
-        with open(os.path.join(self.backlight, "brightness"), "w") as f:
-            f.write(str(raw))
+        with self.lock:
+            self._write(level)
+            # The user's brightness, rather than the one kept.
+            self.restored.set()
         if self.state is not None:
             # Replaced in one step, so a power cut never leaves half a file.
             with open(self.state + ".tmp", "w") as f:

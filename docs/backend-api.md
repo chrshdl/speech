@@ -225,7 +225,8 @@ a sine with a detuned pair, which thickens it like a chorus, see
 `--backlight` names the screen's backlight in `/sys/class/backlight`, or
 `auto` for the only one, which the service then needs to be allowed to
 write. With `--state-dir`, it keeps the brightness there and sets it again
-when it starts, see `speech/backend/brightness.py`.
+when it starts, also once a backlight that appears later, as its driver
+loads, can be written, see `speech/backend/brightness.py`.
 
 To add an intent, give `speech.intents.Intent` its samples, in the
 model's characters, and the values of its slots, and pass a handler whose
