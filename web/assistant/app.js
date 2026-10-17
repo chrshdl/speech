@@ -293,6 +293,16 @@ function hideCard() {
   }
   ui.asked.hidden = true;
   document.body.classList.remove("has-card");
+  // It fades where it is, but out of the stage's layout, so a card that
+  // replaces it, and what was asked above that, are laid out where they
+  // stay, rather than below it and then jumping once it is gone.
+  const { offsetTop, offsetLeft, offsetWidth } = element;
+  Object.assign(element.style, {
+    position: "absolute",
+    top: `${offsetTop}px`,
+    left: `${offsetLeft}px`,
+    width: `${offsetWidth}px`,
+  });
   element.classList.add("leaving");
   element.addEventListener("animationend", () => element.remove(), { once: true });
   // Without animations, as with reduced motion, remove it at once.
@@ -330,6 +340,29 @@ function unlockTones() {
   } catch {
     // Without Web Audio there are no tones, which only accompany the page.
   }
+}
+
+// Readies Web Audio when the page loads: the tones' context, silent until a
+// tap allows sound, with the synthesizer of songs added to it. Added only
+// when the first song came, to a context already playing, it took WPE
+// WebKit on a Raspberry Pi 4 about 5 seconds, which the song waited for,
+// and a third of a second before.
+function prepareSound() {
+  try {
+    tones ??= new AudioContext();
+    loadSynth().catch(() => {});
+  } catch {
+    // Without Web Audio there are no tones or songs.
+  }
+}
+
+// The tones' context adding synth.js, tried again after it failed.
+function loadSynth() {
+  synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
+    synth = null;
+    throw error;
+  });
+  return synth;
 }
 
 // Plays the tone, and resolves once it has played, at once without one.
@@ -403,11 +436,7 @@ async function playSong(songCard) {
   song = playing;
   try {
     unlockTones();
-    synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
-      synth = null; // Tried again with the next song.
-      throw error;
-    });
-    const [response] = await Promise.all([fetch(url), synth]);
+    const [response] = await Promise.all([fetch(url), loadSynth()]);
     if (!response.ok) {
       throw new Error(`${url}: ${response.status}`);
     }
@@ -703,6 +732,7 @@ async function openMicrophone(rate) {
 // Start.
 
 async function start() {
+  prepareSound();
   updateClock();
   setInterval(updateClock, 1000);
   setTheme(document.documentElement.dataset.theme === "night" ? "night" : "day");
