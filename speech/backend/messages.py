@@ -173,7 +173,10 @@ class BrightnessCard(CamelModel):
 
 
 class SongNote(CamelModel):
-    """A note of a song, played with the voice of an additive synthesizer."""
+    """
+    A note of a song, played with the voice of an additive synthesizer, or
+    of a Roland D-50 with a patch.
+    """
 
     # In seconds from the song's start.
     start: float
@@ -187,6 +190,9 @@ class SongNote(CamelModel):
     # past its end.
     attack: float
     release: float
+    # The name of the D-50 patch that plays it instead, of the score's
+    # patches, with its own envelopes rather than partials, attack and release.
+    patch: str | None = None
 
 
 class SongScore(CamelModel):
@@ -197,6 +203,9 @@ class SongScore(CamelModel):
     # Whether it plays over and over until the card is closed.
     loop: bool
     notes: list[SongNote]
+    # The D-50 patches of the notes, by name: their parameters, as
+    # speech/backend/d50.py loads them.
+    patches: dict[str, dict] = {}
 
 
 Card = Annotated[

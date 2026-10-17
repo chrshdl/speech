@@ -3,7 +3,8 @@ Plays songs asked for by name, such as "play twinkle twinkle". Each song is
 a JSON file in a directory (backend.py --songs), which the service reads
 when it starts. It answers with a SongCard, whose client fetches the
 song's notes from GET /v1/songs/{songId} and plays them live with the
-voice of an additive synthesizer, see web/assistant/synth.js.
+voice of an additive synthesizer, or of a Roland D-50, see
+web/assistant/synth.js.
 
 A song file:
 
@@ -29,6 +30,11 @@ and release, for the song or a voice, are how many seconds a note takes to
 swell and to fade, by default the synthesizer's 0.025, which sounds
 struck; a release longer than that fades on past the note's end, into the
 next, as for a lullaby.
+patch, for the song or a voice, names a Roland D-50 patch in
+speech/backend/patches, such as "fantasia", which plays its notes instead
+of the additive synthesizer, with its own envelopes, so without partials,
+attack and release beside it; a voice's own partials play it with the
+additive synthesizer again. See speech/backend/d50.py.
 Optionally, beats is how long the song lasts, which cuts notes that last
 longer, and loop, if true, plays it over and over until the card is
 closed: a looping song lasts exactly its beats, or until its last note
@@ -42,6 +48,7 @@ import json
 import os
 import re
 
+from speech.backend import d50
 from speech.backend.messages import SongCard, SongNote, SongScore
 from speech.intents import Intent
 
@@ -91,6 +98,8 @@ class Note:
     volume: float = 1.0
     attack: float = ENVELOPE_SECONDS
     release: float = ENVELOPE_SECONDS
+    # The D-50 patch that plays it instead, by name, see d50.py.
+    patch: str | None = None
 
 
 def check_partials(partials):
@@ -109,17 +118,36 @@ def check_envelope(seconds, name):
     return float(seconds)
 
 
-def notes(voices, tempo, partials=(1.0,), sound=None):
+def check_patch(patch, fields):
+    """The name of a D-50 patch, alone in fields, raising ValueError otherwise."""
+    if not isinstance(patch, str):
+        raise TypeError(f"patch names a D-50 patch, not {patch!r}")
+    d50.load(patch)
+    beside = {"partials", "attack", "release"} & set(fields)
+    if beside:
+        raise ValueError(f"A patch has its own sound, not {sorted(beside)} beside it")
+    return patch
+
+
+def notes(voices, tempo, partials=(1.0,), sound=None, patch=None):
     """
     The notes of the voices, with their times in seconds, and partials and
-    a sound, the attack and release, for the voices without their own.
+    a sound, the attack and release, or a D-50 patch, for the voices
+    without their own.
     """
     beat = 60 / tempo
     sound = {"attack": ENVELOPE_SECONDS, "release": ENVELOPE_SECONDS} | (sound or {})
     notes = []
     for voice in voices:
         voice_partials, volume, envelope = partials, 1.0, dict(sound)
+        voice_patch = patch
         if isinstance(voice, dict):
+            if "patch" in voice:
+                voice_patch = check_patch(voice["patch"], voice)
+            elif "partials" in voice:
+                voice_patch = None
+            elif voice_patch is not None:
+                check_patch(voice_patch, voice)
             voice_partials = check_partials(voice.get("partials", partials))
             volume = voice.get("volume", 1.0)
             for name in envelope:
@@ -139,6 +167,7 @@ def notes(voices, tempo, partials=(1.0,), sound=None):
                         voice_partials,
                         volume,
                         **envelope,
+                        patch=voice_patch,
                     )
                 )
             time += beats
@@ -174,10 +203,12 @@ class Song:
         return max(note.start + note.seconds for note in self.notes)
 
     def score(self):
-        """The notes the client plays, a SongScore."""
+        """The notes the client plays, a SongScore, with the patches they use."""
+        patches = {note.patch for note in self.notes if note.patch is not None}
         return SongScore(
             seconds=self.seconds,
             loop=self.loop,
+            patches={patch: d50.load(patch) for patch in sorted(patches)},
             notes=[
                 SongNote(
                     start=note.start,
@@ -187,6 +218,7 @@ class Song:
                     volume=note.volume,
                     attack=note.attack,
                     release=note.release,
+                    patch=note.patch,
                 )
                 for note in self.notes
             ],
@@ -204,7 +236,8 @@ def load_song(path):
             for name in ("attack", "release")
             if name in data
         }
-        song_notes = tuple(notes(data["voices"], data["tempo"], partials, sound))
+        patch = check_patch(data["patch"], data) if "patch" in data else None
+        song_notes = tuple(notes(data["voices"], data["tempo"], partials, sound, patch))
         if not song_notes:
             raise ValueError("A song needs a note")
         length = None
