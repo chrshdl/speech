@@ -163,6 +163,12 @@ const LA_GAIN = 0.9;
 const LA_LIMIT = 0.6;
 // Below which a patch's effects have rung out, after its last note.
 const SILENT = 1e-5;
+// How many keys a patch plays at once, as the D-50's 32 partials: 16 in
+// Whole mode, of two partials each, and 8 of four in the others. A key
+// more takes the place of the oldest, which fades in about 50 ms.
+const WHOLE_KEYS = 16;
+const DUAL_KEYS = 8;
+const STOLEN_INCREMENT = 0x80 | 100;
 // How deep the LFOs modulate at depth 100: the pitch in 1/4096 octaves, as
 // the MT-32's vibrato, the pulse width of 255, the cutoff and the amplitude
 // in their 1/16 octaves.
@@ -1047,12 +1053,25 @@ class Key {
   }
 
   release() {
+    if (this.released) {
+      return;
+    }
     this.released = true;
     for (const { tone, partials, pitch } of this.tones) {
       tone.keyOff();
       pitch.release();
       for (const partial of partials) {
         partial?.release();
+      }
+    }
+  }
+
+  // Fades the key out fast, for another to take its place.
+  steal() {
+    this.release();
+    for (const { partials } of this.tones) {
+      for (const partial of partials) {
+        partial?.tva.startRamp(0, STOLEN_INCREMENT, PHASE_RELEASE);
       }
     }
   }
@@ -1165,10 +1184,19 @@ class Patch {
     } else if (this.mode === 2 || this.mode === 6 || this.mode === 7) {
       tones = [key >= this.split ? this.tones[0] : this.tones[1]];
     }
+    // The oldest key, let go or else held, makes room.
+    const limit = this.mode === 0 || this.mode === 4 ? WHOLE_KEYS : DUAL_KEYS;
+    const sounding = this.keys.filter((playing) => !playing.stolen);
+    if (sounding.length >= limit) {
+      const oldest = sounding.find((playing) => playing.released) ?? sounding[0];
+      oldest.stolen = true;
+      oldest.steal();
+    }
     const playing = new Key(this, tones, frequency, volume, gate, this.rate);
     playing.buses = tones.map((tone) => this.tones.indexOf(tone));
     this.keys.push(playing);
     this.quiet = false;
+    return playing;
   }
 
   get sounding() {
@@ -1422,6 +1450,11 @@ class Reverb {
   }
 }
 
+// The patches' voices mixed through tanh, below LA_LIMIT.
+function limitLA(sample) {
+  return LA_LIMIT * Math.tanh((LA_GAIN * sample) / LA_LIMIT);
+}
+
 class Song extends AudioWorkletProcessor {
   constructor({ processorOptions: score }) {
     super();
@@ -1534,7 +1567,7 @@ class Song extends AudioWorkletProcessor {
     for (const patch of this.patches.values()) {
       patch.mix(left, right, out.length);
     }
-    const limit = (sample) => LA_LIMIT * Math.tanh((LA_GAIN * sample) / LA_LIMIT);
+    const limit = limitLA;
     if (channels.length === 1) {
       for (let i = 0; i < end; i++) {
         out[i] += limit(0.5 * (left[i] + right[i]));
@@ -1593,3 +1626,58 @@ class Song extends AudioWorkletProcessor {
 }
 
 registerProcessor("song", Song);
+
+// A patch played on a keyboard, live: the page sends each key pressed,
+// {down: id, frequency}, and let go, {up: id}, and "stop" when it closes.
+// It renders nothing while no key sounds and the effects have rung out.
+class Keyboard extends AudioWorkletProcessor {
+  constructor({ processorOptions: { patch } }) {
+    super();
+    this.patch = new Patch(patch, sampleRate);
+    this.held = new Map();
+    this.left = new Float32Array(128);
+    this.right = new Float32Array(128);
+    this.stopped = false;
+    this.port.onmessage = ({ data }) => {
+      if (data === "stop") {
+        this.stopped = true;
+      } else if (data.down !== undefined) {
+        this.held.get(data.down)?.release();
+        this.held.set(data.down, this.patch.play(data.frequency, 1, Infinity));
+      } else if (data.up !== undefined) {
+        this.held.get(data.up)?.release();
+        this.held.delete(data.up);
+      }
+    };
+  }
+
+  process(inputs, outputs) {
+    if (this.stopped) {
+      return false;
+    }
+    const channels = outputs[0];
+    const frames = channels[0].length;
+    for (const channel of channels) {
+      channel.fill(0);
+    }
+    const { patch } = this;
+    if (!patch.sounding && patch.quiet) {
+      return true;
+    }
+    patch.render(0, frames);
+    const left = this.left.subarray(0, frames).fill(0);
+    const right = this.right.subarray(0, frames).fill(0);
+    patch.mix(left, right, frames);
+    for (let i = 0; i < frames; i++) {
+      if (channels.length === 1) {
+        channels[0][i] = limitLA(0.5 * (left[i] + right[i]));
+      } else {
+        channels[0][i] = limitLA(left[i]);
+        channels[1][i] = limitLA(right[i]);
+      }
+    }
+    return true;
+  }
+}
+
+registerProcessor("keyboard", Keyboard);

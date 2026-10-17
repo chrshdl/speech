@@ -385,3 +385,61 @@ def test_patch_with_additive_voices(tmp_path):
     (left, _), _, _ = play_stereo(tmp_path, score, 1)
     window = left[SR // 4 : 3 * SR // 4]
     assert level(window, 440, 0.5) > 0.1 and level(window, 65.41, 0.5) > 0.01
+
+
+# The keyboard, a patch played live.
+
+
+def play_keys(tmp_path, messages, seconds, patch="fantasia"):
+    """
+    The left and right samples of the keyboard sent the messages, each at a
+    second, and what it posted, and when it ended.
+    """
+    data = {
+        "processor": "keyboard",
+        "options": {"patch": d50.load(patch)},
+        "messages": [[round(at * SR), message] for at, message in messages],
+    }
+    return play_stereo(tmp_path, data, seconds)
+
+
+def test_keyboard_plays_a_held_key(tmp_path):
+    c4 = songs.frequency("C4")
+    (left, right), _, returned_false = play_keys(
+        tmp_path, [(0.5, {"down": 1, "frequency": c4}), (3, {"up": 1})], 9
+    )
+    mono = (left + right) / 2
+    # Silent before the key, and sounding at its pitch while held, also
+    # long after it was pressed.
+    assert np.abs(mono[: SR // 2]).max() == 0
+    held = mono[round(2 * SR) : 3 * SR]
+    assert spectrum_peak(held) == pytest.approx(c4, abs=1)
+    assert rms(held) > 0.05
+    # Let go, it fades, and once the reverb has rung out it is silent, but
+    # goes on for the next key.
+    assert rms(mono[round(4.5 * SR) : round(5.5 * SR)]) < 0.1 * rms(held)
+    assert np.abs(mono[8 * SR :]).max() == 0
+    assert returned_false is None
+
+
+def test_keyboard_plays_as_many_keys_as_a_d50(tmp_path):
+    # Fantasia plays both tones, so 8 keys at once: a 9th takes the place
+    # of the first, which fades at once, while the second sounds on.
+    notes = ["C3", "D3", "E3", "F3", "G3", "A3", "B3", "C4", "D4"]
+    messages = [
+        (0.1 * n, {"down": n, "frequency": songs.frequency(note)})
+        for n, note in enumerate(notes)
+    ]
+    (left, _), _, _ = play_keys(tmp_path, messages, 3)
+    before = left[round(0.5 * SR) : round(0.8 * SR)]
+    after = left[round(1.5 * SR) : round(2.5 * SR)]
+    c3, d3 = songs.frequency("C3"), songs.frequency("D3")
+    assert level(after, c3, 1) < 0.1 * level(before, c3, 0.3)
+    assert level(after, d3, 1) > 0.3 * level(before, d3, 0.3)
+
+
+def test_keyboard_stops(tmp_path):
+    messages = [(0, {"down": 1, "frequency": 440.0}), (1, "stop")]
+    (left, _), _, returned_false = play_keys(tmp_path, messages, 2)
+    assert returned_false == -(-SR // BLOCK) * BLOCK + BLOCK
+    assert np.abs(left[returned_false:]).max() == 0

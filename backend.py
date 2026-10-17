@@ -10,14 +10,14 @@ import os
 import uvicorn
 
 from speech import streaming
-from speech.backend import brightness, game, songs, weather, wifi
+from speech.backend import brightness, game, keyboard, songs, weather, wifi
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
 from speech.intents import THRESHOLD, IntentRecognizer
 
 # What the service answers.
-INTENTS = [weather.INTENT, game.INTENT]
+INTENTS = [weather.INTENT, game.INTENT, keyboard.INTENT]
 
 
 def main(args):
@@ -48,6 +48,7 @@ def main(args):
         handlers={
             weather.INTENT.name: weather.Weather(args.weather_location),
             game.INTENT.name: game.Game(),
+            keyboard.INTENT.name: keyboard.Keyboard(),
             songs.NAME: jukebox,
             brightness.INTENT.name: screen,
         },

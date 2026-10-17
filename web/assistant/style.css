@@ -59,6 +59,13 @@ body {
   gap: 16px;
   padding: 20px;
   z-index: 2;
+  /* Only its buttons take taps, not the space between them, where such as
+     the keyboard's close button is. */
+  pointer-events: none;
+}
+
+.bar > * {
+  pointer-events: auto;
 }
 
 /* A pill, or on narrow screens, where it wraps, a rounded box. */
@@ -938,6 +945,128 @@ body.has-card .step-aside {
   to {
     scale: 0 1;
   }
+}
+
+/* The synthesizer's keyboard: the patch's name above, as Superball's
+   score, and two octaves of keys along the bottom of the screen. */
+
+body.keyboard .greeting-text,
+body.keyboard .bubble {
+  opacity: 0;
+}
+
+.keys {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.keys[hidden] {
+  display: none;
+}
+
+.keys-hud {
+  position: absolute;
+  top: 34px;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 16px 0 22px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 8px 24px rgba(139, 92, 246, 0.2);
+  white-space: nowrap;
+  pointer-events: auto;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.keys-hud-note {
+  width: 20px;
+  height: 30px;
+  fill: var(--pink);
+}
+
+.keys-title {
+  color: var(--purple);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.keys-hud .card-close {
+  margin: 0;
+}
+
+/* The white keys side by side, the black keys over the lines between
+   them, as keyboard.js finds them, all with the touches of several fingers
+   at once. */
+.keys-board {
+  --gap: 6px;
+  --white: calc((100% - 2 * var(--gap)) / var(--whites));
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  translate: -50% 0;
+  width: min(1200px, calc(100% - 48px));
+  height: min(400px, 56%);
+  box-sizing: border-box;
+  padding: var(--gap);
+  border: 4px solid var(--card-border);
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: 0 18px 50px rgba(139, 92, 246, 0.25);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* A key down only changes its colors, at once: moving or fading, each key
+   down got a layer of its own, and on the Raspberry Pi the keyboard flashed
+   as WPE WebKit made and dropped them. */
+.keys-key {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* A white key with a stripe of its color, which fills it while down. */
+.keys-key.white {
+  top: var(--gap);
+  bottom: var(--gap);
+  left: calc(var(--gap) + var(--i) * var(--white));
+  width: var(--white);
+  border: 3px solid #f3e8ff;
+  border-radius: 6px 6px 22px 22px;
+  background: linear-gradient(to top, var(--color) 0 34px, #ffffff 34px);
+  box-shadow: inset 0 -6px 0 rgba(75, 44, 110, 0.08);
+}
+
+.keys-key.white.down {
+  background: var(--color);
+  box-shadow: inset 0 6px 0 rgba(75, 44, 110, 0.12);
+}
+
+.keys-key.black {
+  top: var(--gap);
+  left: calc(var(--gap) + (var(--i) - 0.3) * var(--white));
+  width: calc(0.6 * var(--white));
+  height: calc(60% - var(--gap));
+  border-radius: 4px 4px 14px 14px;
+  background: var(--ink);
+  box-shadow:
+    0 6px 10px rgba(75, 44, 110, 0.3),
+    inset 0 -6px 0 rgba(0, 0, 0, 0.25);
+  z-index: 1;
+}
+
+.keys-key.black.down {
+  background: var(--pink);
+  box-shadow: inset 0 4px 0 rgba(0, 0, 0, 0.15);
 }
 
 /* Superball. */
