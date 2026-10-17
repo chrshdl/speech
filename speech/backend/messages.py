@@ -163,6 +163,22 @@ class SongCard(CamelModel):
     loop: bool = False
 
 
+class KeyboardCard(CamelModel):
+    """
+    Play the synthesizer: the client shows a keyboard that plays the Roland
+    D-50 patch at url, from GET /v1/patches/{patch}. The card stays until
+    the user closes it, or another card replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["KeyboardCard"] = "KeyboardCard"
+    id: str
+    title: str
+    # The patch's name, of speech/backend/patches, and where its parameters are.
+    patch: str
+    url: str
+
+
 class BrightnessCard(CamelModel):
     """The brightness of the screen, just set, in percent."""
 
@@ -209,7 +225,13 @@ class SongScore(CamelModel):
 
 
 Card = Annotated[
-    TranscriptCard | NoticeCard | WeatherCard | GameCard | SongCard | BrightnessCard,
+    TranscriptCard
+    | NoticeCard
+    | WeatherCard
+    | GameCard
+    | SongCard
+    | KeyboardCard
+    | BrightnessCard,
     Field(discriminator="type"),
 ]
 

@@ -14,6 +14,7 @@ from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from pydantic.json_schema import models_json_schema
 
+from speech.backend import d50
 from speech.backend.engine import Busy, Unsupported
 from speech.backend.messages import (
     EVENTS,
@@ -289,6 +290,17 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
         if score is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No such song.")
         return score
+
+    @app.get("/v1/patches/{patch}", responses={404: {"description": "No such patch"}})
+    async def patch(patch: str) -> dict:
+        """
+        A Roland D-50 patch's parameters, of speech/backend/patches, which a
+        KeyboardCard plays, see speech/backend/d50.py.
+        """
+        try:
+            return d50.load(patch)
+        except ValueError:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such patch.") from None
 
     @app.get("/", include_in_schema=False)
     async def home():

@@ -8,6 +8,10 @@
 // as float32, left and right in turn, as the client's node has two
 // channels, and prints what the processor posted, with the frame it
 // posted at, and the frame process() returned false at, if it did.
+//
+// A JSON file with a processor runs that one instead, such as the
+// keyboard: {"processor": "keyboard", "options": {...}, "messages": [[frame,
+// data], ...]}, sending each message before the block at its frame.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -16,7 +20,7 @@ const frames = Number(length);
 const BLOCK = 128;
 const posted = [];
 let frame = 0;
-let processor = null;
+const processors = new Map();
 
 // The globals of an AudioWorkletGlobalScope, in Node's own: in a vm
 // context instead, each lookup of a global such as Math is many times slower.
@@ -28,18 +32,24 @@ Object.assign(globalThis, {
     }
   },
   registerProcessor: (name, Processor) => {
-    processor = (options) => new Processor(options);
+    processors.set(name, Processor);
   },
 });
 const synth = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "web", "assistant", "synth.js");
 await import(new URL(`file://${synth}`));
 
-const song = processor({ processorOptions: JSON.parse(fs.readFileSync(scoreFile, "utf8")) });
+const data = JSON.parse(fs.readFileSync(scoreFile, "utf8"));
+const { processor = "song", options = data, messages = [] } = data.processor ? data : {};
+const Processor = processors.get(processor);
+const song = new Processor({ processorOptions: options });
 const samples = new Float32Array(2 * frames);
 let returnedFalse = null;
 while (frame < frames) {
   if (stopFrame !== undefined && frame >= Number(stopFrame)) {
     song.port.onmessage({ data: "stop" });
+  }
+  while (messages.length && messages[0][0] <= frame) {
+    song.port.onmessage({ data: messages.shift()[1] });
   }
   const out = [new Float32Array(BLOCK), new Float32Array(BLOCK)];
   const more = song.process([], [out]);

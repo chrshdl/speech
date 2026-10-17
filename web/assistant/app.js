@@ -20,6 +20,10 @@ const ui = {
   game: $("game"),
   steerLeft: $("steer-left"),
   steerRight: $("steer-right"),
+  keys: $("keys"),
+  keysTitle: $("keys-title"),
+  keysBoard: $("keys-board"),
+  keysClose: $("keys-close"),
 };
 
 // Audio is sent in chunks of 100 ms.
@@ -32,6 +36,7 @@ let audio = null; // The microphone stream of the browser, while capturing.
 let starting = false;
 let heard = null; // The final transcript of the last capture, by its id.
 let game = null; // The Superball being played, and the id of its card.
+let keyboard = null; // The synthesizer's keyboard shown, and the id of its card.
 let commands = null; // The id of the capture that hears the game's commands.
 let lastCommands = null; // The last such id, also once that capture finished.
 let startingCommands = false; // Whether such a capture is being started.
@@ -239,12 +244,18 @@ function showCard(data) {
     startGame(data);
     return;
   }
+  if (data.type === "KeyboardCard") {
+    startKeyboard(data);
+    return;
+  }
   const render = RENDERERS[data.type];
   if (!render) {
     return; // A card type this client does not know.
   }
-  // Another card, such as the answer to a question, ends the game.
+  // Another card, such as the answer to a question, ends the game, or
+  // closes the keyboard.
   endGame();
+  endKeyboard();
   // A card with the id of the card shown updates it in place.
   const fresh = !card || card.data.id !== data.id || card.data.type !== data.type;
   if (fresh) {
@@ -286,6 +297,10 @@ function hideCard() {
   card = null;
   if (data.type === "GameCard") {
     endGame();
+    return;
+  }
+  if (data.type === "KeyboardCard") {
+    endKeyboard();
     return;
   }
   if (data.type === "SongCard") {
@@ -364,11 +379,12 @@ function prepareSound() {
   }
 }
 
-// Suspends the tones' context once nothing played for IDLE_MS, also not a song.
+// Suspends the tones' context once nothing played for IDLE_MS, also not a
+// song, and while the keyboard is shown, so a key sounds at once.
 function idleTones() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (song || tones.state !== "running") {
+    if (song || keyboard || tones.state !== "running") {
       return;
     }
     suspending = tones.suspend().catch(() => {}).finally(() => {
@@ -606,6 +622,89 @@ function steer(command) {
   }
 }
 
+// The synthesizer's keyboard, see keyboard.js: its card shows it, and it
+// plays the card's patch with the D-50's voice, in synth.js, on the tones'
+// context, until it is closed.
+
+function startKeyboard(data) {
+  if (keyboard && keyboard.id === data.id) {
+    return;
+  }
+  hideCard();
+  card = { data, element: null };
+  const shown = { id: data.id, node: null, keys: null };
+  keyboard = shown;
+  ui.keysTitle.textContent = data.title;
+  ui.keys.hidden = false;
+  document.body.classList.add("keyboard");
+  // A tap allows sound, so a key also wakes the context, where nothing did
+  // before, such as when the page reloaded with the keyboard shown. WPE
+  // WebKit takes the finger lifting as the tap, not its touching.
+  const wake = () => {
+    if (tones && tones.state !== "running") {
+      tones.resume().catch(() => {});
+    }
+  };
+  shown.keys = new Keys({
+    element: ui.keysBoard,
+    onDown: (id, frequency) => {
+      wake();
+      shown.node?.port.postMessage({ down: id, frequency });
+    },
+    onUp: (id) => {
+      wake();
+      shown.node?.port.postMessage({ up: id });
+    },
+  });
+  loadKeyboard(shown, data.url);
+}
+
+// Readies the keyboard's synthesizer with the patch from url.
+async function loadKeyboard(shown, url) {
+  try {
+    unlockTones();
+    const [response] = await Promise.all([fetch(url), loadSynth()]);
+    if (!response.ok) {
+      throw new Error(`${url}: ${response.status}`);
+    }
+    const patch = await response.json();
+    await wakeTones();
+    if (keyboard !== shown) {
+      return; // Closed while loading.
+    }
+    // Running already when the first key is pressed, where a tap before
+    // allowed sound, so that key need not wait for it.
+    if (tones.state !== "running") {
+      tones.resume().catch(() => {});
+    }
+    const node = new AudioWorkletNode(tones, "keyboard", {
+      numberOfInputs: 0,
+      outputChannelCount: [2],
+      processorOptions: { patch },
+    });
+    node.connect(tones.destination);
+    shown.node = node;
+  } catch (error) {
+    console.error("Could not ready the keyboard:", error);
+  }
+}
+
+function endKeyboard() {
+  if (!keyboard) {
+    return;
+  }
+  const { keys, node } = keyboard;
+  keyboard = null;
+  keys.destroy();
+  if (node) {
+    node.port.postMessage("stop");
+    node.disconnect();
+  }
+  ui.keys.hidden = true;
+  document.body.classList.remove("keyboard");
+  idleTones();
+}
+
 // Capturing.
 
 async function toggleCapture() {
@@ -620,6 +719,10 @@ async function toggleCapture() {
       superball.quit();
       return;
     }
+    dismissCard();
+  }
+  if (keyboard) {
+    // The button closes the keyboard, to ask something else.
     dismissCard();
   }
   if (dialogState === "LISTENING") {
@@ -783,6 +886,10 @@ async function start() {
   ui.mic.addEventListener("click", toggleCapture);
   ui.steerLeft.addEventListener("click", () => steer("LEFT"));
   ui.steerRight.addEventListener("click", () => steer("RIGHT"));
+  // Also on lifting, as a click may not come: WPE WebKit makes none while
+  // it takes another finger as down, such as of a chord on the keys.
+  ui.keysClose.addEventListener("pointerup", () => dismissCard());
+  ui.keysClose.addEventListener("click", () => dismissCard());
   document.addEventListener("keydown", (event) => {
     if (wifi && wifi.isOpen) {
       if (event.code === "Escape") {

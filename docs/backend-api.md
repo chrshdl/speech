@@ -78,6 +78,7 @@ All bodies are JSON with camelCase names.
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
 | `GET /v1/songs/{songId}` | A song's notes, `{"seconds": …, "loop": …, "notes": [{"start", "seconds", "frequency", "partials", "volume", "attack", "release", "patch"}, …], "patches": {…}}` in seconds and Hz, which a `SongCard` plays, `404` for no such song. A note's `patch`, if not null, names one of the `patches`, the Roland D-50 patches that play those notes, see below |
+| `GET /v1/patches/{patch}` | A Roland D-50 patch's parameters, which a `KeyboardCard` plays, `404` for no such patch, see below |
 
 Errors have a `detail` with the reason, such as
 `{"detail": "Cannot start a capture while LISTENING."}`.
@@ -145,6 +146,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
 | `BrightnessCard` | `title`, `percent` | The brightness of the screen, just set, in percent |
+| `KeyboardCard` | `title`, `patch`, `url` | Show a keyboard that plays the Roland D-50 patch at `url`, titled with its name. It stays until the user closes it, or another card replaces it. |
 | `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
 
@@ -159,8 +161,8 @@ The lifecycle of a capture's card:
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
    for an answer, which takes longer to read, but never for a
-   `GameCard` or a `SongCard`. A new capture replaces the card sooner, except a
-   `COMMANDS` capture, which shows no cards.
+   `GameCard`, a `SongCard` or a `KeyboardCard`. A new capture replaces the
+   card sooner, except a `COMMANDS` capture, which shows no cards.
 
 When the user dismisses the card, such as by tapping its X, tell the
 service with card-dismissed. It then neither updates the card nor sends
@@ -206,6 +208,7 @@ does not match.
 |---|---|
 | `PlayGame` | A `GameCard` at the level asked for, such as "play superball level three", or else 1 |
 | `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
+| `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
 | `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
 | `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, which `--weather-location` can name any place for. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. |
 
