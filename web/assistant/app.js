@@ -384,6 +384,11 @@ async function wakeTones() {
   await suspending;
 }
 
+// How much later than it renders the tones' context plays the sound.
+function outputLatency() {
+  return tones?.outputLatency || 0;
+}
+
 // The tones' context adding synth.js, tried again after it failed.
 function loadSynth() {
   synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
@@ -393,7 +398,7 @@ function loadSynth() {
   return synth;
 }
 
-// Plays the tone, and resolves once it has played, at once without one.
+// Plays the tone, and resolves once it has been heard, at once without one.
 async function playTone({ notes, volume }) {
   if (!tones) {
     return;
@@ -423,7 +428,11 @@ async function playTone({ notes, volume }) {
     oscillator.start(time);
     oscillator.stop(time + NOTE_LENGTH);
   });
-  await new Promise((resolve) => setTimeout(resolve, toneSeconds({ notes }) * 1000));
+  const rendered = start - tones.currentTime + toneSeconds({ notes });
+  await new Promise((resolve) => setTimeout(resolve, rendered * 1000));
+  // Rendered by now, it is heard as much later as the output's latency, which
+  // right after the context resumed can be less than it is once playing.
+  await new Promise((resolve) => setTimeout(resolve, outputLatency() * 1000));
   idleTones();
 }
 
@@ -681,7 +690,7 @@ function stopAudio() {
     // Closing the microphone can switch the sound output, such as Bluetooth
     // headphones out of their headset mode, which cuts off what plays, so
     // it closes once the end tone has played.
-    audio.close(toneSeconds(END_TONE) + 0.15);
+    audio.close(toneSeconds(END_TONE) + outputLatency() + 0.15);
     audio = null;
   }
 }
