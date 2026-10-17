@@ -1,10 +1,11 @@
 import asyncio
 import json
+import os
 
 import httpx
 import pytest
 
-from speech.backend import songs
+from speech.backend import d50, songs
 from speech.backend.app import create_app
 from speech.intents import IntentRecognizer
 
@@ -142,6 +143,54 @@ def test_bad_song(tmp_path, fields):
         songs.load_song(path)
 
 
+def test_patches(tmp_path):
+    # The song's patch plays its voices, but a voice's own partials, and its
+    # own patch.
+    voices = [
+        [["A4", 1]],
+        {"partials": [1.0, 0.5], "notes": [["C4", 1]]},
+        {"patch": "fantasia", "volume": 0.5, "notes": [["E4", 1]]},
+    ]
+    path = song_file(tmp_path, "patched", voices=voices, patch="fantasia")
+    song = songs.load_song(path)
+    assert [(n.patch, n.partials) for n in song.notes] == [
+        ("fantasia", (1.0,)),
+        (None, (1.0, 0.5)),
+        ("fantasia", (1.0,)),
+    ]
+    score = song.score()
+    assert [note.patch for note in score.notes] == ["fantasia", None, "fantasia"]
+    # The score has the patches its notes play, as d50.py loads them.
+    assert score.patches == {"fantasia": d50.load("fantasia")}
+    served = score.model_dump(by_alias=True)
+    assert served["patches"]["fantasia"]["upper"]["partial1"]["wg_coarse"] == 24
+    assert songs.load_song(song_file(tmp_path, "plain")).score().patches == {}
+
+
+@pytest.mark.parametrize(
+    ("fields", "error"),
+    [
+        ({"patch": "missing"}, "No D-50 patch"),
+        ({"patch": 1}, "patch names"),
+        ({"patch": "fantasia", "partials": [1.0]}, "own sound"),
+        ({"patch": "fantasia", "release": 1.0}, "own sound"),
+        (
+            {"voices": [{"patch": "fantasia", "attack": 0.5, "notes": [["C4", 1]]}]},
+            "own sound",
+        ),
+        # A voice of the song's patch has its envelopes too.
+        (
+            {"patch": "fantasia", "voices": [{"release": 1.0, "notes": [["C4", 1]]}]},
+            "own sound",
+        ),
+    ],
+)
+def test_bad_patch(tmp_path, fields, error):
+    path = song_file(tmp_path, "bad", **fields)
+    with pytest.raises(ValueError, match=error):
+        songs.load_song(path)
+
+
 def test_intent_fits_the_model_labels(tmp_path):
     jukebox = songs.Songs(songs.load(song_file(tmp_path, "twinkle").parent))
     assert jukebox.intent.name == songs.NAME
@@ -204,5 +253,15 @@ def test_score_is_served(tmp_path):
         "volume",
         "attack",
         "release",
+        "patch",
     }
+    assert (score["notes"][0]["patch"], score["patches"]) == (None, {})
     assert asyncio.run(get("/v1/songs/other")).status_code == 404
+
+
+def test_example_songs():
+    # The songs in examples/songs load, also those played with a patch.
+    directory = os.path.join(os.path.dirname(__file__), "..", "examples", "songs")
+    loaded = {song.id: song for song in songs.load(directory)}
+    assert {"twinkle", "fantasia"} <= set(loaded)
+    assert {note.patch for note in loaded["fantasia"].notes} == {"fantasia"}

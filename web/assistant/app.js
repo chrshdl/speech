@@ -441,7 +441,8 @@ function toneSeconds({ notes }) {
 }
 
 // Songs: a SongCard plays the song's notes live, with the voice of the
-// additive synthesizer in synth.js, on the tones' context, and is
+// additive synthesizer in synth.js, or of a Roland D-50 for the notes with a
+// patch, on the tones' context, in stereo, and is
 // dismissed once the song has played, or plays it over and over until it is
 // closed, for a song that loops. The card going, such as when it is closed
 // or replaced, stops the song.
@@ -494,7 +495,7 @@ async function playSong(songCard) {
     }
     const node = new AudioWorkletNode(tones, "song", {
       numberOfInputs: 0,
-      outputChannelCount: [1],
+      outputChannelCount: [2],
       processorOptions: score,
     });
     node.port.onmessage = ({ data }) => {

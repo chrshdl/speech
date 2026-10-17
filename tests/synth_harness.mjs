@@ -5,19 +5,22 @@
 //
 // plays the score from the JSON file for at most FRAMES frames at RATE,
 // sending the processor "stop" at STOP_FRAME, writes the samples to out.f32
-// as float32, and prints what the processor posted, with the frame it
+// as float32, left and right in turn, as the client's node has two
+// channels, and prints what the processor posted, with the frame it
 // posted at, and the frame process() returned false at, if it did.
 import fs from "node:fs";
 import path from "node:path";
-import vm from "node:vm";
 
-const [scoreFile, outFile, rate, frames, stopFrame] = process.argv.slice(2);
+const [scoreFile, outFile, rate, length, stopFrame] = process.argv.slice(2);
+const frames = Number(length);
 const BLOCK = 128;
 const posted = [];
 let frame = 0;
 let processor = null;
 
-const scope = {
+// The globals of an AudioWorkletGlobalScope, in Node's own: in a vm
+// context instead, each lookup of a global such as Math is many times slower.
+Object.assign(globalThis, {
   sampleRate: Number(rate),
   AudioWorkletProcessor: class {
     constructor() {
@@ -27,20 +30,23 @@ const scope = {
   registerProcessor: (name, Processor) => {
     processor = (options) => new Processor(options);
   },
-};
+});
 const synth = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "web", "assistant", "synth.js");
-vm.runInNewContext(fs.readFileSync(synth, "utf8"), scope);
+await import(new URL(`file://${synth}`));
 
 const song = processor({ processorOptions: JSON.parse(fs.readFileSync(scoreFile, "utf8")) });
-const samples = new Float32Array(Number(frames));
+const samples = new Float32Array(2 * frames);
 let returnedFalse = null;
-while (frame < samples.length) {
+while (frame < frames) {
   if (stopFrame !== undefined && frame >= Number(stopFrame)) {
     song.port.onmessage({ data: "stop" });
   }
-  const out = new Float32Array(BLOCK);
-  const more = song.process([], [[out]]);
-  samples.set(out.subarray(0, Math.min(BLOCK, samples.length - frame)), frame);
+  const out = [new Float32Array(BLOCK), new Float32Array(BLOCK)];
+  const more = song.process([], [out]);
+  for (let i = 0; i < Math.min(BLOCK, frames - frame); i++) {
+    samples[2 * (frame + i)] = out[0][i];
+    samples[2 * (frame + i) + 1] = out[1][i];
+  }
   frame += BLOCK;
   if (!more) {
     returnedFalse = frame;

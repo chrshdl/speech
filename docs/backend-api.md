@@ -77,7 +77,7 @@ All bodies are JSON with camelCase names.
 | `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
-| `GET /v1/songs/{songId}` | A song's notes, `{"seconds": …, "loop": …, "notes": [{"start", "seconds", "frequency", "partials", "volume"}, …]}` in seconds and Hz, which a `SongCard` plays, `404` for no such song |
+| `GET /v1/songs/{songId}` | A song's notes, `{"seconds": …, "loop": …, "notes": [{"start", "seconds", "frequency", "partials", "volume", "attack", "release", "patch"}, …], "patches": {…}}` in seconds and Hz, which a `SongCard` plays, `404` for no such song. A note's `patch`, if not null, names one of the `patches`, the Roland D-50 patches that play those notes, see below |
 
 Errors have a `detail` with the reason, such as
 `{"detail": "Cannot start a capture while LISTENING."}`.
@@ -221,6 +221,18 @@ regenerates it.
 plays them live with the voice of an additive synthesizer, each harmonic
 a sine with a detuned pair, which thickens it like a chorus, see
 `web/assistant/synth.js`. Without songs, `PlaySong` is not recognized.
+
+A song, or a voice of it, can instead name a Roland D-50 patch, such as
+`"patch": "fantasia"`, the D-50's first factory patch. The client then
+plays its notes as the D-50 does, with linear arithmetic synthesis: each
+note's two tones of two partials, synthesized as Roland's LA chip makes
+them, after [Munt](https://github.com/munt/munt)'s emulation of it, with
+the D-50's own envelope times, cutoff and LFO rates measured on recordings
+of it, and the tones' equalizer and chorus, and a reverb, in stereo. A patch is the
+D-50's own parameters, in `speech/backend/patches`, which
+`examples/songs/d50_patch.py` makes from a D-50 bank dump. The D-50's PCM
+samples are Roland's, so the client has stand-ins for those the patches
+use, see `speech/backend/d50.py`, which refuses a patch it cannot play.
 
 `--backlight` names the screen's backlight in `/sys/class/backlight`, or
 `auto` for the only one, which the service then needs to be allowed to

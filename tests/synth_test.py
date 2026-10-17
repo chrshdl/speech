@@ -11,7 +11,7 @@ import subprocess
 import numpy as np
 import pytest
 
-from speech.backend import songs
+from speech.backend import d50, songs
 
 HARNESS = os.path.join(os.path.dirname(__file__), "synth_harness.mjs")
 TWINKLE = os.path.join(
@@ -35,8 +35,11 @@ def score(voices, tempo=60, partials=(1.0,), beats=None, loop=False, sound=None)
     return song.score().model_dump(by_alias=True)
 
 
-def play(tmp_path, data, seconds, stop=None):
-    """The samples of the score played for seconds, what it posted, and when it ended."""
+def play_stereo(tmp_path, data, seconds, stop=None):
+    """
+    The left and right samples of the score played for seconds, what it
+    posted, and when it ended.
+    """
     (tmp_path / "score.json").write_text(json.dumps(data))
     args = [tmp_path / "score.json", tmp_path / "out.f32", SR, round(seconds * SR)]
     if stop is not None:
@@ -45,8 +48,16 @@ def play(tmp_path, data, seconds, stop=None):
         ["node", HARNESS, *map(str, args)], capture_output=True, text=True, check=True
     )
     report = json.loads(result.stdout)
-    samples = np.fromfile(tmp_path / "out.f32", dtype=np.float32)
-    return samples, report["posted"], report["returnedFalse"]
+    samples = np.fromfile(tmp_path / "out.f32", dtype=np.float32).reshape(-1, 2)
+    return samples.T, report["posted"], report["returnedFalse"]
+
+
+def play(tmp_path, data, seconds, stop=None):
+    """The samples of the score played for seconds, what it posted, and when it ended."""
+    (left, right), posted, returned_false = play_stereo(tmp_path, data, seconds, stop)
+    # Without a patch, the left and right are the same.
+    assert np.array_equal(left, right)
+    return left, posted, returned_false
 
 
 def rms(samples):
@@ -175,3 +186,202 @@ def test_the_same_each_time(tmp_path):
     first, _, _ = play(tmp_path, data, 2)
     again, _, _ = play(tmp_path, data, 2)
     assert np.array_equal(first, again)
+
+
+# The D-50's voice, for notes with a patch.
+
+
+def patch_score(voices, patch="fantasia", data=None, tempo=60):
+    """The score of the voices played with the patch, or with its data instead."""
+    notes = tuple(songs.notes(voices, tempo, patch=patch))
+    song = songs.Song("song", "Song", ("song",), notes)
+    score = song.score().model_dump(by_alias=True)
+    if data is not None:
+        score["patches"][patch] = data
+    return score
+
+
+def plain(**partial):
+    """
+    Fantasia made a single synth partial with neither effects nor
+    modulation: a square at C4, full cutoff, at full level at once, and
+    silent at once when let go, with the partial's parameters changed.
+    """
+    data = d50.load("fantasia")
+    data["patch"].update(key_mode=0, reverb_balance=0, total_volume=100)
+    common = data["upper"]["common"]
+    common.update(
+        structure=0,
+        partial_mute=1,
+        chorus_balance=0,
+        eq_lg=12,
+        eq_hg=12,
+        pitch_lfo_depth=0,
+    )
+    for n in (1, 2):
+        data["upper"][f"partial{n}"].update(
+            wg_coarse=36,
+            wg_fine=50,
+            wg_keyfollow=11,
+            wg_lfo_mode=0,
+            wg_waveform=0,
+            pw=0,
+            pw_velocity=7,
+            tvf_cutoff=100,
+            tvf_resonance=0,
+            tvf_bias_level=7,
+            tvf_env_depth=0,
+            tva_level=100,
+            tva_velocity=50,
+            tva_bias_level=12,
+            tva_t1=0,
+            tva_t2=0,
+            tva_t3=0,
+            tva_t4=0,
+            tva_t5=0,
+            tva_l1=100,
+            tva_l2=100,
+            tva_l3=100,
+            tva_sus=100,
+            tva_lfo_depth=0,
+        )
+    data["upper"]["partial1"].update(partial)
+    return data
+
+
+def level(samples, frequency, seconds):
+    """The magnitude of the frequency in the samples, of a sine of 1."""
+    hz = np.fft.rfftfreq(len(samples), 1 / SR)
+    magnitudes = np.abs(np.fft.rfft(samples * np.hanning(len(samples))))
+    return magnitudes[np.abs(hz - frequency).argmin()] / (len(samples) / 4)
+
+
+def decibels(samples, at, seconds=0.02):
+    window = samples[round(at * SR) : round((at + seconds) * SR)]
+    return 20 * np.log10(rms(window))
+
+
+def test_patch_square_and_sawtooth_pitch(tmp_path):
+    # An LA sawtooth is the square times a cosine of its frequency: at
+    # pulse width 0, symmetrical, it sounds an octave above the square, as
+    # the D-50's manual says, "pulse width 50% raises the pitch by an
+    # octave", but at other pulse widths the square's pitch sounds too.
+    def play_partial(**partial):
+        data = plain(**partial)
+        samples, _, _ = play(tmp_path, patch_score([[["C4", 2]]], data=data), 2)
+        return samples[SR // 2 : 3 * SR // 2]
+
+    square = play_partial()
+    assert spectrum_peak(square) == pytest.approx(261.63, abs=1)
+    sawtooth = play_partial(wg_waveform=1)
+    assert spectrum_peak(sawtooth) == pytest.approx(523.25, abs=1)
+    assert level(sawtooth, 261.63, 1) < 1e-4
+    wide = play_partial(wg_waveform=1, pw=100)
+    assert level(wide, 261.63, 1) > 0.1 * level(wide, spectrum_peak(wide), 1)
+
+
+def test_patch_cutoff_rounds_the_square(tmp_path):
+    # The lower the cutoff, the wider the cosines of the square's edges,
+    # and the weaker its harmonics; at 22, the LA chip's middle on the
+    # D-50's brighter scale, it is all but a sine, and below it fades, as
+    # the D-50's manual says. Quiet enough for the limiter not to add
+    # harmonics.
+    def harmonics(cutoff):
+        data = plain(tvf_cutoff=cutoff, tva_level=40)
+        samples, _, _ = play(tmp_path, patch_score([[["C4", 1]]], data=data), 1)
+        samples = samples[SR // 4 : 3 * SR // 4]
+        return [level(samples, h * 261.63, 0.5) for h in (1, 3, 9)]
+
+    fundamental, third, ninth = harmonics(100)
+    assert third / fundamental == pytest.approx(1 / 3, rel=0.2)
+    assert ninth / fundamental > 0.05
+    _, _, ninth = harmonics(40)
+    assert ninth / fundamental < 0.01
+    sine, third, _ = harmonics(22)
+    assert third / sine < 0.02
+    faded, _, _ = harmonics(12)
+    assert faded < 0.5 * sine
+
+
+def test_patch_envelope_rates(tmp_path):
+    # An LA ramp's increment is the time setting, the D-50's 1.26 times the
+    # MT-32's, less 8 * log2 of the distance, a rate of
+    # 2^((increment + 24) / 8) / 2^18 of a 1/16 octave at 32 kHz: rising
+    # 100 at time 64, as 81, by 24.1 units a second, 9.1 dB, and falling at
+    # time 64 by 57.3 units, 21.6 dB a second.
+    data = plain(tva_t1=64, tva_t5=64)
+    samples, _, _ = play(tmp_path, patch_score([[["C4", 2]]], data=data), 3)
+    rise = (decibels(samples, 1.5) - decibels(samples, 0.5)) / 1.0
+    assert rise == pytest.approx(24.1 * 6.0206 / 16, rel=0.05)
+    fall = (decibels(samples, 2.1) - decibels(samples, 2.6)) / 0.5
+    assert fall == pytest.approx(57.3 * 6.0206 / 16, rel=0.05)
+
+
+def test_patch_ring_modulation(tmp_path):
+    # Structure 2 adds the ring modulation of partial 2, a fifth up, to
+    # partial 1: their difference sounds, as it does not mixed.
+    def play_structure(structure):
+        data = plain(tvf_cutoff=50, tva_level=40)
+        data["upper"]["common"].update(structure=structure, partial_mute=3)
+        data["upper"]["partial2"].update(wg_coarse=43, tvf_cutoff=50, tva_level=40)
+        samples, _, _ = play(tmp_path, patch_score([[["C4", 1]]], data=data), 1)
+        return samples[SR // 4 : 3 * SR // 4]
+
+    difference = 392.0 - 261.63
+    mixed = play_structure(0)
+    ringed = play_structure(1)
+    assert level(mixed, difference, 0.5) < 1e-4
+    assert level(ringed, difference, 0.5) > 0.05 * level(ringed, 261.63, 0.5)
+
+
+def test_fantasia(tmp_path):
+    (left, right), posted, returned_false = play_stereo(
+        tmp_path, patch_score([[["C4", 5]]]), 18
+    )
+    mono = (left + right) / 2
+    # As measured on a D-50: the synth sounds at the key, with its
+    # harmonics, and the bells strike two octaves and a fourth above it,
+    # 5.34 times its frequency, and fade by about 14 dB a second. Over
+    # seconds, as the chorus sweeps the notches it makes.
+    held = mono[SR : 4 * SR]
+    assert spectrum_peak(held) == pytest.approx(261.63, abs=1)
+    assert 0.1 < level(held, 2 * 261.63, 3) / level(held, 261.63, 3) < 0.6
+    bell = 5.34 * 261.63
+    strike = mono[: SR // 4]
+    assert level(strike, bell, 0.25) > 0.1 * level(strike, 261.63, 0.25)
+    faded = 20 * np.log10(level(strike, bell, 0.25) / level(held, bell, 3))
+    assert 8 < faded < 30
+    # In stereo, by the chorus and the reverb.
+    assert not np.allclose(left[SR : 2 * SR], right[SR : 2 * SR])
+    # Let go after 5 seconds, it fades, and the song ends once the reverb
+    # has rung out too, and is silent after.
+    assert rms(mono[7 * SR : 8 * SR]) < 0.1 * rms(held)
+    [(end, message)] = posted
+    assert message == "ended" and 8 * SR < end < 17 * SR
+    assert np.abs(left[returned_false:]).max() == 0
+
+
+def test_fantasia_loud_as_the_tones(tmp_path):
+    melody = [[[p, 0.5] for p in ("C5", "D5", "E5", "G5", "F5", "E5", "D5", "C5")]]
+    chords = [[["C3", 2], ["F3", 2]], [["G3", 2], ["A3", 2]], [["E4", 2], ["C4", 2]]]
+    samples, _, _ = play_stereo(tmp_path, patch_score(melody + chords, tempo=120), 3)
+    assert 0.2 < np.abs(samples).max() < 0.6
+
+
+def test_fantasia_the_same_each_time(tmp_path):
+    data = patch_score([[["C4", 1], ["E4", 1]], [["G3", 2]]])
+    first, _, _ = play_stereo(tmp_path, data, 3)
+    again, _, _ = play_stereo(tmp_path, data, 3)
+    assert np.array_equal(first, again)
+
+
+def test_patch_with_additive_voices(tmp_path):
+    # A voice of the additive synthesizer sounds beside the patch's.
+    notes = tuple(songs.notes([[["A4", 1]]], 60))
+    notes += tuple(songs.notes([[["C3", 1]]], 60, patch="fantasia"))
+    score = (
+        songs.Song("song", "Song", ("song",), notes).score().model_dump(by_alias=True)
+    )
+    (left, _), _, _ = play_stereo(tmp_path, score, 1)
+    window = left[SR // 4 : 3 * SR // 4]
+    assert level(window, 440, 0.5) > 0.1 and level(window, 65.41, 0.5) > 0.01
