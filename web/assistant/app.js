@@ -330,12 +330,20 @@ const NOTE_LENGTH = 0.25;
 let tones = null;
 // Whether this client chimed for the capture it starts, before listening.
 let chimed = false;
+// While nothing plays, the tones' context is suspended: running, it renders
+// silence all the time, which took about a sixth of a core of a Raspberry Pi 4.
+// It suspends once nothing played for IDLE_MS.
+const IDLE_MS = 3000;
+let idleTimer = null;
+let suspending = null; // The tones' context suspending.
 
 function unlockTones() {
   try {
     tones ??= new AudioContext();
     if (tones.state === "suspended") {
       tones.resume();
+      // Suspended again, unless something plays.
+      idleTones();
     }
   } catch {
     // Without Web Audio there are no tones, which only accompany the page.
@@ -356,6 +364,31 @@ function prepareSound() {
   }
 }
 
+// Suspends the tones' context once nothing played for IDLE_MS, also not a song.
+function idleTones() {
+  clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    if (song || tones.state !== "running") {
+      return;
+    }
+    suspending = tones.suspend().catch(() => {}).finally(() => {
+      suspending = null;
+    });
+  }, IDLE_MS);
+}
+
+// Keeps the tones' context from suspending, and waits until it has, if it is
+// suspending, so that what plays next resumes it.
+async function wakeTones() {
+  clearTimeout(idleTimer);
+  await suspending;
+}
+
+// How much later than it renders the tones' context plays the sound.
+function outputLatency() {
+  return tones?.outputLatency || 0;
+}
+
 // The tones' context adding synth.js, tried again after it failed.
 function loadSynth() {
   synth ??= tones.audioWorklet.addModule("synth.js").catch((error) => {
@@ -365,11 +398,12 @@ function loadSynth() {
   return synth;
 }
 
-// Plays the tone, and resolves once it has played, at once without one.
+// Plays the tone, and resolves once it has been heard, at once without one.
 async function playTone({ notes, volume }) {
   if (!tones) {
     return;
   }
+  await wakeTones();
   if (tones.state !== "running") {
     // Firefox resumes the context only after the tap that unlocked it.
     try {
@@ -394,7 +428,12 @@ async function playTone({ notes, volume }) {
     oscillator.start(time);
     oscillator.stop(time + NOTE_LENGTH);
   });
-  await new Promise((resolve) => setTimeout(resolve, toneSeconds({ notes }) * 1000));
+  const rendered = start - tones.currentTime + toneSeconds({ notes });
+  await new Promise((resolve) => setTimeout(resolve, rendered * 1000));
+  // Rendered by now, it is heard as much later as the output's latency, which
+  // right after the context resumed can be less than it is once playing.
+  await new Promise((resolve) => setTimeout(resolve, outputLatency() * 1000));
+  idleTones();
 }
 
 function toneSeconds({ notes }) {
@@ -441,6 +480,7 @@ async function playSong(songCard) {
       throw new Error(`${url}: ${response.status}`);
     }
     const score = await response.json();
+    await wakeTones();
     if (tones.state !== "running") {
       // Before a tap allows sound, such as right after the page loaded, it
       // does not resume.
@@ -477,6 +517,7 @@ async function playSong(songCard) {
     console.error("Could not play the song:", error);
     if (song === playing) {
       song = null;
+      idleTones();
       if (card && card.data.id === id) {
         dismissCard();
       }
@@ -490,6 +531,7 @@ function stopSong() {
   }
   const { node } = song;
   song = null;
+  idleTones();
   if (node) {
     node.port.onmessage = null;
     node.port.postMessage("stop");
@@ -648,7 +690,7 @@ function stopAudio() {
     // Closing the microphone can switch the sound output, such as Bluetooth
     // headphones out of their headset mode, which cuts off what plays, so
     // it closes once the end tone has played.
-    audio.close(toneSeconds(END_TONE) + 0.15);
+    audio.close(toneSeconds(END_TONE) + outputLatency() + 0.15);
     audio = null;
   }
 }
