@@ -73,6 +73,7 @@ All bodies are JSON with camelCase names.
 | `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
 | `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is not shown |
+| `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
 | `WS /v1/audio/{streamId}` | Takes a capture's audio, see [Audio streaming](#audio-streaming) |
 | `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
@@ -460,7 +461,11 @@ service's microphone, but not while a game listens for its commands. The
 model ignores the chime that the microphone picks up. The button shows the dialog state,
 glowing with the loudness while listening and its rainbow ring spinning
 while listening and thinking, and the page shows the cards the service
-sends, for which the unicorn steps aside. The button in the upper left
+sends, for which the unicorn steps aside. A round button with keys in the
+lower right corner, as big as the microphone button, opens the
+synthesizer's keyboard, with `POST /v1/intents/PlayKeyboard`, for a child
+who would rather press than ask; it shows only on the landing page, with
+no card, game or capture. The button in the upper left
 corner switches to a night sky, with a sleepy moon, stars and fireflies,
 and the page remembers the choice. Above an answer, such as the
 weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka font is in

@@ -24,6 +24,7 @@ const ui = {
   keysTitle: $("keys-title"),
   keysBoard: $("keys-board"),
   keysClose: $("keys-close"),
+  keysOpen: $("keys-open"),
   keysDown: $("keys-down"),
   keysUp: $("keys-up"),
   keysOctave: $("keys-octave"),
@@ -710,6 +711,16 @@ function showOctave() {
   ui.keysUp.disabled = !keys.canShiftUp;
 }
 
+// The keys button asks the service for the keyboard, as asking for it by
+// voice does, and its tap allows sound, so the first key sounds at once.
+function openKeyboard() {
+  unlockTones();
+  if (document.body.dataset.connection !== "online") {
+    return;
+  }
+  post("/v1/intents/PlayKeyboard").catch(() => {});
+}
+
 function endKeyboard() {
   if (!keyboard) {
     return;
@@ -905,6 +916,7 @@ async function start() {
   setTheme(document.documentElement.dataset.theme === "night" ? "night" : "day");
   ui.themeToggle.addEventListener("click", toggleTheme);
   ui.mic.addEventListener("click", toggleCapture);
+  ui.keysOpen.addEventListener("click", openKeyboard);
   ui.steerLeft.addEventListener("click", () => steer("LEFT"));
   ui.steerRight.addEventListener("click", () => steer("RIGHT"));
   // Also on lifting, as a click may not come: WPE WebKit makes none while

@@ -165,7 +165,8 @@ body {
   transform: none;
 }
 
-.mic {
+.mic,
+.keys-open {
   position: relative;
   display: grid;
   place-items: center;
@@ -189,15 +190,18 @@ body {
     opacity 200ms ease;
 }
 
-.mic:hover {
+.mic:hover,
+.keys-open:hover {
   transform: scale(1.05);
 }
 
-.mic:active {
+.mic:active,
+.keys-open:active {
   transform: scale(0.94);
 }
 
-.mic:focus-visible {
+.mic:focus-visible,
+.keys-open:focus-visible {
   outline: 4px solid var(--pink);
   outline-offset: 6px;
 }
@@ -219,7 +223,8 @@ body {
 }
 
 /* A rainbow ring around the button, which spins while listening. */
-.mic-ring {
+.mic-ring,
+.keys-open-ring {
   position: absolute;
   inset: -7px;
   border-radius: 50%;
@@ -256,6 +261,62 @@ body[data-connection="offline"] .mic {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* The button that opens the synthesizer's keyboard, as round as the
+   microphone button, in the lower right corner, on the landing page only:
+   not over a card, the keyboard, a game, or while the service listens. */
+.keys-open {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 2;
+  transition:
+    transform 150ms ease,
+    opacity 250ms ease,
+    visibility 250ms;
+}
+
+body.has-card .keys-open,
+body.keyboard .keys-open,
+body.playing .keys-open,
+body:not([data-state="IDLE"]) .keys-open {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+body[data-connection="connecting"] .keys-open,
+body[data-connection="offline"] .keys-open {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* The keys fill the button, cut round, under the lip the microphone
+   button has. */
+.keys-open::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-shadow: inset 0 -4px 0 rgba(139, 92, 246, 0.12);
+  pointer-events: none;
+}
+
+.keys-open-face {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  clip-path: circle(50%);
+}
+
+.keys-open-lines {
+  stroke: #f3e8ff;
+  stroke-width: 3;
+}
+
+.keys-open-black {
+  fill: var(--ink);
 }
 
 /* The landing page. */

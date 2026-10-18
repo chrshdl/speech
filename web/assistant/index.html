@@ -50,6 +50,24 @@
       </button>
     </header>
 
+    <!-- Opens the synthesizer's keyboard, as asking for it does, for a child
+         to press. Only on the landing page. -->
+    <button class="keys-open" id="keys-open" type="button" aria-label="Synthesizer" title="Synthesizer">
+      <span class="keys-open-ring" aria-hidden="true"></span>
+      <!-- Keys filling the button, F to B, striped as the keyboard's. -->
+      <svg class="keys-open-face" viewBox="0 0 100 100" aria-hidden="true">
+        <rect width="100" height="100" fill="#ffffff" />
+        <rect y="70" width="25" height="30" fill="#ff6b6b" />
+        <rect x="25" y="70" width="25" height="30" fill="#ffa94d" />
+        <rect x="50" y="70" width="25" height="30" fill="#ffd43b" />
+        <rect x="75" y="70" width="25" height="30" fill="#69db7c" />
+        <path class="keys-open-lines" d="M25 0V100M50 0V100M75 0V100" />
+        <rect class="keys-open-black" x="17.5" y="-6" width="15" height="58" rx="4" />
+        <rect class="keys-open-black" x="42.5" y="-6" width="15" height="58" rx="4" />
+        <rect class="keys-open-black" x="67.5" y="-6" width="15" height="58" rx="4" />
+      </svg>
+    </button>
+
     <main>
       <!-- The landing page: a meadow with a rainbow and a unicorn, drawn on a
            1600 by 900 grid that fills the screen, by day or by night. What

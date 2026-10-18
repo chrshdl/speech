@@ -314,6 +314,24 @@ class Recognizer:
         capture.streaming = True
         return capture
 
+    async def answer(self, name):
+        """
+        Answers the intent by name as if it was heard, without slots, such as
+        for a button, shows its card and returns it. Raises Busy unless IDLE,
+        and KeyError for an intent the service does not answer.
+        """
+        if self.handlers.get(name) is None:
+            raise KeyError(name)
+        if self.state != DialogState.IDLE:
+            raise Busy(f"Cannot answer {name} while {self.state}.")
+        card_id = uuid.uuid4().hex
+        log.info("Answering %s for %s", name, card_id)
+        card = await self._card(name, card_id, {})
+        self._show(card)
+        if not getattr(card, "UNTIL_DISMISSED", False):
+            self._start_card_timer(self.settings.answer_card_timeout)
+        return card
+
     def card_dismissed(self, card_id):
         """The client dismissed the card. Raises Busy if it is not shown."""
         if self.card is None or self.card.id != card_id:
@@ -551,19 +569,26 @@ class Recognizer:
                 slots=match.slots,
             )
         )
+        card = await self._card(name, capture.id, match.slots)
+        return card, self.settings.answer_card_timeout
+
+    async def _card(self, name, card_id, slots):
+        """
+        The card of the handler of the intent by name, or a notice that it
+        could not answer.
+        """
         try:
-            card = await asyncio.wait_for(
-                self.handlers[name].card(capture.id, match.slots),
+            return await asyncio.wait_for(
+                self.handlers[name].card(card_id, slots),
                 self.settings.answer_timeout,
             )
         except Exception:
-            log.exception("Capture %s could not be answered", capture.id)
-            card = NoticeCard(
-                id=capture.id,
+            log.exception("%s could not be answered for %s", name, card_id)
+            return NoticeCard(
+                id=card_id,
                 title="Sorry, I can't answer that right now",
                 text="Please try again later.",
             )
-        return card, self.settings.answer_card_timeout
 
     def _transcript_card(self, capture, text, final):
         title = "You said" if final else "Listening…"
