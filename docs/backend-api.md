@@ -510,7 +510,10 @@ uv run --no-default-groups backend.py best_model-int8.onnx --lm lm.npz --host 0.
 ```
 
 The model is a `.onnx` file from `export.py`, see the README's Raspberry
-Pi section. `--audio-input client` takes the audio from the client
+Pi section. `--lm-weight`, `--word-bonus` and `--unk-penalty` set how the
+LM counts in the beam search, by default as in `stream.py` and `eval.py`;
+`tune_lm.py` finds the best for a model and an LM, see the README's
+Language model section. `--audio-input client` takes the audio from the client
 instead of the microphone, and `--mic-device` picks the microphone. The
 service listens on port 8080 of `127.0.0.1`, so only the device itself
 can reach it, unless `--host` says otherwise. The API has no

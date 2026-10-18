@@ -616,6 +616,8 @@ and display cards it sends:
 uv run --no-default-groups backend.py best_model-int8.onnx --lm lm.npz --host 0.0.0.0
 ```
 
+With `--lm`, `--lm-weight`, `--word-bonus` and `--unk-penalty` set how
+the LM counts, the values `tune_lm.py` finds best for the model and the LM.
 It listens to the Pi's microphone, or with `--audio-input client` to
 audio the client streams. It recognizes intents in what is said, such as
 "what's the weather in hamburg?", and shows the answer, a card with the

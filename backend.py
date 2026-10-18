@@ -15,6 +15,7 @@ from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
 from speech.intents import THRESHOLD, IntentRecognizer
+from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
 
 # What the service answers.
 INTENTS = [weather.INTENT, game.INTENT, keyboard.INTENT]
@@ -79,7 +80,14 @@ def load(args, jukebox, screen):
     commands, which match the model's output.
     """
     model = streaming.load(args.model, "best", "cpu", args.threads)
-    new_search = streaming.search_factory(model.blank, model.char_to_int, args.lm)
+    new_search = streaming.search_factory(
+        model.blank,
+        model.char_to_int,
+        args.lm,
+        lm_weight=args.lm_weight,
+        word_bonus=args.word_bonus,
+        unk_penalty=args.unk_penalty,
+    )
 
     intents = [*INTENTS]
     if jukebox.intent is not None:
@@ -121,7 +129,8 @@ class Server(uvicorn.Server):
         await super().serve(sockets)
 
 
-if __name__ == "__main__":
+def make_parser():
+    """The service's command line."""
     parser = argparse.ArgumentParser(
         description="Serve streaming speech recognition with an HTTP API. The API "
         "is documented at /docs and in docs/backend-api.md."
@@ -132,6 +141,25 @@ if __name__ == "__main__":
         "directory.",
     )
     parser.add_argument("--lm", help="A word LM .npz file from speech.models.word_lm.")
+    parser.add_argument(
+        "--lm-weight",
+        type=float,
+        default=LM_WEIGHT,
+        help="Scales the LM scores. tune_lm.py finds the best weight, bonus and "
+        "penalty for a model and an LM.",
+    )
+    parser.add_argument(
+        "--word-bonus",
+        type=float,
+        default=WORD_BONUS,
+        help="Score added per word, which offsets the LM's preference for fewer words.",
+    )
+    parser.add_argument(
+        "--unk-penalty",
+        type=float,
+        default=UNK_PENALTY,
+        help="Score added per word outside the LM's vocabulary.",
+    )
     parser.add_argument(
         "--audio-input",
         choices=["microphone", "client"],
@@ -241,7 +269,11 @@ if __name__ == "__main__":
         help="A card that answers a question, such as for the weather, is cleared "
         "after this long.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+if __name__ == "__main__":
+    args = make_parser().parse_args()
     if args.mic_device is not None and args.mic_device.isdigit():
         args.mic_device = int(args.mic_device)
     main(args)
