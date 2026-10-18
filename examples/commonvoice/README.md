@@ -275,6 +275,58 @@ uv run examples/commonvoice/data_report.py score \
     examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2
 ```
 
+Its `clean` scores every clip of one source in batches and writes a page
+of clips from each band of the highest losses, to hear where the
+transcripts stop matching the audio, as VoxPopuli's sometimes do: they are
+the Parliament's edited record, such as "returning financial markets" for
+"financial markets are stabilizing". Given that band's lowest loss, it
+writes the source without those clips and the ones that cannot fit:
+
+```
+uv run examples/commonvoice/data_report.py clean \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2 \
+    examples/voxpopuli/data/train.json
+uv run examples/commonvoice/data_report.py clean \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2 \
+    examples/voxpopuli/data/train.json --max-loss 4
+```
+
+With 15 of 300 SLURP clips given each other's transcripts, the stride 3
+model after epoch 2 ranked 13 of them among the 21 highest losses, and the
+other 2 could not fit; `--max-loss 4` dropped all 15 and 9 of the other
+285, which it found hard.
+
+`examples/commonvoice/whisper_check.py` checks the transcripts with
+Whisper, trained on other data than these models, for a person to review
+the clips whose transcript Whisper does not hear, such as the many Speech
+Commands clips whose word is cut off. Its `check` transcribes each clip
+once, on the GPU, and keeps the result next to the dataset. Then training
+pauses after each epoch for the review, given the checked datasets in the
+config's data:
+
+```
+uv run --with transformers --with accelerate \
+    examples/commonvoice/whisper_check.py check \
+    examples/speech_commands/data/train.json examples/voxpopuli/data/train.json
+```
+
+```json
+"review": {
+    "sets": ["examples/speech_commands/data/train.json",
+             "examples/voxpopuli/data/train.json"]
+}
+```
+
+After each epoch but the last, `train.py` serves the clips whose CER
+against Whisper's transcript is over 0.15 (`"min_cer"`) at
+http://127.0.0.1:8765/ (`"port"`), one at a time, playing each: `O` keeps
+it, Whisper misheard it, and `N` leaves it out of training, Whisper is
+right. Each verdict is saved at once to `<dataset>-review.json`, so only
+new clips come up in a later review, and the next epoch starts once
+Continue is pressed, without the clips reviewed NOK. `whisper_check.py
+review` serves the same review without training, and `write` writes a
+dataset without the NOK clips.
+
 ### Bigram trials
 
 A model of bigrams at a stride of 4, the config at a stride of 4 with

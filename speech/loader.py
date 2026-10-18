@@ -112,7 +112,7 @@ def compute_mean_std(audio_files):
 
 
 class AudioDataset(tud.Dataset):
-    def __init__(self, data_json, preproc, batch_size, augment=None):
+    def __init__(self, data_json, preproc, batch_size, augment=None, exclude=None):
         """
         Arguments:
             augment (dict, optional): Maps the names in AUGMENTATIONS to
@@ -121,9 +121,13 @@ class AudioDataset(tud.Dataset):
                 also have a from_epoch, the epoch, counted from 0, from
                 which it is applied, so the model can learn from clean
                 audio first.
+            exclude (set, optional): The audio paths of examples to leave
+                out, such as those a review found mislabeled.
         """
 
         data = read_data_json(data_json)
+        if exclude:
+            data = [d for d in data if d["audio"] not in exclude]
         self.preproc = preproc
         self.augment = augment or {}
         self.set_epoch(0)
@@ -463,9 +467,15 @@ def collate(batch):
 
 
 def make_loader(
-    dataset_json, preproc, batch_size, num_workers=4, augment=None, sortagrad=False
+    dataset_json,
+    preproc,
+    batch_size,
+    num_workers=4,
+    augment=None,
+    sortagrad=False,
+    exclude=None,
 ):
-    dataset = AudioDataset(dataset_json, preproc, batch_size, augment)
+    dataset = AudioDataset(dataset_json, preproc, batch_size, augment, exclude)
     sampler = BatchRandomSampler(dataset, batch_size, sortagrad)
     loader = tud.DataLoader(
         dataset,

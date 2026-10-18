@@ -15,6 +15,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import speech
 from speech import loader, models
+from speech.utils import review
 from speech.utils.io import atomic_write
 
 # Everything needed to resume training, saved after each epoch.
@@ -293,14 +294,26 @@ def run(config, device, resume=False):
         name: data_cfg[name] for name in loader.AUGMENTATIONS if name in data_cfg
     }
     sortagrad = data_cfg.get("sortagrad", False)
-    train_ldr = loader.make_loader(
-        data_cfg["train_set"],
-        preproc,
-        batch_size,
-        workers,
-        augment=augment,
-        sortagrad=sortagrad,
-    )
+    # A review of the clips whose transcript Whisper does not hear, see
+    # speech/utils/review.py: training pauses for it after each epoch, and
+    # leaves out the clips reviewed as NOK.
+    review_cfg = data_cfg.get("review")
+
+    def make_train_loader():
+        exclude = review.excluded(review_cfg["sets"]) if review_cfg else set()
+        if exclude:
+            print(f"Leaving out {len(exclude)} clips reviewed as NOK.")
+        return loader.make_loader(
+            data_cfg["train_set"],
+            preproc,
+            batch_size,
+            workers,
+            augment=augment,
+            sortagrad=sortagrad,
+            exclude=exclude,
+        )
+
+    train_ldr = make_train_loader()
     dev_sets = data_cfg["dev_set"]
     if isinstance(dev_sets, str):
         dev_sets = [dev_sets]
@@ -409,6 +422,15 @@ def run(config, device, resume=False):
             *run_state,
             best_so_far,
         )
+
+        if review_cfg and e + 1 < opt_cfg["epochs"]:
+            review.serve(
+                review_cfg["sets"],
+                review_cfg.get("port", 8765),
+                review_cfg.get("min_cer", review.MIN_CER),
+                title=f"Review after epoch {e}",
+            )
+            train_ldr = make_train_loader()
 
     writer.close()
 
