@@ -14,12 +14,12 @@ import uvicorn
 import websockets
 
 from speech import export, loader, streaming
-from speech.backend import engine, game, keyboard
+from speech.backend import engine, game, keyboard, songs
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind, NoticeCard
 from speech.intents import Intent, Match
-from speech.models import CTC
+from speech.models import CTC, word_lm
 from speech.utils import wave
 
 CHUNK = 1600
@@ -809,3 +809,34 @@ def test_client_is_revalidated(model_path):
     )
     # An unchanged file is not sent again.
     assert again.status_code == 304
+
+
+def test_lm_settings_reach_the_decoder(model_path, monkeypatch):
+    """--lm-weight, --word-bonus and --unk-penalty set the beam search's."""
+    import backend
+
+    parser = backend.make_parser()
+    defaults = parser.parse_args([str(model_path)])
+    assert (defaults.lm_weight, defaults.word_bonus, defaults.unk_penalty) == (
+        word_lm.LM_WEIGHT,
+        word_lm.WORD_BONUS,
+        word_lm.UNK_PENALTY,
+    )
+    args = parser.parse_args(
+        [str(model_path), "--lm", "lm.npz", "--lm-weight", "0.5", "--word-bonus", "4"]
+        + ["--unk-penalty=0"]
+    )
+    seen = {}
+
+    def search_factory(*args, **kwargs):
+        seen.update(args=args, kwargs=kwargs)
+        return lambda: None
+
+    monkeypatch.setattr(backend.streaming, "search_factory", search_factory)
+    # The test model lacks the characters of the intents' samples, which are
+    # not what is tested here.
+    monkeypatch.setattr(backend, "IntentRecognizer", lambda *args: None)
+    monkeypatch.setattr(backend.game, "commands", lambda *args: None)
+    backend.load(args, songs.Songs([]), None)
+    assert seen["args"][2] == "lm.npz"
+    assert seen["kwargs"] == {"lm_weight": 0.5, "word_bonus": 4.0, "unk_penalty": 0.0}
