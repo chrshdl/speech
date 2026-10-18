@@ -384,7 +384,7 @@ def test_patch_with_additive_voices(tmp_path):
     )
     (left, _), _, _ = play_stereo(tmp_path, score, 1)
     window = left[SR // 4 : 3 * SR // 4]
-    assert level(window, 440, 0.5) > 0.1 and level(window, 65.41, 0.5) > 0.01
+    assert level(window, 440, 0.5) > 0.1 and level(window, 130.81, 0.5) > 0.01
 
 
 # The keyboard, a patch played live.

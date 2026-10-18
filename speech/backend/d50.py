@@ -15,7 +15,8 @@ speech/backend/patches:
 Each block has the parameters of PATCH, COMMON and PARTIAL, in the order
 the D-50 stores them, with the values it stores, such as wg_coarse 36 for
 C4 and tone_balance 100 for the upper tone alone. examples/songs/d50_patch.py
-writes one from a D-50 bank dump.
+writes one from a D-50 bank dump. A patch changed from its source says how
+and why in "changes", a list of sentences.
 
 The client plays a patch's partials as the D-50's LA chip makes them, but
 not everything a D-50 does: the key modes Whole, Dual and Split, the
