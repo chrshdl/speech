@@ -47,8 +47,9 @@ def bank_dump(patches, device=0):
 
 @pytest.fixture
 def fantasia():
+    # As a bank dump has it: without where it is from and how it was changed.
     patch = d50.load("fantasia")
-    del patch["source"]
+    del patch["source"], patch["changes"]
     return patch
 
 
