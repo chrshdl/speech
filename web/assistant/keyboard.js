@@ -1,4 +1,4 @@
-// The synthesizer's keyboard: two octaves, C4 to C6, played by touch, also
+// The synthesizer's keyboard: an octave, C4 to B4, played by touch, also
 // with several fingers at once, a finger sliding over the keys playing each
 // key it reaches, as on a synthesizer's ribbon of keys. It only draws the
 // keys and tells what is played; app.js plays it with synth.js.
@@ -9,7 +9,7 @@
 // still down is let go.
 
 const FIRST_KEY = 60; // C4
-const LAST_KEY = 84; // C6
+const LAST_KEY = 71; // B4
 // The white keys of an octave, from C, and where each black key sits, as
 // the white keys it lies between.
 const WHITE_STEPS = [0, 2, 4, 5, 7, 9, 11];
