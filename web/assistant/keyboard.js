@@ -6,8 +6,11 @@
 //
 // On the Raspberry Pi's touch display, WPE WebKit sometimes loses a finger
 // of a chord lifting: it never ends, and its key would sound on for good.
-// So once no touch is left, or a touch starts as the only one, every key
-// still down is let go.
+// So once no touch is left, or touches start with no other down, every key
+// still down from before is let go. Not by isPrimary: WPE WebKit takes the
+// first touch point of the event as the primary one, by the controller's
+// slot, so of a chord changing, a finger landing in a lower slot than one
+// held let go of the held one's key.
 
 // The lowest key, a C, at first, and as low and as high as it shifts: the
 // keys reach from C2 to C7.
@@ -32,6 +35,9 @@ class Keys {
     this.onUp = onUp;
     // The presses sounding, by pointer: the key and the press's id.
     this.presses = new Map();
+    // The pointers pressed since the last touch started: WebKit sends a
+    // touch's pointerdown before its touchstart.
+    this.starting = new Set();
     this.nextId = 1;
     this.first = FIRST_KEY;
     this.draw();
@@ -42,7 +48,7 @@ class Keys {
       pointercancel: (event) => this.up(event),
       // Touches are played as pointers, so the touches themselves do
       // nothing else, such as the mouse and click WebKit makes of a tap.
-      touchstart: (event) => event.preventDefault(),
+      touchstart: (event) => this.touchesStart(event),
       touchmove: (event) => event.preventDefault(),
       touchend: (event) => this.touchesLeft(event),
       touchcancel: (event) => this.touchesLeft(event),
@@ -142,15 +148,28 @@ class Keys {
 
   down(event) {
     event.preventDefault();
-    // The only touch: any other still down was lost.
-    if (event.pointerType === "touch" && event.isPrimary) {
-      this.releaseAll();
+    if (event.pointerType === "touch") {
+      this.starting.add(event.pointerId);
     }
     // A pointer that presses again lets go of what it pressed.
     this.release(event.pointerId);
     // Moves go on to this element also once the finger left it.
     this.element.setPointerCapture?.(event.pointerId);
     this.press(event.pointerId, this.keyAt(event.clientX, event.clientY));
+  }
+
+  // Touches started: with no other down, any press but theirs was lost.
+  touchesStart(event) {
+    event.preventDefault();
+    if (event.touches.length === event.changedTouches.length) {
+      for (const pointer of [...this.presses.keys()]) {
+        if (!this.starting.has(pointer)) {
+          this.release(pointer);
+          this.presses.delete(pointer);
+        }
+      }
+    }
+    this.starting.clear();
   }
 
   // A touch ended: with none left, every key is let go.
