@@ -275,6 +275,27 @@ uv run examples/commonvoice/data_report.py score \
     examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2
 ```
 
+Its `clean` scores every clip of one source in batches and writes a page
+of clips from each band of the highest losses, to hear where the
+transcripts stop matching the audio, as VoxPopuli's sometimes do: they are
+the Parliament's edited record, such as "returning financial markets" for
+"financial markets are stabilizing". Given that band's lowest loss, it
+writes the source without those clips and the ones that cannot fit:
+
+```
+uv run examples/commonvoice/data_report.py clean \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2 \
+    examples/voxpopuli/data/train.json
+uv run examples/commonvoice/data_report.py clean \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2 \
+    examples/voxpopuli/data/train.json --max-loss 4
+```
+
+With 15 of 300 SLURP clips given each other's transcripts, the stride 3
+model after epoch 2 ranked 13 of them among the 21 highest losses, and the
+other 2 could not fit; `--max-loss 4` dropped all 15 and 9 of the other
+285, which it found hard.
+
 ### Bigram trials
 
 A model of bigrams at a stride of 4, the config at a stride of 4 with
