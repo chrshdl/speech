@@ -143,14 +143,25 @@ def percentile(rows, key, q):
 
 
 def clip_row(r):
-    """A row of a listening page: the clip, its transcript and what was heard."""
-    note = "" if r["fits"] else " <b>does not fit</b>"
-    extra = f"<br>peak {r['peak dBFS']:.0f} dBFS" if "peak dBFS" in r else ""
+    """
+    A row of a listening page: the clip, its transcript and what was heard,
+    and what was measured of it.
+    """
+    measures = []
+    if "loss/char" in r:
+        measures.append(f"loss/char {r['loss/char']:.2f}")
+    measures.append(
+        f"CER {r['CER']:.2f}" + ("" if r.get("fits", True) else " <b>does not fit</b>")
+    )
+    measures.append(
+        f"{r['duration']:.1f} s, {len(r['text']) / r['duration']:.0f} chars/s"
+    )
+    if "peak dBFS" in r:
+        measures.append(f"peak {r['peak dBFS']:.0f} dBFS")
     return (
         f"<tr><td><audio controls preload='none' src='file://{html.escape(os.path.abspath(r['audio']))}'></audio></td>"
         f"<td>{html.escape(r['text'])}<br><i>heard: {html.escape(r['hyp'])}</i></td>"
-        f"<td class='m'>loss/char {r['loss/char']:.2f}<br>CER {r['CER']:.2f}{note}<br>"
-        f"{r['duration']:.1f} s, {len(r['text']) / r['duration']:.0f} chars/s{extra}</td></tr>"
+        f"<td class='m'>{'<br>'.join(measures)}</td></tr>"
     )
 
 
