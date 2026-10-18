@@ -351,7 +351,8 @@
       </section>
 
       <!-- The synthesizer's keyboard, drawn by keyboard.js, with the patch
-           it plays and the button that closes it. -->
+           it plays and its lowest key, the button that closes it, and the
+           buttons that shift the keys an octave down or up. -->
       <section class="keys" id="keys" hidden>
         <div class="keys-hud">
           <svg class="keys-hud-note" viewBox="0 0 32 48" aria-hidden="true">
@@ -360,10 +361,17 @@
             <path d="M19 6 C27 9 31 17 25 26 C26 18 24 15 19 14 Z" />
           </svg>
           <span class="keys-title" id="keys-title"></span>
+          <span class="keys-octave" id="keys-octave"></span>
           <button class="card-close" id="keys-close" type="button" aria-label="Close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
           </button>
         </div>
+        <button class="keys-shift keys-shift-down" id="keys-down" type="button" aria-label="Octave down">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+        </button>
+        <button class="keys-shift keys-shift-up" id="keys-up" type="button" aria-label="Octave up">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
+        </button>
         <div class="keys-board" id="keys-board" role="group" aria-label="Keyboard"></div>
       </section>
     </main>

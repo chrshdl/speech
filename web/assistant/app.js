@@ -24,6 +24,9 @@ const ui = {
   keysTitle: $("keys-title"),
   keysBoard: $("keys-board"),
   keysClose: $("keys-close"),
+  keysDown: $("keys-down"),
+  keysUp: $("keys-up"),
+  keysOctave: $("keys-octave"),
 };
 
 // Audio is sent in chunks of 100 ms.
@@ -656,6 +659,7 @@ function startKeyboard(data) {
       shown.node?.port.postMessage({ up: id });
     },
   });
+  showOctave();
   loadKeyboard(shown, data.url);
 }
 
@@ -687,6 +691,23 @@ async function loadKeyboard(shown, url) {
   } catch (error) {
     console.error("Could not ready the keyboard:", error);
   }
+}
+
+// Shifts the keyboard's keys an octave down, by -1, or up, by 1.
+function shiftKeyboard(octaves) {
+  if (!keyboard) {
+    return;
+  }
+  keyboard.keys.shift(octaves);
+  showOctave();
+}
+
+// Shows the lowest key of the keyboard, and which way it can shift.
+function showOctave() {
+  const { keys } = keyboard;
+  ui.keysOctave.textContent = keys.name;
+  ui.keysDown.disabled = !keys.canShiftDown;
+  ui.keysUp.disabled = !keys.canShiftUp;
 }
 
 function endKeyboard() {
@@ -890,6 +911,19 @@ async function start() {
   // it takes another finger as down, such as of a chord on the keys.
   ui.keysClose.addEventListener("pointerup", () => dismissCard());
   ui.keysClose.addEventListener("click", () => dismissCard());
+  // The octave buttons shift on touching, at once, which is also why no
+  // click is needed, and on a click from the keyboard, without a pointer.
+  for (const [button, octaves] of [
+    [ui.keysDown, -1],
+    [ui.keysUp, 1],
+  ]) {
+    button.addEventListener("pointerdown", () => shiftKeyboard(octaves));
+    button.addEventListener("click", (event) => {
+      if (event.detail === 0) {
+        shiftKeyboard(octaves);
+      }
+    });
+  }
   document.addEventListener("keydown", (event) => {
     if (wifi && wifi.isOpen) {
       if (event.code === "Escape") {

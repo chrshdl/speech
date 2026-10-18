@@ -1,15 +1,22 @@
-// The synthesizer's keyboard: an octave, C4 to B4, played by touch, also
-// with several fingers at once, a finger sliding over the keys playing each
-// key it reaches, as on a synthesizer's ribbon of keys. It only draws the
-// keys and tells what is played; app.js plays it with synth.js.
+// The synthesizer's keyboard: an octave of keys, C to C, from C4 at first and
+// shifted an octave down or up by the buttons of app.js, played by touch,
+// also with several fingers at once, a finger sliding over the keys playing
+// each key it reaches, as on a synthesizer's ribbon of keys. It only draws
+// the keys and tells what is played; app.js plays it with synth.js.
 //
 // On the Raspberry Pi's touch display, WPE WebKit sometimes loses a finger
 // of a chord lifting: it never ends, and its key would sound on for good.
-// So once no touch is left, or a touch starts as the only one, every key
-// still down is let go.
+// So once no touch is left, or touches start with no other down, every key
+// still down from before is let go. Not by isPrimary: WPE WebKit takes the
+// first touch point of the event as the primary one, by the controller's
+// slot, so of a chord changing, a finger landing in a lower slot than one
+// held let go of the held one's key.
 
+// The lowest key, a C, at first, and as low and as high as it shifts: the
+// keys reach from C2 to C7.
 const FIRST_KEY = 60; // C4
-const LAST_KEY = 71; // B4
+const LOWEST_FIRST_KEY = 36; // C2
+const HIGHEST_FIRST_KEY = 84; // C6
 // The white keys of an octave, from C, and where each black key sits, as
 // the white keys it lies between.
 const WHITE_STEPS = [0, 2, 4, 5, 7, 9, 11];
@@ -28,37 +35,12 @@ class Keys {
     this.onUp = onUp;
     // The presses sounding, by pointer: the key and the press's id.
     this.presses = new Map();
+    // The pointers pressed since the last touch started: WebKit sends a
+    // touch's pointerdown before its touchstart.
+    this.starting = new Set();
     this.nextId = 1;
-    this.keys = new Map();
-    this.whites = [];
-    for (let key = FIRST_KEY; key <= LAST_KEY; key++) {
-      const step = (key - FIRST_KEY) % 12;
-      if (WHITE_STEPS.includes(step)) {
-        this.whites.push(key);
-      }
-    }
-    element.replaceChildren();
-    element.style.setProperty("--whites", this.whites.length);
-    for (const key of this.whites) {
-      const index = this.whites.indexOf(key);
-      const div = document.createElement("div");
-      div.className = "keys-key white";
-      div.style.setProperty("--i", index);
-      div.style.setProperty("--color", KEY_COLORS[index % 7]);
-      element.append(div);
-      this.keys.set(key, div);
-    }
-    for (let key = FIRST_KEY; key <= LAST_KEY; key++) {
-      if (this.keys.has(key)) {
-        continue;
-      }
-      const div = document.createElement("div");
-      div.className = "keys-key black";
-      // Between the white key below it and the one above.
-      div.style.setProperty("--i", this.whites.indexOf(key - 1) + 1);
-      element.append(div);
-      this.keys.set(key, div);
-    }
+    this.first = FIRST_KEY;
+    this.draw();
     this.listeners = {
       pointerdown: (event) => this.down(event),
       pointermove: (event) => this.move(event),
@@ -66,13 +48,72 @@ class Keys {
       pointercancel: (event) => this.up(event),
       // Touches are played as pointers, so the touches themselves do
       // nothing else, such as the mouse and click WebKit makes of a tap.
-      touchstart: (event) => event.preventDefault(),
+      touchstart: (event) => this.touchesStart(event),
       touchmove: (event) => event.preventDefault(),
       touchend: (event) => this.touchesLeft(event),
       touchcancel: (event) => this.touchesLeft(event),
     };
     for (const [name, listener] of Object.entries(this.listeners)) {
       element.addEventListener(name, listener, { passive: false });
+    }
+  }
+
+  // The name of the lowest key, such as C4.
+  get name() {
+    return `C${this.first / 12 - 1}`;
+  }
+
+  get canShiftDown() {
+    return this.first > LOWEST_FIRST_KEY;
+  }
+
+  get canShiftUp() {
+    return this.first < HIGHEST_FIRST_KEY;
+  }
+
+  // Shifts the keys an octave down, by -1, or up, by 1, letting go of every
+  // key still down.
+  shift(octaves) {
+    const first = Math.min(Math.max(this.first + 12 * octaves, LOWEST_FIRST_KEY), HIGHEST_FIRST_KEY);
+    if (first === this.first) {
+      return;
+    }
+    this.releaseAll();
+    this.first = first;
+    this.draw();
+  }
+
+  // Draws the octave of keys from the lowest.
+  draw() {
+    const last = this.first + 12;
+    this.keys = new Map();
+    this.whites = [];
+    for (let key = this.first; key <= last; key++) {
+      if (WHITE_STEPS.includes((key - this.first) % 12)) {
+        this.whites.push(key);
+      }
+    }
+    // The stylesheet sizes the board for these eight white keys.
+    this.element.replaceChildren();
+    for (const key of this.whites) {
+      const index = this.whites.indexOf(key);
+      const div = document.createElement("div");
+      div.className = "keys-key white";
+      div.style.setProperty("--i", index);
+      div.style.setProperty("--color", KEY_COLORS[index % 7]);
+      this.element.append(div);
+      this.keys.set(key, div);
+    }
+    for (let key = this.first; key <= last; key++) {
+      if (this.keys.has(key)) {
+        continue;
+      }
+      const div = document.createElement("div");
+      div.className = "keys-key black";
+      // Between the white key below it and the one above.
+      div.style.setProperty("--i", this.whites.indexOf(key - 1) + 1);
+      this.element.append(div);
+      this.keys.set(key, div);
     }
   }
 
@@ -107,15 +148,28 @@ class Keys {
 
   down(event) {
     event.preventDefault();
-    // The only touch: any other still down was lost.
-    if (event.pointerType === "touch" && event.isPrimary) {
-      this.releaseAll();
+    if (event.pointerType === "touch") {
+      this.starting.add(event.pointerId);
     }
     // A pointer that presses again lets go of what it pressed.
     this.release(event.pointerId);
     // Moves go on to this element also once the finger left it.
     this.element.setPointerCapture?.(event.pointerId);
     this.press(event.pointerId, this.keyAt(event.clientX, event.clientY));
+  }
+
+  // Touches started: with no other down, any press but theirs was lost.
+  touchesStart(event) {
+    event.preventDefault();
+    if (event.touches.length === event.changedTouches.length) {
+      for (const pointer of [...this.presses.keys()]) {
+        if (!this.starting.has(pointer)) {
+          this.release(pointer);
+          this.presses.delete(pointer);
+        }
+      }
+    }
+    this.starting.clear();
   }
 
   // A touch ended: with none left, every key is let go.
