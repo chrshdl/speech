@@ -327,6 +327,62 @@ Continue is pressed, without the clips reviewed NOK. `whisper_check.py
 review` serves the same review without training, and `write` writes a
 dataset without the NOK clips.
 
+#### Reviewing a run, step by step
+
+1. Check the dataset with Whisper, and let it finish before training, as
+   both use the GPU. It prints how many clips fall in each band of CER at
+   the end:
+
+   ```
+   uv run --with transformers --with accelerate \
+       examples/commonvoice/whisper_check.py check \
+       examples/speech_commands/data/train.json
+   ```
+
+   Whisper pads every clip to 30 seconds, so a one-second clip costs as
+   much as a 30-second one: Speech Commands' 85,000 clips took 6 to 7
+   hours on an Apple M4 Max at the default `--batch-size 16`, and
+   VoxPopuli's 181,000 clips take about twice as long, a job for a night.
+   A larger `--batch-size`, such as 64, may be faster. Stopping loses at
+   most the batch in progress: a run started again skips the checked
+   clips.
+
+2. Add the checked datasets to the config's data, such as after
+   `"num_workers"`, keeping the comma before the next key:
+
+   ```json
+   "review" : {
+       "sets" : ["examples/speech_commands/data/train.json"]
+   },
+   ```
+
+   `train.py` reads it when it starts, so a run already training needs a
+   restart with `--resume` to pause for the review; stop it after an
+   epoch, as stopping within one loses that epoch.
+
+3. Review first, without training, so the next epoch already trains
+   without the NOK clips rather than with them for a whole epoch:
+
+   ```
+   uv run examples/commonvoice/whisper_check.py review \
+       examples/speech_commands/data/train.json
+   ```
+
+   and open http://127.0.0.1:8765/. The queue need not be finished: press
+   Continue whenever training should start. The verdicts are kept, and a
+   later review shows only the clips not judged yet.
+
+4. Continue the run:
+
+   ```
+   caffeinate -i uv run train.py \
+       examples/commonvoice/ctc_streaming_3750h_stride3_config.json --resume
+   ```
+
+   It prints "Leaving out N clips reviewed as NOK." when it starts, and
+   after each epoch it pauses at the same page for the clips not judged
+   yet, until Continue is pressed.
+
 ### Bigram trials
 
 A model of bigrams at a stride of 4, the config at a stride of 4 with
