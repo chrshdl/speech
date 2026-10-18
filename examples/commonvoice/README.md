@@ -256,6 +256,25 @@ uv run examples/commonvoice/inspect_run.py \
     examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 0
 ```
 
+`examples/commonvoice/data_report.py` compares a run's epochs on each dev
+set, also on SLURP's requests to a voice assistant, which are what the
+device hears, written by `examples/slurp/prepare.py`. Its `score` decodes a
+random sample of each training source with a saved model and compares the
+sources: loss per character, CER, speaking rate, durations, and the clips
+whose transcript cannot fit the model's output frames. It writes
+`report.html` with the worst clips of each source to listen to, which tells
+mislabeled data from hard speech:
+
+```
+uv run examples/slurp/prepare.py
+uv run examples/commonvoice/data_report.py eval \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epochs 0,1,2 \
+    --sets examples/slurp/data/slurp-test-headset.json \
+    examples/slurp/data/slurp-test-far.json
+uv run examples/commonvoice/data_report.py score \
+    examples/commonvoice/models/ctc_streaming_3750h_stride3 --epoch 2
+```
+
 ### Bigram trials
 
 A model of bigrams at a stride of 4, the config at a stride of 4 with
