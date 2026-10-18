@@ -18,6 +18,7 @@ from speech.backend import d50
 from speech.backend.engine import Busy, Unsupported
 from speech.backend.messages import (
     EVENTS,
+    Card,
     CardDismissedRequest,
     Info,
     Message,
@@ -166,6 +167,28 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
         except Busy as error:
             raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
         return StopCaptureResponse(dialog_request_id=capture.id)
+
+    @app.post(
+        "/v1/intents/{intent}",
+        responses={
+            404: {"description": "No such intent"},
+            409: {"description": "Not IDLE"},
+        },
+    )
+    async def answer_intent(intent: str) -> Card:
+        """
+        Answers the intent as if it was heard, without slots, such as for a
+        button that opens the synthesizer's keyboard: shows its card, in a
+        ShowCard event as for speech, and returns it.
+        """
+        try:
+            return await recognizer.answer(intent)
+        except KeyError:
+            raise HTTPException(
+                status.HTTP_404_NOT_FOUND, f"No intent {intent}."
+            ) from None
+        except Busy as error:
+            raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from None
 
     @app.post(
         "/v1/display/card-dismissed",

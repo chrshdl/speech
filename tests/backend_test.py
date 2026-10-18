@@ -14,7 +14,7 @@ import uvicorn
 import websockets
 
 from speech import export, loader, streaming
-from speech.backend import engine, game
+from speech.backend import engine, game, keyboard
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind, NoticeCard
@@ -750,6 +750,46 @@ def test_game_card_stays(model_path):
     assert commands.status_code == 422
     assert dismissed.status_code == 204
     assert state["card"] is None
+
+
+def test_answers_an_intent_for_a_button(model_path):
+    """
+    An intent asked for without speech, such as by the client's button
+    for the keyboard, shows its card as when heard.
+    """
+    recognizer = make_recognizer(
+        model_path,
+        handlers={keyboard.INTENT.name: keyboard.Keyboard()},
+        answer_card_timeout=0.1,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            answered = await svc.post("/v1/intents/PlayKeyboard")
+            events = await svc.events.until("ShowCard")
+            await asyncio.sleep(0.3)
+            shown = await svc.get("/v1/state")
+            unknown = await svc.post("/v1/intents/GetTime")
+            await svc.start("HOLD_TO_TALK")
+            busy = await svc.post("/v1/intents/PlayKeyboard")
+            return answered, events, shown, unknown, busy
+
+    answered, events, shown, unknown, busy = asyncio.run(run())
+    assert answered.status_code == 200
+    card = answered.json()
+    assert card == {
+        "type": "KeyboardCard",
+        "id": card["id"],
+        "title": "Fantasia",
+        "patch": "fantasia",
+        "url": "/v1/patches/fantasia",
+    }
+    assert events[-1]["payload"]["card"] == card
+    # It stays until dismissed, past the timeout of an answer.
+    assert shown["dialogState"] == "IDLE" and shown["card"] == card
+    assert unknown.status_code == 404
+    assert busy.status_code == 409
+    assert busy.json()["detail"] == "Cannot answer PlayKeyboard while LISTENING."
 
 
 def test_client_is_revalidated(model_path):
