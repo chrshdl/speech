@@ -948,14 +948,25 @@ body.has-card .step-aside {
 }
 
 /* The synthesizer's keyboard: the patch's name above, as Superball's
-   score, and an octave of keys along the bottom of the screen. */
+   score, and an octave of keys, C to C, along the bottom of the screen,
+   with the buttons that shift them an octave above its ends. */
 
 body.keyboard .greeting-text,
 body.keyboard .bubble {
   opacity: 0;
 }
 
+/* The board of keys, for the buttons above it too. A white key is 141px
+   wide, 1.7 cm on the Raspberry Pi's Touch Display 2 (8.3px a millimeter),
+   or narrower on a narrower screen; keyboard.js draws eight, an octave. */
 .keys {
+  --whites: 8;
+  --key: 141px;
+  --gap: 6px;
+  --border: 4px;
+  --board-width: min(calc(var(--whites) * var(--key) + 2 * var(--gap) + 2 * var(--border)), calc(100% - 48px));
+  --board-height: min(400px, 56%);
+  --board-bottom: 24px;
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -999,21 +1010,77 @@ body.keyboard .bubble {
   margin: 0;
 }
 
+/* The lowest key, beside the patch's name. */
+.keys-octave {
+  min-width: 2.2em;
+  color: var(--pink);
+  font-size: 24px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The buttons that shift the keys an octave down and up, above the
+   board's ends, as round as the day and night button. */
+.keys-shift {
+  position: absolute;
+  bottom: calc(var(--board-bottom) + var(--board-height) + 14px);
+  display: grid;
+  place-items: center;
+  width: 80px;
+  height: 80px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--purple);
+  cursor: pointer;
+  box-shadow:
+    0 6px 16px rgba(139, 92, 246, 0.25),
+    inset 0 -3px 0 rgba(139, 92, 246, 0.12);
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  pointer-events: auto;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.keys-shift-down {
+  left: calc(50% - var(--board-width) / 2);
+}
+
+.keys-shift-up {
+  right: calc(50% - var(--board-width) / 2);
+}
+
+.keys-shift:active {
+  background: #f3e8ff;
+}
+
+.keys-shift:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.keys-shift svg {
+  width: 40px;
+  height: 40px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 /* The white keys side by side, the black keys over the lines between
    them, as keyboard.js finds them, all with the touches of several fingers
-   at once. A white key is 166px wide, 2 cm on the Raspberry Pi's Touch
-   Display 2 (8.3px a millimeter), or narrower on a narrower screen. */
+   at once. */
 .keys-board {
-  --gap: 6px;
-  --border: 4px;
-  --key: 166px;
   --white: calc((100% - 2 * var(--gap)) / var(--whites));
   position: absolute;
   left: 50%;
-  bottom: 24px;
+  bottom: var(--board-bottom);
   translate: -50% 0;
-  width: min(calc(var(--whites) * var(--key) + 2 * var(--gap) + 2 * var(--border)), calc(100% - 48px));
-  height: min(400px, 56%);
+  width: var(--board-width);
+  height: var(--board-height);
   box-sizing: border-box;
   padding: var(--gap);
   border: var(--border) solid var(--card-border);
