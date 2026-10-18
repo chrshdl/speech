@@ -430,6 +430,27 @@ Best practices for the corpus:
 - **Retune the decoder after any change** to the LM or the acoustic model,
   as described next. The best weights depend on both.
 
+#### Interpolating language models
+
+Text of the domain is usually little, such as requests to a voice
+assistant, and text of general speech much. Trained together as one
+corpus, the little text mostly adds counts to the large one's n-grams.
+`--mix` instead interpolates LMs trained apart, `P(w | h) = Σ λᵢ Pᵢ(w | h)`,
+so the domain's LM keeps its own estimates and the general one covers the
+words and phrases it lacks:
+
+```
+uv run python -m speech.models.word_lm lm-domain.npz lm-general.npz \
+    lm-mixed.npz --mix --dev examples/slurp/data/slurp-devel-text.json
+```
+
+With `--dev`, the weights λ are those with the lowest perplexity on its
+text, found by expectation maximization; `--weights 0.8,0.2` sets them.
+Each LM scores a word with its own vocabulary, and the mixture knows the
+words of all of them. It is saved to one file, which loads wherever an LM
+does, with `--lm`. Weights fitted on a dev set favor its phrasing, so fit
+them on text like what the device hears.
+
 #### Tuning the weight, bonus and unknown-word penalty
 
 The LM weight α sets how much the LM counts against the acoustic model, the
@@ -630,3 +651,16 @@ in each example's `README.md`.
   repository.
 
 [Mozilla Common Voice]: https://commonvoice.mozilla.org
+
+## To do
+
+- **Save the device's captures, as a dev set of real requests.** The
+  language models and acoustic models are compared on SLURP's requests to
+  a voice assistant (`examples/slurp/prepare.py`), which reward its narrow
+  phrasing. A switch for `backend.py`, off by default, such as
+  `--save-captures DIR`, would keep each capture's audio as 16 kHz FLAC with
+  its final transcript and the intent it matched, so a few dozen real
+  requests, corrected by hand, can tune and compare the models on what the
+  device hears. The recordings are of a child's voice: keep them on the
+  device's `/data`, bound how many are kept, and only collect them while
+  someone has turned it on.

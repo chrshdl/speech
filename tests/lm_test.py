@@ -1,6 +1,9 @@
 import collections
+import json
 import math
 import os
+import subprocess
+import sys
 import tempfile
 
 import numpy as np
@@ -8,7 +11,7 @@ import pytest
 
 from speech import tokens
 from speech.models import word_lm
-from speech.models.word_lm import WordLM
+from speech.models.word_lm import MixedLM, WordLM
 
 
 def test_train_and_score():
@@ -323,3 +326,120 @@ def test_load_bigram(tmp_path):
                 v,
                 w,
             )
+
+
+# Interpolated LMs.
+
+
+def two_lms(order=3):
+    """Two LMs of the same words, said in different proportions."""
+    words = [f"w{i}" for i in range(12)]
+    rng = np.random.RandomState(0)
+    first = [" ".join(rng.choice(words[:8], size=6)) for _ in range(200)]
+    second = [" ".join(rng.choice(words[4:], size=6)) for _ in range(200)]
+    # Each says every word at least once, so the vocabularies match.
+    first.append(" ".join(words))
+    second.append(" ".join(words))
+    return WordLM(first, order=order), WordLM(second, order=order)
+
+
+def test_mixed_lm_interpolates():
+    a, b = two_lms()
+    mixed = MixedLM([a, b], [0.3, 0.7])
+    for word, context in [("w1", ("w2", "w3")), ("w9", ("w5",)), ("w0", None)]:
+        expected = math.log(
+            0.3 * math.exp(a.log_prob(word, context))
+            + 0.7 * math.exp(b.log_prob(word, context))
+        )
+        assert mixed.log_prob(word, context) == pytest.approx(expected)
+    assert mixed.order == 3
+
+
+def test_mixed_lm_probabilities_sum_to_one():
+    a, b = two_lms()
+    assert set(a.words) == set(b.words)
+    mixed = MixedLM([a, b], [0.4, 0.6])
+    for context in [(), ("w1",), ("w2", "w9"), ("w11", "w0", "w5")]:
+        total = sum(math.exp(mixed.log_prob(w, context)) for w in mixed.words[1:])
+        assert total == pytest.approx(1.0, abs=1e-9)
+
+
+def test_mixed_lm_knows_the_words_of_each(tmp_path):
+    a = WordLM(["turn on the lights", "turn off the lights"])
+    b = WordLM(["what is the weather", "how is the weather"])
+    mixed = MixedLM([a, b], [0.5, 0.5])
+    scorer = mixed.scorer({c: i for i, c in enumerate(" abcdefghijklmnopqrstuvwxyz'")})
+    # A word only one LM knows is not unknown, nor penalized as one.
+    assert "lights" in mixed.vocab and "weather" in mixed.vocab
+    known = scorer.word_score("weather", ("<s>", "the"))
+    unknown = scorer.word_score("zebra", ("<s>", "the"))
+    assert known > unknown + scorer.unk_penalty * -0.5
+
+
+def test_mixed_lm_save_load(tmp_path):
+    a, b = two_lms()
+    mixed = MixedLM([a, b], [0.25, 0.75])
+    path = str(tmp_path / "mixed.npz")
+    mixed.save(path)
+    loaded = WordLM.load(path)
+    assert isinstance(loaded, MixedLM)
+    assert loaded.weights == [0.25, 0.75]
+    for word, context in [("w1", ("w2", "w3")), ("zzz", ("w5",)), ("</s>", None)]:
+        assert loaded.log_prob(word, context) == mixed.log_prob(word, context)
+    # A plain LM still loads as one.
+    a.save(str(tmp_path / "a.npz"))
+    assert isinstance(WordLM.load(str(tmp_path / "a.npz")), WordLM)
+
+
+def test_best_weights_fit_the_dev_text():
+    a, b = two_lms()
+    rng = np.random.RandomState(1)
+    # Text mostly like the first LM's.
+    dev = [" ".join(rng.choice([f"w{i}" for i in range(8)], size=6)) for _ in range(50)]
+    weights = MixedLM.best_weights([a, b], dev)
+    assert weights[0] > 0.5 and sum(weights) == pytest.approx(1.0)
+    mixed = MixedLM([a, b], weights)
+    # The best weights are at least as good as either LM alone.
+    assert mixed.perplexity(dev) <= min(a.perplexity(dev), b.perplexity(dev)) * 1.001
+
+
+def test_mixed_lm_refuses_bad_weights():
+    a, b = two_lms()
+    with pytest.raises(ValueError, match="sum to 1"):
+        MixedLM([a, b], [0.5, 0.6])
+    with pytest.raises(ValueError, match="at least two"):
+        MixedLM([a], [1.0])
+    with pytest.raises(ValueError, match="not mixtures"):
+        MixedLM([MixedLM([a, b], [0.5, 0.5]), a], [0.5, 0.5])
+
+
+def test_mix_command(tmp_path):
+    a, b = two_lms()
+    a.save(str(tmp_path / "a.npz"))
+    b.save(str(tmp_path / "b.npz"))
+    with open(tmp_path / "dev.json", "w") as f:
+        f.writelines(
+            json.dumps({"text": f"w{i % 8} w{(i + 1) % 8} w{(i + 2) % 8}"}) + "\n"
+            for i in range(20)
+        )
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "speech.models.word_lm",
+            str(tmp_path / "a.npz"),
+            str(tmp_path / "b.npz"),
+            str(tmp_path / "mixed.npz"),
+            "--mix",
+            "--dev",
+            str(tmp_path / "dev.json"),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=root,
+    )
+    assert "Mixed dev perplexity" in result.stdout
+    mixed = WordLM.load(str(tmp_path / "mixed.npz"))
+    assert isinstance(mixed, MixedLM) and mixed.weights[0] > mixed.weights[1]

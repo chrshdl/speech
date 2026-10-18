@@ -31,6 +31,12 @@ Usage::
     # Persistence
     lm.save("lm.npz")
     lm = WordLM.load("lm.npz")
+
+    # Interpolate an LM of the device's requests with one of general speech,
+    # with the weights that fit a dev set's text best
+    lms = [WordLM.load("domain.npz"), WordLM.load("general.npz")]
+    mixed = MixedLM(lms, MixedLM.best_weights(lms, dev_sentences))
+    mixed.save("mixed.npz")  # WordLM.load returns a MixedLM
 """
 
 import argparse
@@ -544,40 +550,49 @@ class WordLM:
 
     def save(self, path):
         """Save the language model to a NumPy .npz file."""
-        arrays = {}
+        with open(path, "wb") as fid:
+            np.savez(fid, **self._arrays())
+
+    def _arrays(self, prefix=""):
+        """The arrays the model is saved as, their names after prefix."""
+        arrays = {
+            f"{prefix}words": np.array("\n".join(self.words)),
+            f"{prefix}order": np.array(self.order),
+            f"{prefix}unigram": self.unigram,
+        }
         for n, table in self.tables.items():
             for name, values in table.items():
-                arrays[f"{name}{n}"] = values
-        with open(path, "wb") as fid:
-            np.savez(
-                fid,
-                words=np.array("\n".join(self.words)),
-                order=np.array(self.order),
-                unigram=self.unigram,
-                **arrays,
-            )
+                arrays[f"{prefix}{name}{n}"] = values
+        return arrays
 
     @classmethod
     def load(cls, path):
         """
         Load a language model from a NumPy .npz file, also a bigram LM
-        saved before n-gram LMs, which it converts.
+        saved before n-gram LMs, which it converts. A file saved by
+        :meth:`MixedLM.save` loads as that :class:`MixedLM`.
         """
-        lm = cls()
         with np.load(path) as data:
-            lm._set_vocab(str(data["words"]).split("\n"))
-            if "order" not in data:
-                lm._load_bigram(data)
-            else:
-                lm.order = int(data["order"])
-                lm.unigram = data["unigram"]
-                lm.tables = {
-                    n: {
-                        name: data[f"{name}{n}"]
-                        for name in ("keys", "probs", "contexts", "gammas")
-                    }
-                    for n in range(2, lm.order + 1)
+            if "mix_weights" in data:
+                return MixedLM._from_arrays(data)
+            return cls._from_arrays(data)
+
+    @classmethod
+    def _from_arrays(cls, data, prefix=""):
+        lm = cls()
+        lm._set_vocab(str(data[f"{prefix}words"]).split("\n"))
+        if f"{prefix}order" not in data:
+            lm._load_bigram(data)
+        else:
+            lm.order = int(data[f"{prefix}order"])
+            lm.unigram = data[f"{prefix}unigram"]
+            lm.tables = {
+                n: {
+                    name: data[f"{prefix}{name}{n}"]
+                    for name in ("keys", "probs", "contexts", "gammas")
                 }
+                for n in range(2, lm.order + 1)
+            }
         lm._cache()
         return lm
 
@@ -608,6 +623,102 @@ class WordLM:
             "contexts": context_keys[context_order],
             "gammas": data["backoff"][contexts][context_order],
         }
+
+
+class MixedLM:
+    """
+    A linear interpolation of word LMs, such as one of the requests a
+    device hears with one of general speech:
+
+        P(w | h) = sum_i weight_i * P_i(w | h)
+
+    which keeps the general LM's words and phrasing where the small one of
+    the requests knows little. Each LM scores a word with its own
+    vocabulary, one it does not know as its <unk>, and the mixture knows
+    the words that any of them knows. It scores and saves like a
+    :class:`WordLM`, to one .npz file, which :meth:`WordLM.load` loads.
+    """
+
+    SOS, EOS, UNK = WordLM.SOS, WordLM.EOS, WordLM.UNK
+
+    def __init__(self, lms, weights):
+        """
+        Arguments:
+            lms: :class:`WordLM` models, at least two.
+            weights: The weight of each, positive and summing to 1, such
+                as from :meth:`best_weights`.
+        """
+        lms, weights = list(lms), [float(w) for w in weights]
+        if len(lms) < 2 or len(weights) != len(lms):
+            raise ValueError("Give at least two LMs and a weight for each.")
+        if not all(isinstance(lm, WordLM) for lm in lms):
+            raise ValueError("Mix the LMs themselves, not mixtures.")
+        if min(weights) <= 0 or not math.isclose(sum(weights), 1):
+            raise ValueError("The weights must be positive and sum to 1.")
+        self.lms, self.weights = lms, weights
+        self.order = max(lm.order for lm in lms)
+        self.words = list(dict.fromkeys(w for lm in lms for w in lm.words))
+        self.vocab = {w: i for i, w in enumerate(self.words)}
+        self._log_prob_words = functools.lru_cache(maxsize=1 << 20)(self._log_prob)
+
+    def log_prob(self, word, context=None):
+        """The log probability of word after context, as WordLM.log_prob."""
+        if context is None:
+            context = ()
+        elif isinstance(context, str):
+            context = (context,)
+        context = tuple(context[max(len(context) - self.order + 1, 0) :])
+        return self._log_prob_words(word, context)
+
+    def _log_prob(self, word, context):
+        p = sum(
+            w * math.exp(lm.log_prob(word, context))
+            for lm, w in zip(self.lms, self.weights)
+        )
+        return math.log(p) if p > 0 else -math.inf
+
+    perplexity = WordLM.perplexity
+    scorer = WordLM.scorer
+
+    @staticmethod
+    def best_weights(lms, sentences, iterations=100):
+        """
+        The weights of the LMs that give their mixture the lowest perplexity
+        on the sentences, by expectation maximization: each word of the
+        sentences is attributed to the LMs by how likely each makes it, and
+        each LM's weight becomes its share. The perplexity is convex in the
+        weights, so this finds the best ones.
+        """
+        probs = []
+        for sent in sentences:
+            words = sent.split()
+            if not words:
+                continue
+            context = [WordLM.SOS]
+            for w in [*words, WordLM.EOS]:
+                probs.append([math.exp(lm.log_prob(w, context)) for lm in lms])
+                context.append(w)
+        probs = np.array(probs)
+        weights = np.full(len(lms), 1 / len(lms))
+        for _ in range(iterations):
+            shares = probs * weights
+            shares /= np.maximum(shares.sum(axis=1, keepdims=True), 1e-300)
+            weights = shares.mean(axis=0)
+        return (weights / weights.sum()).tolist()
+
+    def save(self, path):
+        """Save the mixture, its LMs and weights, to a NumPy .npz file."""
+        arrays = {"mix_weights": np.array(self.weights)}
+        for i, lm in enumerate(self.lms):
+            arrays.update(lm._arrays(f"lm{i}_"))
+        with open(path, "wb") as fid:
+            np.savez(fid, **arrays)
+
+    @classmethod
+    def _from_arrays(cls, data):
+        weights = data["mix_weights"].tolist()
+        lms = [WordLM._from_arrays(data, f"lm{i}_") for i in range(len(weights))]
+        return cls(lms, weights)
 
 
 # The discounts when the counts of counts give none in range, as in
@@ -723,7 +834,39 @@ if __name__ == "__main__":
         "parts, each a pass over the corpus.",
     )
     parser.add_argument("--dev", help="A dataset json to report the perplexity on.")
+    parser.add_argument(
+        "--mix",
+        action="store_true",
+        help="Interpolate the LMs saved in the inputs, .npz files, instead of "
+        "training one, with --weights.",
+    )
+    parser.add_argument(
+        "--weights",
+        help="With --mix, the weight of each LM, comma separated, summing to 1. "
+        "By default those with the lowest perplexity on --dev, or equal ones.",
+    )
     args = parser.parse_args()
+
+    if args.mix:
+        lms = [WordLM.load(path) for path in args.inputs]
+        if args.weights is not None:
+            weights = [float(x) for x in args.weights.split(",")]
+        elif args.dev is not None:
+            weights = MixedLM.best_weights(lms, TextCorpus([args.dev]))
+        else:
+            weights = [1 / len(lms)] * len(lms)
+        mixed = MixedLM(lms, weights)
+        mixed.save(args.output)
+        for path, lm, weight in zip(args.inputs, lms, weights):
+            dev = ""
+            if args.dev is not None:
+                dev = f", dev perplexity {lm.perplexity(TextCorpus([args.dev])):.1f}"
+            print(f"{path}: weight {weight:.3f}{dev}")
+        if args.dev is not None:
+            print(
+                f"Mixed dev perplexity {mixed.perplexity(TextCorpus([args.dev])):.1f}"
+            )
+        raise SystemExit
 
     MEMORY = args.memory * 1e9
     min_count = [int(x) for x in args.min_count.split(",")]
