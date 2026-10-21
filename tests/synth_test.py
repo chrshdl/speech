@@ -365,7 +365,8 @@ def test_fantasia_loud_as_the_tones(tmp_path):
     melody = [[[p, 0.5] for p in ("C5", "D5", "E5", "G5", "F5", "E5", "D5", "C5")]]
     chords = [[["C3", 2], ["F3", 2]], [["G3", 2], ["A3", 2]], [["E4", 2], ["C4", 2]]]
     samples, _, _ = play_stereo(tmp_path, patch_score(melody + chords, tempo=120), 3)
-    assert 0.2 < np.abs(samples).max() < 0.6
+    # Limited to 0.6, and a note's first milliseconds bent below 0.7.
+    assert 0.2 < np.abs(samples).max() < 0.7
 
 
 def test_fantasia_the_same_each_time(tmp_path):
@@ -436,6 +437,33 @@ def test_keyboard_plays_as_many_keys_as_a_d50(tmp_path):
     c3, d3 = songs.frequency("C3"), songs.frequency("D3")
     assert level(after, c3, 1) < 0.1 * level(before, c3, 0.3)
     assert level(after, d3, 1) > 0.3 * level(before, d3, 0.3)
+
+
+def test_keyboard_turns_a_loud_chord_down_without_distorting_it(tmp_path):
+    # Two held keys of a near sine, loud enough to be limited: turned down
+    # smoothly, they sound without the tones clipping makes of two notes,
+    # 2 f1 - f2 and 2 f2 - f1, which neither has. Through tanh alone, four
+    # held keys of Fantasia distorted, and it wobbled with the chorus.
+    data = plain(tvf_cutoff=22)
+    data["upper"]["partial2"].update(tvf_cutoff=22)
+    data["upper"]["common"].update(partial_mute=3)
+    c4, e4 = songs.frequency("C4"), songs.frequency("E4")
+    messages = [
+        (0, {"down": 1, "frequency": c4}),
+        (0, {"down": 2, "frequency": e4}),
+    ]
+    data = {
+        "processor": "keyboard",
+        "options": {"patch": data},
+        "messages": [[round(at * SR), message] for at, message in messages],
+    }
+    (left, _), _, _ = play_stereo(tmp_path, data, 3)
+    held = left[SR : 3 * SR]
+    # Limited: 0.8 without, as loud as a chord of Fantasia can get.
+    assert 0.55 < np.abs(held).max() < 0.65
+    notes = min(level(held, c4, 2), level(held, e4, 2))
+    for tone in (2 * c4 - e4, 2 * e4 - c4):
+        assert level(held, tone, 2) < 1e-3 * notes
 
 
 def test_keyboard_stops(tmp_path):
