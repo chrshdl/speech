@@ -1,4 +1,5 @@
 import copy
+import math
 import os
 import random
 
@@ -286,6 +287,38 @@ def test_accumulate_steps_on_a_partial_group():
     assert it == 3
     steps = {int(state["step"]) for state in optimizer.state.values()}
     assert steps == {2}
+
+
+class PoisonGrad(torch.autograd.Function):
+    """Passes the loss through and makes all its gradients NaN."""
+
+    @staticmethod
+    def forward(ctx, x):
+        return x.clone()
+
+    @staticmethod
+    def backward(ctx, grad):
+        return torch.full_like(grad, math.nan)
+
+
+def test_skips_a_step_with_nonfinite_gradients():
+    # One batch with a finite loss but NaN gradients, as happened 17600
+    # batches into an epoch on MPS in bf16, must not reach the weights.
+    np.random.seed(0)
+    batch = shared.gen_fake_data(40, 10, max_time=60, max_seq_len=5, batch_size=1)
+    model = accumulation_model()
+    loss = model.loss
+    calls = iter([False, True, False])
+    model.loss = lambda b: PoisonGrad.apply(loss(b)) if next(calls) else loss(b)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    precision = train.MixedPrecision(None, torch.device("cpu"))
+    _, avg_loss = train.run_epoch(
+        model, optimizer, precision, [batch] * 3, NoWriter(), 0, 0.0, 1
+    )
+    assert all(torch.isfinite(p).all() for p in model.parameters())
+    steps = {int(state["step"]) for state in optimizer.state.values()}
+    assert steps == {2}
+    assert math.isfinite(avg_loss)
 
 
 def test_mixed_precision_changes_training(tmp_path):

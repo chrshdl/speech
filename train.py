@@ -82,8 +82,14 @@ def run_epoch(
             # Clip the true gradients, not the scaled ones.
             precision.scaler.unscale_(optimizer)
             grad_norm = nn.utils.clip_grad_norm_(model.parameters(), grad_clip).item()
-            # Skips the step if float16 gradients overflowed.
-            precision.scaler.step(optimizer)
+            writer.add_scalar("grad_norm", grad_norm, it)
+            # The scaler skips the step if float16 gradients overflowed.
+            # Without it, a single step with NaN or infinite gradients
+            # would make every weight NaN, so it is skipped here.
+            if precision.scaler.is_enabled() or math.isfinite(grad_norm):
+                precision.scaler.step(optimizer)
+            else:
+                tq.write(f"Skipped the step at iteration {it}, grad_norm={grad_norm}")
             precision.scaler.update()
             optimizer.zero_grad()
 
@@ -97,8 +103,10 @@ def run_epoch(
         model_t += end_t - start_t
         data_t += start_t - prev_end_t
 
-        exp_w = 0.99
-        avg_loss = exp_w * avg_loss + (1 - exp_w) * loss
+        # A NaN loss would make the average NaN for the rest of the run.
+        if math.isfinite(loss):
+            exp_w = 0.99
+            avg_loss = exp_w * avg_loss + (1 - exp_w) * loss
         writer.add_scalar("train_loss", loss, it)
         tq.set_postfix(
             iter=it,
