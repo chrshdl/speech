@@ -157,10 +157,22 @@ const CUTOFF_OFFSET = 28;
 // The amplitude of an LA partial at full level, of a pair's mix, as Munt
 // scales the chip's samples.
 const PAIR_LEVEL = 0.25;
-// The voices of the patches are mixed through tanh, below LA_LIMIT, as loud
-// as the client's tones, PEAK, for a few notes of Fantasia at once.
+// The voices of the patches are mixed below LA_LIMIT, a note of Fantasia
+// about as loud as the client's tones, PEAK, see LimiterLA.
 const LA_GAIN = 0.9;
-const LA_LIMIT = 0.6;
+const LA_LIMIT = 0.7;
+// The limiter keeps the mix times LA_GAIN below LIMIT_LEVEL, turning it
+// down within LIMIT_ATTACK seconds, and back up within LIMIT_RELEASE once
+// its peak is LIMIT_HOLD seconds past. Below it, a chord sounds louder the
+// more notes it has, up to three of Fantasia untouched: limited to PEAK,
+// two to four notes sounded as loud as one. The hold rides over the beats
+// of the notes of a chord: falling between them, the gain rose and fell
+// with them, which made tones of two notes that neither has, 2 f1 - f2 and
+// 2 f2 - f1.
+const LIMIT_LEVEL = 0.6;
+const LIMIT_ATTACK = 0.002;
+const LIMIT_RELEASE = 0.3;
+const LIMIT_HOLD = 0.1;
 // Below which a patch's effects have rung out, after its last note.
 const SILENT = 1e-5;
 // How many keys a patch plays at once, as the D-50's 32 partials: 16 in
@@ -1452,9 +1464,53 @@ class Reverb {
   }
 }
 
-// The patches' voices mixed through tanh, below LA_LIMIT.
-function limitLA(sample) {
-  return LA_LIMIT * Math.tanh((LA_GAIN * sample) / LA_LIMIT);
+// The patches' voices mixed below LA_LIMIT: turned down as much as their
+// loudest moments need, smoothly, so a held chord sounds as played, only
+// softer. Up to LIMIT_LEVEL they pass as they are, and above it, what
+// gets past, such as a key's first milliseconds, is bent by tanh toward
+// LA_LIMIT. Through tanh alone, sample by sample, four held keys of
+// Fantasia drove it hard, and its distortion wobbled with the patch's
+// vibrato and chorus.
+function clipLA(sample) {
+  const size = Math.abs(sample);
+  if (size <= LIMIT_LEVEL) {
+    return sample;
+  }
+  const room = LA_LIMIT - LIMIT_LEVEL;
+  return Math.sign(sample) * (LIMIT_LEVEL + room * Math.tanh((size - LIMIT_LEVEL) / room));
+}
+
+class LimiterLA {
+  constructor(rate) {
+    this.attack = Math.exp(-1 / (LIMIT_ATTACK * rate));
+    this.release = Math.exp(-1 / (LIMIT_RELEASE * rate));
+    // The louder channel's peak, rising at once and, held, falling within
+    // the release, and the gain it calls for.
+    this.peak = 0;
+    this.hold = 0;
+    this.holdFrames = Math.round(LIMIT_HOLD * rate);
+    this.gain = 1;
+  }
+
+  // Limits the frames of left and right, in place.
+  apply(left, right, frames) {
+    for (let i = 0; i < frames; i++) {
+      const level = LA_GAIN * Math.max(Math.abs(left[i]), Math.abs(right[i]));
+      if (level >= this.peak) {
+        this.peak = level;
+        this.hold = this.holdFrames;
+      } else if (this.hold > 0) {
+        this.hold--;
+      } else {
+        this.peak = level + this.release * (this.peak - level);
+      }
+      const target = this.peak > LIMIT_LEVEL ? LIMIT_LEVEL / this.peak : 1;
+      this.gain = target < this.gain ? target + this.attack * (this.gain - target) : target;
+      const gain = LA_GAIN * this.gain;
+      left[i] = clipLA(gain * left[i]);
+      right[i] = clipLA(gain * right[i]);
+    }
+  }
 }
 
 class Song extends AudioWorkletProcessor {
@@ -1465,6 +1521,7 @@ class Song extends AudioWorkletProcessor {
     this.patches = new Map(
       Object.entries(score.patches ?? {}).map(([name, data]) => [name, new Patch(data, sampleRate)]),
     );
+    this.limiter = new LimiterLA(sampleRate);
     this.voices = score.notes
       .map((note) =>
         note.patch
@@ -1569,16 +1626,16 @@ class Song extends AudioWorkletProcessor {
     for (const patch of this.patches.values()) {
       patch.mix(left, right, out.length);
     }
-    const limit = limitLA;
+    this.limiter.apply(left, right, end);
     if (channels.length === 1) {
       for (let i = 0; i < end; i++) {
-        out[i] += limit(0.5 * (left[i] + right[i]));
+        out[i] += 0.5 * (left[i] + right[i]);
       }
       return;
     }
     for (let i = 0; i < end; i++) {
-      channels[0][i] += limit(left[i]);
-      channels[1][i] += limit(right[i]);
+      channels[0][i] += left[i];
+      channels[1][i] += right[i];
     }
   }
 
@@ -1636,6 +1693,7 @@ class Keyboard extends AudioWorkletProcessor {
   constructor({ processorOptions: { patch } }) {
     super();
     this.patch = new Patch(patch, sampleRate);
+    this.limiter = new LimiterLA(sampleRate);
     this.held = new Map();
     this.left = new Float32Array(128);
     this.right = new Float32Array(128);
@@ -1670,12 +1728,13 @@ class Keyboard extends AudioWorkletProcessor {
     const left = this.left.subarray(0, frames).fill(0);
     const right = this.right.subarray(0, frames).fill(0);
     patch.mix(left, right, frames);
+    this.limiter.apply(left, right, frames);
     for (let i = 0; i < frames; i++) {
       if (channels.length === 1) {
-        channels[0][i] = limitLA(0.5 * (left[i] + right[i]));
+        channels[0][i] = 0.5 * (left[i] + right[i]);
       } else {
-        channels[0][i] = limitLA(left[i]);
-        channels[1][i] = limitLA(right[i]);
+        channels[0][i] = left[i];
+        channels[1][i] = right[i];
       }
     }
     return true;
