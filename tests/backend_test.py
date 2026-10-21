@@ -47,6 +47,7 @@ def make_recognizer(
     audio_input=AudioInputKind.CLIENT,
     intents=None,
     handlers=None,
+    voice=None,
     **settings,
 ):
     model = streaming.load(path)
@@ -60,6 +61,7 @@ def make_recognizer(
         model_name="tiny",
         intents=intents,
         handlers=handlers,
+        voice=voice,
     )
 
 
@@ -579,6 +581,168 @@ def test_intents(model_path, score, fail, title):
     else:
         assert "IntentRecognized" not in after
     assert clock.closed
+
+
+class TalkingClock(Clock):
+    """Answers with a card, and says it in two sentences."""
+
+    def speech(self, card):
+        return "It is noon. Time for lunch."
+
+
+class GatedVoice:
+    """
+    Synthesizes a sentence each time the test lets it, as samples of the
+    sentence's number.
+    """
+
+    sample_rate = 22050
+
+    def __init__(self):
+        self.next = threading.Semaphore(0)
+        self.said = []
+
+    def sentences(self, text):
+        self.said.append(text)
+        for i, _ in enumerate(text.split(". "), 1):
+            self.next.acquire()
+            yield np.full(1000, i, "<i2").tobytes()
+
+
+async def ask(svc, audio):
+    """Asks for an intent, and returns the events up to its Speak."""
+    start = await svc.start("HOLD_TO_TALK")
+    socket = await stream_audio(svc.address, start, audio)
+    await socket.close()
+    return start, await svc.events.until("Speak")
+
+
+def test_speaks_the_answer(model_path):
+    """
+    The answer is spoken, its audio streamed as each sentence is
+    synthesized.
+    """
+    audio, _ = wave.array_from_wave("test0.wav")
+    voice = GatedVoice()
+    recognizer = make_recognizer(
+        model_path,
+        intents=FixedIntents(-0.5),
+        handlers={"GetTime": TalkingClock()},
+        voice=voice,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            start, events = await ask(svc, audio)
+            events += await svc.events.until("DialogStateChanged")
+            speak = next(e for e in events if e["action"] == "Speak")["payload"]
+            chunks = []
+            async with svc.client.stream("GET", speak["url"]) as response:
+                headers = response.headers
+                stream = response.aiter_raw()
+                # Each sentence arrives once synthesized, not at the end.
+                for _ in range(2):
+                    voice.next.release()
+                    chunks.append(await asyncio.wait_for(anext(stream), 5))
+                chunks.extend([chunk async for chunk in stream])
+            again = await svc.client.get(speak["url"])
+            return start, events, speak, headers, chunks, again
+
+    start, events, speak, headers, chunks, again = asyncio.run(run())
+    after = actions(events)[actions(events).index("CaptureFinished") :]
+    assert after == [
+        "CaptureFinished",
+        "IntentRecognized",
+        "ShowCard",
+        "Speak",
+        "DialogStateChanged",
+    ]
+    dialog = start["dialogRequestId"]
+    assert speak == {
+        "speechId": speak["speechId"],
+        "cardId": dialog,
+        "text": "It is noon. Time for lunch.",
+        "url": f"/v1/speech/{speak['speechId']}",
+        "sampleRate": 22050,
+        "encoding": "LINEAR16",
+        "channels": 1,
+    }
+    assert headers["content-type"] == "audio/L16;rate=22050;channels=1"
+    samples = np.frombuffer(b"".join(chunks), "<i2")
+    assert np.array_equal(samples, np.repeat([1, 2], 1000))
+    # Synthesized, it can be streamed again, as by another client.
+    assert np.array_equal(np.frombuffer(again.content, "<i2"), samples)
+
+
+@pytest.mark.parametrize("stop", ["capture", "dismissed"])
+def test_speaking_stops(model_path, stop):
+    """
+    A capture starting, or the card dismissed, stops the speech, also its
+    stream, before the rest is synthesized.
+    """
+    audio, _ = wave.array_from_wave("test0.wav")
+    voice = GatedVoice()
+    recognizer = make_recognizer(
+        model_path,
+        intents=FixedIntents(-0.5),
+        handlers={"GetTime": TalkingClock()},
+        voice=voice,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            start, events = await ask(svc, audio)
+            await svc.events.until("DialogStateChanged")
+            speak = events[-1]["payload"]
+            async with svc.client.stream("GET", speak["url"]) as response:
+                stream = response.aiter_raw()
+                voice.next.release()
+                first = await asyncio.wait_for(anext(stream), 5)
+                if stop == "capture":
+                    await svc.start("TAP_TO_TALK")
+                else:
+                    dismissed = await svc.post(
+                        "/v1/display/card-dismissed",
+                        {"cardId": start["dialogRequestId"]},
+                    )
+                    assert dismissed.status_code == 204
+                stopped = await svc.events.until("StopSpeaking")
+                rest = [chunk async for chunk in stream]
+            voice.next.release()
+            later = await svc.client.get(speak["url"])
+            return speak, first, stopped, rest, later
+
+    speak, first, stopped, rest, later = asyncio.run(run())
+    assert stopped[-1]["payload"] == {"speechId": speak["speechId"]}
+    if stop == "capture":
+        # Stopped before listening starts.
+        assert actions(stopped) == ["StopSpeaking"]
+    assert np.array_equal(np.frombuffer(first, "<i2"), np.full(1000, 1))
+    assert rest == []
+    assert later.status_code == 404
+
+
+def test_answers_unspoken_without_a_voice(model_path):
+    """Without a voice, or for a card its handler says nothing for."""
+    audio, _ = wave.array_from_wave("test0.wav")
+    recognizer = make_recognizer(
+        model_path,
+        intents=FixedIntents(-0.5),
+        handlers={"GetTime": TalkingClock()},
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            start = await svc.start("HOLD_TO_TALK")
+            socket = await stream_audio(svc.address, start, audio)
+            await socket.close()
+            events = await svc.events.until("CaptureFinished")
+            events += await svc.events.until("DialogStateChanged")
+            return events, await svc.client.get("/v1/speech/none")
+
+    events, missing = asyncio.run(run())
+    assert "Speak" not in actions(events)
+    assert missing.status_code == 404
 
 
 class LoudTranscriber:

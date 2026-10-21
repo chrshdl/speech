@@ -350,6 +350,34 @@ class StopAudioStream(Payload):
     stream_id: str
 
 
+class Speak(Payload):
+    """
+    Speak the answer shown on the card with card_id: play the audio at url,
+    16 bit little-endian mono samples at sample_rate, which the service
+    streams as it synthesizes them, a sentence at a time.
+    """
+
+    TOPIC = "Speech"
+    speech_id: str
+    card_id: str
+    # What it says.
+    text: str
+    url: str
+    sample_rate: int
+    encoding: Literal["LINEAR16"] = "LINEAR16"
+    channels: Literal[1] = 1
+
+
+class StopSpeaking(Payload):
+    """
+    Stop playing the speech, such as when a capture starts or its card goes.
+    Its audio stream ends.
+    """
+
+    TOPIC = "Speech"
+    speech_id: str
+
+
 # Every event's payload.
 EVENTS = (
     DialogStateChanged,
@@ -362,6 +390,8 @@ EVENTS = (
     ClearCard,
     StartAudioStream,
     StopAudioStream,
+    Speak,
+    StopSpeaking,
 )
 
 
