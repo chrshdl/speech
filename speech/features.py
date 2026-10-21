@@ -1,11 +1,11 @@
 """
 The log spectrogram features of the models, computed for whole clips or
-incrementally as audio arrives. Needs only NumPy and SciPy, so it also
-runs where PyTorch is not installed.
+incrementally as audio arrives. Needs only NumPy, so it also runs where
+PyTorch and SciPy are not installed, and the backend starts without
+importing scipy.signal, which takes seconds on a Raspberry Pi.
 """
 
 import numpy as np
-import scipy.signal
 
 # The window and step of the features in milliseconds.
 WINDOW_MS = 20
@@ -17,15 +17,25 @@ def log_specgram(
 ):
     nperseg = int(window_size * sample_rate / 1e3)
     noverlap = int(step_size * sample_rate / 1e3)
-    _, _, spec = scipy.signal.spectrogram(
-        audio,
-        fs=sample_rate,
-        window="hann",
-        nperseg=nperseg,
-        noverlap=noverlap,
-        detrend=False,
-    )
-    return np.log(spec.T.astype(np.float32) + eps)
+    hop = nperseg - noverlap
+    # What scipy.signal.spectrogram(audio, sample_rate, "hann", nperseg,
+    # noverlap, detrend=False) computes, which the models were trained on:
+    # the one-sided power spectral density of periodic Hann windows, in
+    # single precision unless the audio needs double.
+    audio = np.asarray(audio)
+    dtype = np.result_type(audio, np.float32)
+    if len(audio) < nperseg:
+        return np.zeros((0, nperseg // 2 + 1), dtype=np.float32)
+    frames = np.lib.stride_tricks.sliding_window_view(audio, nperseg)[::hop]
+    window = 0.5 - 0.5 * np.cos(2 * np.pi * np.arange(nperseg) / nperseg)
+    window = window.astype(dtype)
+    spec = np.fft.rfft(frames.astype(dtype) * window, axis=1)
+    spec = spec.real**2 + spec.imag**2
+    spec *= 1 / (sample_rate * (window * window).sum())
+    # Each bin but DC and, for an even nperseg, Nyquist also stands for
+    # its negative frequency.
+    spec[:, 1 : None if nperseg % 2 else -1] *= 2
+    return np.log(spec.astype(np.float32) + eps)
 
 
 def sample_rate_for(input_dim):
