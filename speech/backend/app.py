@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Response, WebSocket, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 from fastapi.staticfiles import StaticFiles
 from pydantic.json_schema import models_json_schema
@@ -305,6 +305,29 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
             raise HTTPException(
                 status.HTTP_503_SERVICE_UNAVAILABLE, str(error)
             ) from None
+
+    @app.get(
+        "/v1/speech/{speech_id}",
+        response_class=StreamingResponse,
+        responses={
+            200: {"content": {"audio/L16": {}}},
+            404: {"description": "Not the speech spoken last, or stopped"},
+        },
+    )
+    async def speech(speech_id: str):
+        """
+        A Speak event's audio, 16 bit little-endian mono samples at its
+        sampleRate, streamed as each sentence is synthesized. It ends after
+        the last, or early when the speech is stopped.
+        """
+        spoken = recognizer.speech
+        if spoken is None or spoken.id != speech_id:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such speech.")
+        return StreamingResponse(
+            spoken.audio(),
+            media_type=f"audio/L16;rate={recognizer.voice.sample_rate};channels=1",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.get("/v1/songs/{song_id}", responses={404: {"description": "No such song"}})
     async def song(song_id: str) -> SongScore:

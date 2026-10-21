@@ -19,13 +19,14 @@ and event, is served at `/docs`, and the OpenAPI document at
 
 ## Concepts
 
-The API has three topics:
+The API has four topics:
 
 | Topic | Purpose |
 |---|---|
 | `Recognition` | Starting and stopping captures, the dialog state and the transcript |
 | `Display` | The display cards to show and clear |
 | `Audio` | Streaming a capture's audio from the client |
+| `Speech` | Answers spoken, such as the weather, with `--voice` |
 
 Requests go in over REST, and events come out as server-sent events.
 
@@ -75,6 +76,7 @@ All bodies are JSON with camelCase names.
 | `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is not shown |
 | `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
 | `WS /v1/audio/{streamId}` | Takes a capture's audio, see [Audio streaming](#audio-streaming) |
+| `GET /v1/speech/{speechId}` | A spoken answer's audio, streamed as it is synthesized, see [Speech](#speech); `404` unless it is the speech spoken last and not stopped |
 | `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
@@ -113,6 +115,8 @@ when there are no events for a while.
 | `Display.ClearCard` | `cardId` | Dismiss the card with the id |
 | `Audio.StartAudioStream` | `streamId`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Stream the capture's audio, with audio input from the client |
 | `Audio.StopAudioStream` | `streamId` | Stop streaming |
+| `Speech.Speak` | `speechId`, `cardId`, `text`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Speak the answer on the card, see [Speech](#speech) |
+| `Speech.StopSpeaking` | `speechId` | Stop playing the speech |
 
 `reason` is one of:
 
@@ -211,7 +215,7 @@ does not match.
 | `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
 | `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
 | `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
-| `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, which `--weather-location` can name any place for. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. |
+| `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, which `--weather-location` can name any place for. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. With `--voice`, it says the weather now, and today's and tomorrow's, see [Speech](#speech). |
 
 `places.tsv` lists the towns of Germany, Austria and Switzerland with
 50,000 people or more, the world's capitals and its cities of 3 million
@@ -321,6 +325,49 @@ sent.
 
 A stream that no capture takes is refused with HTTP 403, and text
 messages close the WebSocket with code 1003.
+
+## Speech
+
+With `--voice`, the service speaks some answers, the weather for now,
+with [Piper](https://github.com/OHF-Voice/piper1-gpl), a neural text to
+speech system that runs on the Pi. `--voice` names a Piper voice, an
+`.onnx` file with its `.onnx.json` beside it, such as one of those
+`python -m piper.download_voices` lists and downloads:
+
+```
+uv run python -m piper.download_voices --download-dir voices en_US-kristin-medium
+```
+
+Voices have the licenses of the recordings they were trained on, see
+each voice's model card: Kristin's and LJ Speech's are public domain,
+Alba's CC BY 4.0, while Lessac's restricts its use.
+
+After the `ShowCard` of an answer to speak, the service sends `Speak`,
+with the text and where its audio is:
+
+```json
+{"speechId": "51ab…", "cardId": "9cf0…", "text": "In Berlin it's 13 degrees and cloudy. Today will be …", "url": "/v1/speech/51ab…", "sampleRate": 22050, "encoding": "LINEAR16", "channels": 1}
+```
+
+`GET` the `url` and play its body, `audio/L16` of 16 bit little-endian
+mono samples at `sampleRate`, as it arrives. The service synthesizes the
+speech a sentence at a time and sends each as soon as it is synthesized,
+so the first is heard while the next are synthesized, and the body ends
+after the last. On a Raspberry Pi 4 a medium voice synthesizes about twice
+as fast as it speaks: the first sentence of the weather arrives about 1.9
+seconds after it was asked for, where the whole of it takes 5. A speech
+synthesized already is sent at once, so a client that comes late, or
+another, plays it all.
+
+A capture starting, the card dismissed or cleared, or another card shown
+stops the speech: the service sends `StopSpeaking`, the body ends, and
+the `url` answers `404`. Stop playing then, also what arrived already. A
+capture starts only after the speech has stopped, so the microphone does
+not hear it.
+
+Loading a voice takes some 9 seconds on a Pi 4, so the service loads it
+alongside the model. A question asked before it is loaded waits for it to
+be spoken.
 
 ## Wi-Fi
 
@@ -492,6 +539,13 @@ touchscreen without a keyboard needs, and wait while the service joins
 it. The sheet opens by itself when no network is saved. See
 `web/assistant/wifi.js`.
 
+With `--voice`, it speaks the answers the service speaks, such as the
+weather, as their audio arrives, on Web Audio's audio thread, see
+`web/assistant/speaker.js`, and stops when listening starts, when the card
+goes, or on `StopSpeaking`. Browsers only play sound after the user taps,
+so an answer asked for by another client before the page was tapped is
+not heard.
+
 Asked to play a song, it shows the song's title with notes that dance
 while it plays and a rainbow that fills as it goes, plays it live with a
 synthesizer on Web Audio's audio thread, an AudioWorklet, and dismisses
@@ -514,7 +568,8 @@ Pi section. `--lm-weight`, `--word-bonus` and `--unk-penalty` set how the
 LM counts in the beam search, by default as in `stream.py` and `eval.py`;
 `tune_lm.py` finds the best for a model and an LM, see the README's
 Language model section. `--audio-input client` takes the audio from the client
-instead of the microphone, and `--mic-device` picks the microphone. The
+instead of the microphone, and `--mic-device` picks the microphone.
+`--voice` speaks answers, see [Speech](#speech). The
 service listens on port 8080 of `127.0.0.1`, so only the device itself
 can reach it, unless `--host` says otherwise. The API has no
 authentication, so only open it to networks you trust.

@@ -156,6 +156,8 @@ function connectEvents() {
     }
   });
   on("Audio.StopAudioStream", () => stopAudio());
+  on("Speech.Speak", (speech) => speak(speech));
+  on("Speech.StopSpeaking", ({ speechId }) => stopSpeaking(speechId));
 }
 
 // Cards.
@@ -310,6 +312,9 @@ function hideCard() {
   if (data.type === "SongCard") {
     stopSong();
   }
+  if (speaking && speaking.cardId === data.id) {
+    stopSpeaking();
+  }
   ui.asked.hidden = true;
   document.body.classList.remove("has-card");
   // It fades where it is, but out of the stage's layout, so a card that
@@ -378,8 +383,9 @@ function prepareSound() {
   try {
     tones ??= new AudioContext();
     loadSynth().catch(() => {});
+    loadSpeaker().catch(() => {});
   } catch {
-    // Without Web Audio there are no tones or songs.
+    // Without Web Audio there are no tones, songs or speech.
   }
 }
 
@@ -388,7 +394,7 @@ function prepareSound() {
 function idleTones() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (song || keyboard || tones.state !== "running") {
+    if (song || keyboard || speaking || tones.state !== "running") {
       return;
     }
     suspending = tones.suspend().catch(() => {}).finally(() => {
@@ -558,6 +564,109 @@ function stopSong() {
     node.port.postMessage("stop");
     node.disconnect();
   }
+}
+
+// Speech: the service speaks some answers, such as the weather, streaming
+// each sentence as soon as it is synthesized. The speaker in speaker.js plays
+// it on the tones' context as it arrives. A capture starting, or the card
+// going, stops it.
+
+// Below full scale, as the voice is normalized to it, so a chime with it
+// does not clip.
+const SPEECH_VOLUME = 0.8;
+// How long the speaker fades out when stopped, as in speaker.js.
+const SPEECH_FADE = 0.02;
+let speaking = null; // The speech playing: its ids, request and node.
+let speaker = null; // The tones' context loading speaker.js.
+
+function loadSpeaker() {
+  speaker ??= tones.audioWorklet.addModule("speaker.js").catch((error) => {
+    speaker = null;
+    throw error;
+  });
+  return speaker;
+}
+
+async function speak({ speechId, cardId, url, sampleRate }) {
+  stopSpeaking();
+  if (!tones) {
+    return;
+  }
+  const playing = { id: speechId, cardId, request: new AbortController(), node: null };
+  speaking = playing;
+  try {
+    const [response] = await Promise.all([fetch(url, { signal: playing.request.signal }), loadSpeaker()]);
+    if (!response.ok) {
+      throw new Error(`${url}: ${response.status}`);
+    }
+    await wakeTones();
+    if (tones.state !== "running") {
+      // Before a tap allows sound, it does not resume, as for songs.
+      await Promise.race([tones.resume(), new Promise((resolve) => setTimeout(resolve, 1000))]);
+      if (tones.state !== "running") {
+        throw new Error("Sound is not allowed before a tap");
+      }
+    }
+    if (speaking !== playing) {
+      return; // Stopped while starting.
+    }
+    const node = new AudioWorkletNode(tones, "speaker", {
+      numberOfInputs: 0,
+      outputChannelCount: [1],
+      processorOptions: { sampleRate, volume: SPEECH_VOLUME },
+    });
+    node.port.onmessage = ({ data }) => {
+      if (data === "ended" && speaking === playing) {
+        speaking = null;
+        node.disconnect();
+        idleTones();
+      }
+    };
+    node.connect(tones.destination);
+    playing.node = node;
+    // The samples as they come, which can split one between two reads.
+    const reader = response.body.getReader();
+    let odd = null;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done || speaking !== playing) {
+        break;
+      }
+      const bytes = odd ? new Uint8Array(odd.length + value.length) : new Uint8Array(value.length);
+      if (odd) {
+        bytes.set(odd);
+      }
+      bytes.set(value, odd ? odd.length : 0);
+      const even = bytes.length & ~1;
+      odd = even < bytes.length ? bytes.slice(even) : null;
+      const samples = bytes.buffer.slice(0, even);
+      node.port.postMessage(samples, [samples]);
+    }
+    node.port.postMessage("end");
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      console.error("Could not speak:", error);
+    }
+    if (speaking === playing) {
+      stopSpeaking();
+    }
+  }
+}
+
+// Stops the speech playing, or only the one with the id.
+function stopSpeaking(id) {
+  if (!speaking || (id && speaking.id !== id)) {
+    return;
+  }
+  const { request, node } = speaking;
+  speaking = null;
+  request.abort();
+  if (node) {
+    node.port.onmessage = null;
+    node.port.postMessage("stop");
+    setTimeout(() => node.disconnect(), (SPEECH_FADE + 0.05) * 1000);
+  }
+  idleTones();
 }
 
 function isCommands(id) {
@@ -770,6 +879,8 @@ async function startCapture(initiator) {
   try {
     // Chime before listening, so the microphone opening never dulls the
     // tone, which is the cue to speak, and the microphone misses it.
+    // Speech stops for listening, so the microphone does not hear it.
+    stopSpeaking();
     if (!startingCommands) {
       // The song stops for the question, so it is neither heard nor talked over.
       stopSong();

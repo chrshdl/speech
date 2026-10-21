@@ -11,7 +11,9 @@
 //
 // A JSON file with a processor runs that one instead, such as the
 // keyboard: {"processor": "keyboard", "options": {...}, "messages": [[frame,
-// data], ...]}, sending each message before the block at its frame.
+// data], ...]}, sending each message before the block at its frame, and
+// with "module", from another file of web/assistant, such as speaker.js. A
+// message {"int16": [...]} is sent as an ArrayBuffer of those samples.
 import fs from "node:fs";
 import path from "node:path";
 
@@ -35,11 +37,11 @@ Object.assign(globalThis, {
     processors.set(name, Processor);
   },
 });
-const synth = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "web", "assistant", "synth.js");
-await import(new URL(`file://${synth}`));
-
 const data = JSON.parse(fs.readFileSync(scoreFile, "utf8"));
-const { processor = "song", options = data, messages = [] } = data.processor ? data : {};
+const { processor = "song", options = data, messages = [], module = "synth.js" } = data.processor ? data : {};
+const file = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "web", "assistant", module);
+await import(new URL(`file://${file}`));
+
 const Processor = processors.get(processor);
 const song = new Processor({ processorOptions: options });
 const samples = new Float32Array(2 * frames);
@@ -49,7 +51,8 @@ while (frame < frames) {
     song.port.onmessage({ data: "stop" });
   }
   while (messages.length && messages[0][0] <= frame) {
-    song.port.onmessage({ data: messages.shift()[1] });
+    const message = messages.shift()[1];
+    song.port.onmessage({ data: message.int16 ? new Int16Array(message.int16).buffer : message });
   }
   const out = [new Float32Array(BLOCK), new Float32Array(BLOCK)];
   const more = song.process([], [out]);

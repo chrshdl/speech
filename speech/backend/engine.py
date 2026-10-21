@@ -28,8 +28,10 @@ from speech.backend.messages import (
     Message,
     NoticeCard,
     ShowCard,
+    Speak,
     StartAudioStream,
     StopAudioStream,
+    StopSpeaking,
     TranscriptCard,
     TranscriptUpdated,
 )
@@ -160,6 +162,43 @@ class Capture:
     task: asyncio.Task | None = None
 
 
+@dataclasses.dataclass
+class Speech:
+    """An answer spoken, which clients stream as it is synthesized."""
+
+    id: str
+    # The card it speaks for.
+    card_id: str
+    text: str
+    # The audio of each sentence synthesized so far.
+    sentences: list[bytes] = dataclasses.field(default_factory=list)
+    # Whether every sentence is synthesized, and whether it was stopped.
+    synthesized: bool = False
+    stopped: bool = False
+    # Set, and replaced, at each change.
+    changed: asyncio.Event = dataclasses.field(default_factory=asyncio.Event)
+    task: asyncio.Task | None = None
+
+    async def audio(self):
+        """
+        Yields the audio of each sentence, as soon as it is synthesized,
+        until the last, or until the speech is stopped.
+        """
+        sent = 0
+        while not self.stopped:
+            if sent < len(self.sentences):
+                yield self.sentences[sent]
+                sent += 1
+            elif self.synthesized:
+                return
+            else:
+                await self.changed.wait()
+
+    def notify(self):
+        changed, self.changed = self.changed, asyncio.Event()
+        changed.set()
+
+
 class Recognizer:
     def __init__(
         self,
@@ -172,6 +211,7 @@ class Recognizer:
         intents=None,
         handlers=None,
         commands=None,
+        voice=None,
     ):
         """
         Arguments:
@@ -195,6 +235,10 @@ class Recognizer:
                 releases it.
             commands (optional): Recognizes the commands of a COMMANDS
                 capture, as intents does the intents.
+            voice (optional): Speaks the answers whose handler has a
+                speech(card) that returns what to say, such as a
+                voice.Voice. Its sample_rate is the audio's, and its
+                sentences(text) yields each sentence's 16 bit samples.
         """
         self.new_transcriber = new_transcriber
         self._sample_rate = sample_rate
@@ -205,6 +249,7 @@ class Recognizer:
         self.intents = intents
         self.handlers = handlers or {}
         self.commands = commands
+        self.voice = voice
         self.bus = EventBus()
         self.state = DialogState.IDLE
         self.capture = None
@@ -213,6 +258,8 @@ class Recognizer:
         self.card_timer = None
         # A card the client dismissed, which later updates must not show.
         self.dismissed = None
+        # The answer spoken last, until it is stopped.
+        self.speech = None
 
     @property
     def sample_rate(self):
@@ -234,6 +281,8 @@ class Recognizer:
             raise Busy(f"Cannot start a capture while {self.state}.")
         if initiator == Initiator.COMMANDS and self.commands is None:
             raise Unsupported("This service recognizes no commands.")
+        # Neither talked over nor heard by the microphone.
+        self._stop_speaking()
         capture = Capture(
             id=uuid.uuid4().hex,
             initiator=initiator,
@@ -328,6 +377,7 @@ class Recognizer:
         log.info("Answering %s for %s", name, card_id)
         card = await self._card(name, card_id, {})
         self._show(card)
+        self._speak(name, card)
         if not getattr(card, "UNTIL_DISMISSED", False):
             self._start_card_timer(self.settings.answer_card_timeout)
         return card
@@ -339,6 +389,8 @@ class Recognizer:
         self._cancel_card_timer()
         self.card = None
         self.dismissed = card_id
+        if self.speech is not None and self.speech.card_id == card_id:
+            self._stop_speaking()
 
     def shutdown(self):
         """
@@ -346,6 +398,8 @@ class Recognizer:
         whose audio stream then closes, so no connection keeps a server
         from stopping.
         """
+        # Its audio stream ends, too.
+        self._stop_speaking()
         self.bus.close()
         if self.capture is not None:
             self.capture.audio.put_nowait(_STOP)
@@ -357,6 +411,7 @@ class Recognizer:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.capture.task
         self._cancel_card_timer()
+        self._stop_speaking()
         self.bus.close()
         for handler in self.handlers.values():
             await handler.close()
@@ -525,8 +580,10 @@ class Recognizer:
         self.bus.publish(
             CaptureFinished(dialog_request_id=capture.id, text=text, reason=reason)
         )
-        card, timeout = await self._answer(capture, text, reason)
+        card, timeout, intent = await self._answer(capture, text, reason)
         self._show(card)
+        if intent is not None:
+            self._speak(intent, card)
         # A card such as a game's stays until the client dismisses it.
         if not getattr(card, "UNTIL_DISMISSED", False):
             self._start_card_timer(timeout)
@@ -535,9 +592,9 @@ class Recognizer:
 
     async def _answer(self, capture, text, reason):
         """
-        Returns the card to show at the end of the capture, and how long to
-        show it: the answer to the intent the capture asks for, or else
-        the final transcript.
+        Returns the card to show at the end of the capture, how long to
+        show it, and the intent it answers: the answer to the intent the
+        capture asks for, or else the final transcript, for no intent.
         """
         match = None
         if text and self.intents is not None and reason in _ANSWERABLE:
@@ -552,7 +609,8 @@ class Recognizer:
                     match.intent.name,
                     match.score,
                 )
-            return self._final_card(capture, text, reason), self.settings.card_timeout
+            card = self._final_card(capture, text, reason)
+            return card, self.settings.card_timeout, None
         name = match.intent.name
         log.info(
             "Capture %s asked for %s %s, score %.2f",
@@ -570,7 +628,7 @@ class Recognizer:
             )
         )
         card = await self._card(name, capture.id, match.slots)
-        return card, self.settings.answer_card_timeout
+        return card, self.settings.answer_card_timeout, name
 
     async def _card(self, name, card_id, slots):
         """
@@ -589,6 +647,59 @@ class Recognizer:
                 title="Sorry, I can't answer that right now",
                 text="Please try again later.",
             )
+
+    def _speak(self, name, card):
+        """
+        Speaks the card that answers the intent by name, if there is a voice
+        and its handler says what to say for it.
+        """
+        say = getattr(self.handlers.get(name), "speech", None)
+        text = say(card) if self.voice is not None and say is not None else None
+        if not text:
+            return
+        self._stop_speaking()
+        speech = Speech(id=uuid.uuid4().hex, card_id=card.id, text=text)
+        self.speech = speech
+        log.info("Speaking %s for %s: %r", speech.id, card.id, text)
+        speech.task = asyncio.create_task(self._synthesize(speech))
+        self.bus.publish(
+            Speak(
+                speech_id=speech.id,
+                card_id=card.id,
+                text=text,
+                url=f"/v1/speech/{speech.id}",
+                sample_rate=self.voice.sample_rate,
+            )
+        )
+
+    async def _synthesize(self, speech):
+        """Synthesizes the speech a sentence at a time, until stopped."""
+        sentences = self.voice.sentences(speech.text)
+        try:
+            while not speech.stopped:
+                audio = await asyncio.to_thread(next, sentences, None)
+                if audio is None:
+                    break
+                speech.sentences.append(audio)
+                speech.notify()
+        except Exception:
+            log.exception("Speech %s failed", speech.id)
+        finally:
+            speech.synthesized = True
+            speech.notify()
+
+    def _stop_speaking(self):
+        """
+        Stops the speech, also on clients still playing it after it was all
+        synthesized, which end its audio stream.
+        """
+        speech = self.speech
+        if speech is None:
+            return
+        self.speech = None
+        speech.stopped = True
+        speech.notify()
+        self.bus.publish(StopSpeaking(speech_id=speech.id))
 
     def _transcript_card(self, capture, text, final):
         title = "You said" if final else "Listening…"
@@ -610,6 +721,8 @@ class Recognizer:
         if card.id == self.dismissed:
             return
         self._cancel_card_timer()
+        if self.speech is not None and self.speech.card_id != card.id:
+            self._stop_speaking()
         self.card = card
         self.bus.publish(ShowCard(card=card))
 
@@ -623,6 +736,8 @@ class Recognizer:
             if self.card is not None and self.card.id == card_id:
                 self.card = None
                 self.card_timer = None
+                if self.speech is not None and self.speech.card_id == card_id:
+                    self._stop_speaking()
                 self.bus.publish(ClearCard(card_id=card_id))
 
         self.card_timer = asyncio.create_task(clear())

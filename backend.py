@@ -6,11 +6,12 @@ import argparse
 import asyncio
 import logging
 import os
+import threading
 
 import uvicorn
 
 from speech import streaming
-from speech.backend import brightness, game, keyboard, songs, weather, wifi
+from speech.backend import brightness, game, keyboard, songs, voice, weather, wifi
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind
@@ -37,6 +38,12 @@ def main(args):
     if args.backlight:
         state = os.path.join(args.state_dir, "brightness") if args.state_dir else None
         screen = brightness.Brightness(args.backlight, state)
+    speaker = None
+    if args.voice:
+        speaker = voice.Voice(args.voice)
+        # Alongside the model, rather than after it, as it takes as long. A
+        # question asked before it is loaded waits for it to be spoken.
+        threading.Thread(target=speaker.load, daemon=True).start()
     new_transcriber, sample_rate, intents, commands = load(args, jukebox, screen)
     recognizer = Recognizer(
         new_transcriber,
@@ -54,6 +61,7 @@ def main(args):
             brightness.INTENT.name: screen,
         },
         commands=commands,
+        voice=speaker,
     )
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
@@ -202,6 +210,12 @@ def make_parser():
         "--weather-location",
         default="Berlin",
         help="The place to answer questions for the weather for.",
+    )
+    parser.add_argument(
+        "--voice",
+        help="Speak answers, such as the weather, with this Piper voice, an .onnx "
+        "file with its .onnx.json beside it, see `python -m piper.download_voices`. "
+        "The client plays the speech.",
     )
     parser.add_argument(
         "--songs",

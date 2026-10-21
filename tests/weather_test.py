@@ -5,7 +5,7 @@ import httpx
 import pytest
 
 from speech.backend import weather
-from speech.backend.messages import WeatherCondition
+from speech.backend.messages import NoticeCard, WeatherCondition
 from speech.intents import IntentRecognizer
 
 PLACE = {"name": "Berlin", "latitude": 52.52, "longitude": 13.41, "country_code": "DE"}
@@ -92,6 +92,42 @@ def test_card():
     assert requests[0].url.params["name"] == "somewhere"
     assert requests[1].url.params["latitude"] == "52.52"
     assert second.id == "id2"
+
+
+def test_summary():
+    async def run():
+        service = weather.Weather("Berlin", client([]))
+        card = await service.card("id")
+        await service.close()
+        return service, card
+
+    service, card = asyncio.run(run())
+    # The first sentence is the shortest, as it is heard soonest.
+    assert service.speech(card) == (
+        "In Berlin it's 15 degrees and partly cloudy. "
+        "Today will be sunny, with a high of 17 and a low of 11 degrees. "
+        "Tomorrow will be snowy, with a high of 13 and a low of 8 degrees."
+    )
+    clear = card.model_copy(update={"condition": WeatherCondition.CLEAR})
+    assert "it's 15 degrees and clear." in weather.summary(clear)
+    sunny = clear.model_copy(update={"is_day": True})
+    assert "it's 15 degrees and sunny." in weather.summary(sunny)
+    notice = NoticeCard(id="id", title="Sorry", text="I couldn't find it.")
+    assert service.speech(notice) is None
+
+
+@pytest.mark.parametrize(
+    ("value", "said"),
+    [
+        (12.4, "12 degrees"),
+        (1.2, "1 degree"),
+        (-0.4, "0 degrees"),
+        (-1.0, "minus 1 degree"),
+        (-2.6, "minus 3 degrees"),
+    ],
+)
+def test_degrees_as_said(value, said):
+    assert weather._degrees(value) == said
 
 
 def test_unknown_place():

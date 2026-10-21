@@ -1,7 +1,7 @@
 """
 Answers questions for the weather with a card of the current weather and
 the forecast, from Open-Meteo (https://open-meteo.com), which needs no
-API key.
+API key, and says it in a few sentences.
 """
 
 import dataclasses
@@ -169,6 +169,55 @@ def day_condition(hours):
     return WeatherCondition.FOG if fog > len(hours) / 2 else WeatherCondition.CLOUDY
 
 
+# The weather now, after "it's 12 degrees", by day and by night.
+NOW = {
+    WeatherCondition.CLEAR: ("and sunny", "and clear"),
+    WeatherCondition.PARTLY_CLOUDY: ("and partly cloudy",) * 2,
+    WeatherCondition.CLOUDY: ("and cloudy",) * 2,
+    WeatherCondition.FOG: ("and foggy",) * 2,
+    WeatherCondition.DRIZZLE: ("and drizzling",) * 2,
+    WeatherCondition.RAIN: ("and raining",) * 2,
+    WeatherCondition.SNOW: ("and snowing",) * 2,
+    WeatherCondition.THUNDERSTORM: ("with a thunderstorm",) * 2,
+}
+# A day's weather, after "today will be".
+DAY = {
+    WeatherCondition.CLEAR: "sunny",
+    WeatherCondition.PARTLY_CLOUDY: "partly cloudy",
+    WeatherCondition.CLOUDY: "cloudy",
+    WeatherCondition.FOG: "foggy",
+    WeatherCondition.DRIZZLE: "a little rainy",
+    WeatherCondition.RAIN: "rainy",
+    WeatherCondition.SNOW: "snowy",
+    WeatherCondition.THUNDERSTORM: "stormy",
+}
+
+
+def _degrees(value, unit=True):
+    """A temperature as it is said, such as "minus 3 degrees"."""
+    degrees = round(value) or 0  # Not "-0".
+    said = f"minus {-degrees}" if degrees < 0 else str(degrees)
+    if unit:
+        said += " degree" if abs(degrees) == 1 else " degrees"
+    return said
+
+
+def summary(card):
+    """
+    The weather of a WeatherCard in a few short sentences, to be said: the
+    weather now, and today's and tomorrow's. The first is the shortest, so
+    it is heard soonest.
+    """
+    now = NOW[card.condition][0 if card.is_day else 1]
+    sentences = [f"In {card.location} it's {_degrees(card.temperature)} {now}."]
+    for name, day in zip(("Today", "Tomorrow"), card.days):
+        sentences.append(
+            f"{name} will be {DAY[day.condition]}, with a high of "
+            f"{_degrees(day.high, unit=False)} and a low of {_degrees(day.low)}."
+        )
+    return " ".join(sentences)
+
+
 class Weather:
     def __init__(self, location, client=None):
         """
@@ -197,6 +246,10 @@ class Weather:
                 text=f"I couldn't find {city or self.location}.",
             )
         return await self._forecast(card_id, place)
+
+    def speech(self, card):
+        """What to say for a card of card(): the summary of the weather."""
+        return summary(card) if isinstance(card, WeatherCard) else None
 
     async def place(self, name):
         """
