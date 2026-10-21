@@ -700,13 +700,15 @@ function normalized(wave, level = 1) {
   return wave;
 }
 
-const pcmWaves = new Map();
+// The stand-ins, made when this module loads, which the page does before
+// anything plays. Made on a note's first play instead, bells() alone took
+// a quarter of a second of the audio thread on a Raspberry Pi 4, and the
+// first key pressed on the keyboard was not heard.
+const pcmWaves = new Map(
+  Object.entries(PCM_WAVES).map(([number, { root, make }]) => [Number(number), { ...make(), root }]),
+);
 function pcmWave(number) {
-  if (!pcmWaves.has(number)) {
-    const stand = PCM_WAVES[number];
-    pcmWaves.set(number, stand ? { ...stand.make(), root: stand.root } : null);
-  }
-  return pcmWaves.get(number);
+  return pcmWaves.get(number) ?? null;
 }
 
 // The rate of an LFO in Hz: 5 Hz at 75, measured, doubling every 8 as the
