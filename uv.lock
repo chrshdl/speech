@@ -1592,7 +1592,6 @@ dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "rapidfuzz" },
-    { name = "scipy" },
     { name = "sounddevice" },
     { name = "soundfile" },
     { name = "tqdm" },
@@ -1609,6 +1608,7 @@ dev = [
 train = [
     { name = "onnx" },
     { name = "pyarrow" },
+    { name = "scipy" },
     { name = "tensorboard" },
     { name = "torch" },
     { name = "torchaudio" },
@@ -1621,7 +1621,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "onnxruntime", specifier = ">=1.31.0" },
     { name = "rapidfuzz", specifier = ">=3.14.6" },
-    { name = "scipy", specifier = ">=1.18.1" },
     { name = "sounddevice", specifier = ">=0.5.6" },
     { name = "soundfile", specifier = ">=0.14.0" },
     { name = "tqdm", specifier = ">=4.70.1" },
@@ -1638,6 +1637,7 @@ dev = [
 train = [
     { name = "onnx", specifier = ">=1.23.2" },
     { name = "pyarrow", specifier = ">=26.0.0" },
+    { name = "scipy", specifier = ">=1.18.1" },
     { name = "tensorboard", specifier = ">=2.21.0" },
     { name = "torch", specifier = ">=2.14.1" },
     { name = "torchaudio", specifier = ">=2.11.0" },
