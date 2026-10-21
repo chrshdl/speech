@@ -2,7 +2,8 @@
   "name": "Fantasia",
   "source": "Roland D-50 factory patch I-11, PN-D50-00, with the changes below",
   "changes": [
-    "Upper partial 2, the soft octave below the key, fades from >A#1 (tva_bias_point 65) rather than >A#2 (77): played here, it was as loud as partial 1 up to C3, which sounded too low there, while recordings of a D-50 have its octave below the key subtle from C3 up and strong at C2 only, as Eric Persing, who made the patch, describes it: a very soft, subtle lower octave."
+    "Upper partial 2, the soft octave below the key, fades from >A#1 (tva_bias_point 65) rather than >A#2 (77): played here, it was as loud as partial 1 up to C3, which sounded too low there, while recordings of a D-50 have its octave below the key subtle from C3 up and strong at C2 only, as Eric Persing, who made the patch, describes it: a very soft, subtle lower octave.",
+    "Lower partial 2, the airy Spectrum (PCM 69), plays at tva_level 75 rather than 100, 6 dB softer: at full level it sounded too loud on the keyboard."
   ],
   "patch": {
     "key_mode": 1,
@@ -314,7 +315,7 @@
       "tvf_lfo_select": 2,
       "tvf_lfo_depth": 0,
       "tvf_aftertouch": 7,
-      "tva_level": 100,
+      "tva_level": 75,
       "tva_velocity": 80,
       "tva_bias_point": 100,
       "tva_bias_level": 9,
