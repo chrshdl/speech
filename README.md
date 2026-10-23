@@ -423,7 +423,8 @@ Best practices for the corpus:
   of its dev and test sets.
 - **Match the domain.** Text like what will be said matters more than its
   amount. Nineteenth century books suit LibriSpeech but not someone talking
-  into a microphone, so add text from your domain when you have it.
+  into a microphone, so add text from your domain when you have it, see
+  [Choosing the text of the LM](#choosing-the-text-of-the-lm).
 - **Bound the size.** `--max-vocab` keeps the most frequent words and
   `--min-count` drops rare word pairs, to keep the model small and fast to
   load. Check the effect on the dev perplexity and WER.
@@ -503,7 +504,176 @@ set, from 0.787 to 0.687, 13%, against 26% for the 3,750 hour model. The
 small LM from the training transcripts did as well for it, WER 0.685, as the
 acoustic model limited the result.
 
+#### The LM of the voice assistant
+
+The best LM for what the backend hears interpolates a small LM of
+requests to a voice assistant with a large one of general speech. To
+train it, write [SLURP]'s evaluation sets and the text of the requests,
+download the transcripts of [The People's Speech], and train and mix the
+two LMs:
+
+```
+uv run examples/slurp/prepare.py
+uv run examples/slurp/lm_text.py
+uv run examples/peoples_speech/download_text.py --exclude \
+    examples/slurp/data/slurp-devel-text.json examples/slurp/data/slurp-test-text.json
+mkdir -p examples/slurp/models
+uv run python -m speech.models.word_lm examples/slurp/data/slurp-train-text.txt \
+    examples/slurp/data/intents-text.txt examples/slurp/models/lm-requests.npz \
+    --order 3 --dev examples/slurp/data/slurp-devel-text.json
+uv run python -m speech.models.word_lm examples/peoples_speech/data/ps-clean.txt.gz \
+    examples/slurp/models/lm-ps-clean.npz --order 3 --max-vocab 200000 \
+    --min-count 2,2 --memory 6 --dev examples/slurp/data/slurp-devel-text.json
+uv run python -m speech.models.word_lm examples/slurp/models/lm-requests.npz \
+    examples/slurp/models/lm-ps-clean.npz examples/slurp/models/lm-mix.npz \
+    --mix --dev examples/slurp/data/slurp-devel-text.json
+```
+
+- The requests are SLURP's 26,778 training sentences, recorded and
+  synthesized, and the 6,375 samples of the backend's intents with each
+  value of their slots, 218 thousand words. Their trigram LM keeps every
+  n-gram: 6,582 words in 2.4 MB.
+- The clean subset of The People's Speech is 1.5 million segments of
+  public talks, hearings and other recordings, 58 million words. Only the
+  text column of its Parquet files is downloaded, which takes about half
+  an hour. Its trigram LM has 96,813 words, 1.6 million bigrams and 4.6
+  million trigrams, in 117 MB.
+- Both texts leave out every sentence of SLURP's devel and test sets,
+  among them 3,989 of SLURP's training sentences, as its sets share many
+  common requests.
+- `--mix` fits the weights 0.932 and 0.068 on SLURP's devel text, for a
+  perplexity of 56.7 there and 57.7 on its test text, in a 119 MB file.
+
+Each LM below was tuned with `tune_lm.py` on SLURP's 300 close-talk
+devel clips and tested on its 400 close-talk and 400 far-field test clips,
+with the 3,750 hour model of characters after epoch 4:
+
+| LM | Text | File | Test perplexity | Close-talk WER | Far WER |
+|---|---|---|---|---|---|
+| None, greedy | | | | 0.739 | 0.903 |
+| LibriSpeech LM corpus, bigram | 844 million words | 171 MB | 776 | 0.669 | 0.860 |
+| The People's Speech, clean | 58 million words | 117 MB | 629 | 0.654 | 0.856 |
+| The People's Speech, clean and dirty | 267 million words | 254 MB | 569 | 0.685 | 0.909 |
+| The People's Speech, clean, with the requests 30 times as one corpus | 65 million words | 118 MB | 138 | 0.656 | 0.896 |
+| The requests | 218 thousand words | 2.4 MB | 60.9 | 0.633 | 0.830 |
+| The requests and the clean People's Speech, mixed | | 119 MB | 57.7 | 0.634 | 0.828 |
+| The requests and all of The People's Speech, mixed | | 257 MB | 57.1 | 0.631 | 0.827 |
+
+- Text like the requests matters far more than its amount: 218 thousand
+  words of requests did better than 267 million of general speech. The
+  less accurate transcripts of the dirty subset, trained with
+  `--min-count 2,3`, made the LM worse than the clean ones alone, and on
+  the far-field clips worse than none.
+- Trained as one corpus, the requests mostly added counts to the n-grams
+  of general speech: the perplexity fell to 138, but the WER stayed that
+  of the general LM. Mixed, each LM keeps its own estimates.
+- On SLURP the mixture does as well as the requests alone, whose test
+  sentences are phrased like its training ones. But the LM of the
+  requests knows only 6,582 words, and any other word is unknown to it,
+  while the mixture also knows the 96,813 of The People's Speech. The
+  dirty subset adds little to the mixture at twice the size, so the
+  clean one is used.
+
+With the stride 3 model after epoch 2, which the Pi runs, the mixture
+was tuned on the same clips over weights from 0.3 to 0.8 and bonuses
+from 2 to 7, with penalties of 0 and -1:
+
+```
+uv run tune_lm.py examples/commonvoice/models/ctc_streaming_3750h_stride3_epoch2 \
+    examples/slurp/data/slurp-devel-headset.json --lm examples/slurp/models/lm-mix.npz \
+    --weights 0.3,0.4,0.5,0.6,0.7,0.8 --bonuses 2,3,4,5,6,7 --unk-penalties=0,-1 \
+    --last --results docs/lm-tuning-slurp.json --plot docs/lm-tuning-slurp.png
+```
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/lm-tuning-slurp-dark.png">
+  <img alt="The SLURP devel WER of the stride 3 model with the mixture over the LM weight and word bonus as a 3D surface and as a heatmap, at an unknown-word penalty of 0, with a diagonal valley from weight 0.4 and bonus 3 to weight 0.6 and bonus 5" src="docs/lm-tuning-slurp.png">
+</picture>
+
+- The good settings form the same diagonal valley as on LibriSpeech, with
+  a flat floor: α 0.4 and β 3, α 0.5 and β 4, and α 0.6 and β 5 gave a
+  dev WER of 0.608 to 0.609, which 300 clips cannot tell apart. Further
+  along it, α 0.7 and β 6 gave 0.615 and α 0.8 and β 7 0.626.
+- An unknown-word penalty of -1 made each of them worse, by about 0.005.
+- On the test clips, a stronger LM along the valley did slightly better
+  close-talk and worse far-field. α 0.5 and β 4 lie in the middle, and
+  are used.
+
+| LM | `--lm-weight`, `--word-bonus`, `--unk-penalty` | Close-talk WER | Far WER |
+|---|---|---|---|
+| None, greedy | | 0.732 | 0.888 |
+| LibriSpeech LM corpus | 0.3, 2.5, -2, the defaults and the best | 0.668 | 0.855 |
+| The mixture | 0.3, 2.5, -2, the defaults | 0.619 | 0.832 |
+| The mixture | 0.4, 3, 0 | 0.610 | 0.823 |
+| The mixture | 0.5, 4, 0, the best | 0.604 | 0.828 |
+| The mixture | 0.6, 5, 0 | 0.603 | 0.842 |
+
+To use the mixture, give it with its best settings to `backend.py`, or
+the same way to `stream.py` and `eval.py`:
+
+```
+uv run --no-default-groups backend.py best_model-int8.onnx --lm lm-mix.npz \
+    --lm-weight 0.5 --word-bonus 4 --unk-penalty 0
+```
+
+For another acoustic model, tune the settings again with `tune_lm.py`.
+
+#### Choosing the text of the LM
+
+The LM's text does not need to differ from the acoustic model's
+transcripts. The two models learn different things: the acoustic model
+learns which characters the audio holds, and the LM which words follow
+each other. CTC outputs each frame's label apart from the others, given
+the audio, so it does not model word sequences even of the text it
+trained on. The LM from the 100 hour model's own training transcripts
+lowered its WER from 0.787 to 0.685, see above. Text that overlaps the
+transcripts is fine. It just adds nothing that other text of the same
+kind would not.
+
+What sets the WER is how much the text is like what the device hears:
+
+- 218 thousand words of requests to a voice assistant beat 844 million
+  words of books and 267 million of general speech, see
+  [The LM of the voice assistant](#the-lm-of-the-voice-assistant).
+- More text of another kind, or with worse transcripts, can make it
+  worse. Adding the dirty subset of The People's Speech raised the WER.
+- Perplexity guides, but the WER decides. The requests added 30 times to
+  the general text lowered its perplexity from 629 to 138 and left its WER
+  as it was. The mixtures had a lower perplexity than the requests alone
+  and the same WER.
+
+The text the LM must be kept apart from is the text it is measured on.
+Leave every sentence of the dev and test sets out of the LM's text, also
+where the corpus repeats them in its training set, as SLURP does with
+3,989 of its sentences. Otherwise the LM knows the answers, the WER
+looks better than the device will see, and the tuning trusts the LM too
+much.
+
+To build an LM for a low WER:
+
+1. **Get dev and test audio like the device's.** The WER on it decides
+   every choice below. SLURP's requests stand in for now. Recordings
+   from the device itself would be better, see [To do](#to-do).
+2. **Write the text of the domain.** Every phrase the device's intents
+   know, with each value of their slots, such as the cities and the songs,
+   which general text rarely has, and a corpus of similar requests.
+   `examples/slurp/lm_text.py` writes both.
+3. **Add a general LM of speech.** Use accurate transcripts of speech
+   rather than written text. It covers the words the domain text lacks,
+   96,813 against 6,582 here, and hardly changes the WER.
+4. **Train them apart and mix them** with `--mix`, its weights fitted on
+   dev text like the device's. Concatenated into one corpus, the domain
+   text is lost among the general text's counts.
+5. **Tune the weight, bonus and penalty** with `tune_lm.py` for the
+   acoustic model the device runs, on the dev audio, and check them on
+   the test audio, close-talk and far-field.
+6. **Take the smallest LM that does as well.** On SLURP the requests alone,
+   2.4 MB, were within 0.002 WER of the 119 MB mixture. The mixture is
+   worth its size when the device also hears words outside the domain.
+
 [LibriSpeech LM corpus]: https://www.openslr.org/11/
+[SLURP]: https://github.com/pswietojanski/slurp
+[The People's Speech]: https://huggingface.co/datasets/MLCommons/peoples_speech
 
 [Deep Speech 2]: https://arxiv.org/abs/1512.02595
 [DeepSpeech 0.9]: https://github.com/mozilla/DeepSpeech/releases/tag/v0.9.0
@@ -665,6 +835,11 @@ in each example's `README.md`.
 - `examples/speech_commands`: Speech Commands, single words such as "left"
   and "right" said alone, which the Common Voice configs also train on, and
   an evaluation of how a model recognizes them.
+- `examples/slurp`: SLURP, requests to a voice assistant, for evaluating
+  what the device hears and for the text of the voice assistant's LM, see
+  [The LM of the voice assistant](#the-lm-of-the-voice-assistant).
+- `examples/peoples_speech`: the transcripts of The People's Speech, text
+  of general speech for that LM.
 - `examples/olivia`: the wake word "olivia", spotted by a DS-CNN of
   [Hello Edge] and confirmed by the speech model, which starts a capture
   of `backend.py` without a tap.
