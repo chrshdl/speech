@@ -55,10 +55,13 @@ class RevalidatedFiles(StaticFiles):
         return response
 
 
-def create_app(recognizer, microphone=None, wifi=None, songs=None, radio=None):
+def create_app(
+    recognizer, microphone=None, wifi=None, songs=None, radio=None, volume_keys=None
+):
     """
     Returns the service for the recognizer, an engine.Recognizer, which
-    with a microphone, an engine.Microphone, listens to it while running.
+    with a microphone, an engine.Microphone, listens to it while running,
+    and with volume_keys, a volume.Keys, to them.
     With wifi, a wifi.Wifi, the client can join a Wi-Fi network. With
     songs, a songs.Songs, it serves the notes its SongCards play, and with
     radio, a radio.Radio, the audio and images of its RadioCards.
@@ -70,13 +73,15 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None, radio=None):
     @contextlib.asynccontextmanager
     async def lifespan(app):
         recognizer.start()
-        if microphone is not None:
-            microphone.start(asyncio.get_running_loop())
+        for device in (microphone, volume_keys):
+            if device is not None:
+                device.start(asyncio.get_running_loop())
         try:
             yield
         finally:
-            if microphone is not None:
-                microphone.stop()
+            for device in (microphone, volume_keys):
+                if device is not None:
+                    device.stop()
             await recognizer.close()
 
     app = FastAPI(

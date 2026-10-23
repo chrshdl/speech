@@ -54,9 +54,15 @@ def main(args):
         state = os.path.join(args.state_dir, "brightness") if args.state_dir else None
         screen = brightness.Brightness(args.backlight, state)
     speaker_volume = None
+    # The sound card of the volume control, such as a speakerphone's.
+    card = (args.volume_control or "").rpartition(":")[0]
     if args.volume_control:
         state = os.path.join(args.state_dir, "volume") if args.state_dir else None
-        speaker_volume = volume.Volume(volume.Mixer(args.volume_control), state)
+        speaker_volume = volume.Volume(
+            volume.Mixer(args.volume_control),
+            state,
+            volume.speakerphone_levels(card) if card else None,
+        )
     station = None
     if shutil.which("ffmpeg"):
         station = radio.Radio()
@@ -96,11 +102,19 @@ def main(args):
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
         microphone = Microphone(recognizer, args.mic_device)
+    # The speakerphone's own + and -, see speech/backend/volume.py.
+    keys = None
+    if speaker_volume is not None and card:
+        keys = volume.Keys(
+            speaker_volume,
+            recognizer.answer,
+            lambda: volume.speakerphone_keys(card),
+        )
     wifi_control = None
     if args.wifi_interface:
         wifi_control = wifi.Wifi(args.wifi_interface, args.wifi_control_dir)
     config = uvicorn.Config(
-        create_app(recognizer, microphone, wifi_control, jukebox, station),
+        create_app(recognizer, microphone, wifi_control, jukebox, station, keys),
         host=args.host,
         port=args.port,
         # A last resort, should a connection still not close.
@@ -349,7 +363,9 @@ def make_parser():
         "--volume-control",
         help='Let the user turn the speaker up and down, as in "volume up" and '
         '"turn it down", with this ALSA mixer control, as "card:control", such '
-        'as "usbaudio:PCM", see `amixer -c usbaudio scontrols`.',
+        'as "usbaudio:PCM", see `amixer -c usbaudio scontrols`. The volume set '
+        "by the card's own keys, such as a USB speakerphone's, shows too, if the "
+        "service's user is in the group input.",
     )
     parser.add_argument(
         "--state-dir",
