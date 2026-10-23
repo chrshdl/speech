@@ -45,6 +45,9 @@ let commands = null; // The id of the capture that hears the game's commands.
 let lastCommands = null; // The last such id, also once that capture finished.
 let startingCommands = false; // Whether such a capture is being started.
 let listening = null; // The id of the capture listening, if any.
+// The id of the last capture of a wake word heard by mistake, which ends
+// without the end chime.
+let mistaken = null;
 let restarts = []; // When listening for commands restarted by itself.
 let wifi = null; // Joining a Wi-Fi network, where the service can, see wifi.js.
 
@@ -130,14 +133,17 @@ function connectEvents() {
       }
       chimed = false;
     } else if (wasListening && state !== "LISTENING") {
-      if (!isCommands(listening)) {
+      if (!isCommands(listening) && listening !== mistaken) {
         playTone(END_TONE);
       }
       listening = null;
     }
     listenForCommands();
   });
-  on("Recognition.CaptureFinished", ({ dialogRequestId, text }) => {
+  on("Recognition.CaptureFinished", ({ dialogRequestId, text, reason }) => {
+    if (reason === "NO_WAKE_WORD") {
+      mistaken = dialogRequestId;
+    }
     if (dialogRequestId === commands) {
       commands = null;
     } else {

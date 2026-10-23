@@ -1004,3 +1004,303 @@ def test_lm_settings_reach_the_decoder(model_path, monkeypatch):
     backend.load(args, songs.Songs([]), None)
     assert seen["args"][2] == "lm.npz"
     assert seen["kwargs"] == {"lm_weight": 0.5, "word_bonus": 4.0, "unk_penalty": 0.0}
+
+
+# The wake word.
+
+LOUD = 5000
+
+
+class FakeDetector:
+    """Hears the wake word in each chunk that starts loud."""
+
+    score = 1.0
+
+    def __init__(self):
+        self.resets = 0
+
+    def push(self, audio):
+        return bool(len(audio)) and audio[0] == LOUD
+
+    def reset(self):
+        self.resets += 1
+
+
+class WakeTranscriber:
+    """
+    Hears each loud stretch of the audio as the next of the words, the
+    first of them the wake word, whose labels, 0 and 1, the output
+    probabilities have after a frame of another label.
+    """
+
+    frame_seconds = 0.03
+
+    def __init__(self, words, says_wake_word=True):
+        self.words = ["olivia", *words]
+        self.said = []
+        self.quiet = 0
+        self.pushed = []
+        self.dropped = None
+        wake = [2, 3, 0, 3, 1] if says_wake_word else [2, 2, 2, 2, 2]
+        self.path = [*wake, 3, 3, 3]
+
+    def push(self, audio, final=False):
+        self.pushed.append(audio.copy())
+        if len(audio) and np.abs(audio).max() > 1000:
+            if self.quiet or not self.said:
+                self.said.append(self.words.pop(0))
+            self.quiet = 0
+        else:
+            self.quiet += len(audio)
+
+    @property
+    def heard_speech(self):
+        return bool(self.said)
+
+    @property
+    def pause_seconds(self):
+        return self.quiet / 16000
+
+    def text(self, final=False):
+        return " ".join(self.said)
+
+    def probs(self):
+        probs = np.full((len(self.path), 4), 0.01, np.float32)
+        probs[np.arange(len(self.path)), self.path] = 0.97
+        return probs
+
+    def drop(self, frames):
+        self.dropped = frames
+        self.said.pop(0)
+
+
+def wake_recognizer(transcriber, **settings):
+    settings = Settings(
+        **({"end_of_speech": 0.2, "wake_word_lookback": 0.5} | settings)
+    )
+    return Recognizer(
+        lambda: transcriber,
+        16000,
+        AudioInputKind.MICROPHONE,
+        settings,
+        wake_word=engine.WakeWord(FakeDetector(), np.array([0, 1]), 3),
+    )
+
+
+def chunk(level):
+    return np.full(CHUNK, level, np.int16)
+
+
+async def say(recognizer, *levels):
+    for level in levels:
+        recognizer.deliver(chunk(level))
+        await asyncio.sleep(0.01)
+
+
+def test_wake_word_starts_a_capture():
+    transcriber = WakeTranscriber(["lights"])
+    recognizer = wake_recognizer(transcriber)
+
+    async def run():
+        async with service(recognizer) as svc:
+            # Quiet, the wake word, then the request and a pause.
+            await say(recognizer, 1, 2, 3, 4, LOUD, 0, 6000, 6000, *[0] * 10)
+            events = await svc.events.until("CaptureFinished")
+            await svc.events.until("DialogStateChanged")
+            # Heard again in new audio only.
+            await say(recognizer, 0)
+            return events
+
+    events = asyncio.run(run())
+    # Announced once the transcript confirms the wake word.
+    assert actions(events)[:2] == ["DialogStateChanged", "ShowCard"]
+    assert events[0]["payload"]["state"] == "LISTENING"
+    assert events[1]["payload"]["card"]["title"] == "Listening…"
+    # The capture starts with the audio before the wake word was heard,
+    # as long as the lookback.
+    lookback = transcriber.pushed[0]
+    assert len(lookback) == 8000
+    np.testing.assert_array_equal(
+        lookback, np.concatenate([chunk(level) for level in (1, 2, 3, 4, LOUD)])
+    )
+    # The transcript starts after the wake word.
+    assert transcriber.dropped == 5
+    finished = events[-1]["payload"]
+    assert finished["reason"] == "END_OF_SPEECH"
+    assert finished["text"] == "lights"
+    assert recognizer.wake_word.detector.resets == 1
+
+
+def test_wake_word_without_a_request_ends_quietly():
+    transcriber = WakeTranscriber([])
+    recognizer = wake_recognizer(transcriber, no_speech_timeout=0.3)
+
+    async def run():
+        async with service(recognizer) as svc:
+            await say(recognizer, LOUD, *[0] * 16)
+            events = await svc.events.until("CaptureFinished")
+            events += await svc.events.until("DialogStateChanged")
+            return events
+
+    events = asyncio.run(run())
+    finished = next(e for e in events if e["action"] == "CaptureFinished")
+    assert finished["payload"]["reason"] == "NO_SPEECH"
+    # The listening card is cleared, without a notice.
+    assert actions(events)[-3:] == [
+        "CaptureFinished",
+        "ClearCard",
+        "DialogStateChanged",
+    ]
+    assert "NoticeCard" not in json.dumps(events)
+
+
+def test_wake_word_heard_by_mistake_ends_quietly():
+    """A capture whose transcript does not say the wake word ends at once."""
+    transcriber = WakeTranscriber(["lights"], says_wake_word=False)
+    recognizer = wake_recognizer(transcriber)
+
+    async def run():
+        async with service(recognizer) as svc:
+            await say(recognizer, LOUD)
+            response = await svc.post(
+                "/v1/recognition/start-capture", {"initiator": "TAP_TO_TALK"}
+            )
+            assert response.status_code == 409
+            await say(recognizer, *[0] * 12)
+            events = await svc.events.until("CaptureFinished")
+            return events + await svc.events.until("DialogStateChanged")
+
+    events = asyncio.run(run())
+    assert transcriber.dropped is None
+    assert actions(events) == [
+        "DialogStateChanged",
+        "ShowCard",
+        "CaptureFinished",
+        "ClearCard",
+        "DialogStateChanged",
+    ]
+    finished = events[2]["payload"]
+    assert finished["reason"] == "NO_WAKE_WORD"
+    assert finished["text"] == ""
+    assert events[-1]["payload"]["state"] == "IDLE"
+
+
+def test_wake_word_only_while_idle(model_path):
+    transcriber = WakeTranscriber(["lights"])
+    recognizer = wake_recognizer(transcriber)
+
+    async def run():
+        async with service(recognizer) as svc:
+            response = await svc.post(
+                "/v1/recognition/start-capture", {"initiator": "WAKE_WORD"}
+            )
+            assert response.status_code == 422
+            start = await svc.start("HOLD_TO_TALK")
+            await say(recognizer, LOUD, 6000)
+            await svc.post("/v1/recognition/stop-capture")
+            events = await svc.events.until("CaptureFinished")
+            return start, events
+
+    start, events = asyncio.run(run())
+    # The wake word said during a capture is part of it.
+    assert events[-1]["payload"]["dialogRequestId"] == start["dialogRequestId"]
+    assert events[-1]["payload"]["text"] == "olivia"
+    with pytest.raises(ValueError, match="microphone"):
+        Recognizer(
+            lambda: transcriber,
+            16000,
+            AudioInputKind.CLIENT,
+            wake_word=engine.WakeWord(FakeDetector(), np.array([0]), 3),
+        )
+
+
+class QuietVad:
+    """Hears speech in loud chunks, and silence in quiet ones."""
+
+    class Stream:
+        def __init__(self):
+            self.silence_seconds = 0.0
+            self.seconds = 0.0
+            # When each loud chunk started.
+            self.loud = []
+
+        def push(self, audio):
+            if len(audio) and np.abs(audio).max() > 1000:
+                self.silence_seconds = 0.0
+                self.loud.append(self.seconds)
+            else:
+                self.silence_seconds += len(audio) / 16000
+            self.seconds += len(audio) / 16000
+
+        def speech_seconds(self, after=0.0):
+            return 0.1 * sum(start >= after for start in self.loud)
+
+    def stream(self, history=False):
+        return self.Stream()
+
+
+class EndlessTranscriber(LoudTranscriber):
+    """Hears no pause ever, as when a model transcribes noise."""
+
+    @property
+    def pause_seconds(self):
+        return 0.0
+
+
+def test_vad_ends_speech():
+    transcriber = EndlessTranscriber(["lights"])
+    recognizer = Recognizer(
+        lambda: transcriber,
+        16000,
+        AudioInputKind.MICROPHONE,
+        Settings(end_of_speech=0.3),
+        vad=QuietVad(),
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            await svc.start("TAP_TO_TALK")
+            await say(recognizer, 6000, 6000, *[0] * 5)
+            return await svc.events.until("CaptureFinished")
+
+    events = asyncio.run(run())
+    assert "EndOfSpeechDetected" in actions(events)
+    assert events[-1]["payload"]["reason"] == "END_OF_SPEECH"
+    assert events[-1]["payload"]["text"] == "lights"
+
+
+class LeftoverTranscriber(WakeTranscriber):
+    """Keeps a letter of the wake word in the transcript, as "olivia e"."""
+
+    def drop(self, frames):
+        self.dropped = frames
+        self.said[0] = "e"
+
+
+def test_letter_of_the_wake_word_is_not_a_request():
+    """
+    With a voice activity detector, a pause after the wake word does not end
+    the capture, also when the transcript kept a letter of it.
+    """
+    transcriber = LeftoverTranscriber(["lights"])
+    recognizer = Recognizer(
+        lambda: transcriber,
+        16000,
+        AudioInputKind.MICROPHONE,
+        Settings(end_of_speech=0.3, wake_word_lookback=0.5, no_speech_timeout=5),
+        wake_word=engine.WakeWord(FakeDetector(), np.array([0, 1]), 3),
+        vad=QuietVad(),
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            # The wake word, a pause of 2 seconds, the request and a pause.
+            await say(recognizer, LOUD, *[0] * 20, 6000, 6000, *[0] * 5)
+            return await svc.events.until("CaptureFinished")
+
+    events = asyncio.run(run())
+    assert events[-1]["payload"]["reason"] == "END_OF_SPEECH"
+    assert events[-1]["payload"]["text"] == "e lights"
+    # The letter alone was never shown.
+    shown = [e["payload"]["card"]["text"] for e in events if e["action"] == "ShowCard"]
+    assert shown == ["", "e lights"]

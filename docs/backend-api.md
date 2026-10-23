@@ -42,6 +42,7 @@ time.
 | `HOLD_TO_TALK` | When the client calls stop-capture, or closes its audio stream, as the button is released |
 | `TAP_TO_TALK` | At the end of speech: a pause of 1 second after the transcript starts. Also with stop-capture. |
 | `COMMANDS` | Only with stop-capture, or when the client closes its audio stream. It listens for short commands, such as "left" and "right" to steer a game, and reports each in a `CommandRecognized` event, see [Commands](#commands). |
+| `WAKE_WORD` | As `TAP_TO_TALK`. The service starts it itself when its microphone hears the wake word, see [Wake word](#wake-word). |
 
 A `HOLD_TO_TALK` or `TAP_TO_TALK` capture ends after 60 seconds, a
 `COMMANDS` capture after 30 minutes, and any when no audio arrives for 5
@@ -71,7 +72,7 @@ All bodies are JSON with camelCase names.
 | `GET /v1/info` | The model, its sample rate, the audio input and the language model |
 | `GET /v1/state` | The dialog state, the capture, and the card shown |
 | `GET /v1/events` | The event stream, see [Events](#events) |
-| `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none |
+| `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
 | `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is not shown |
 | `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
@@ -125,6 +126,7 @@ when there are no events for a while.
 | `END_OF_SPEECH` | A `TAP_TO_TALK` capture heard speech followed by a pause |
 | `STOP_CAPTURE` | The client called stop-capture or closed its audio stream |
 | `NO_SPEECH` | A `TAP_TO_TALK` capture recognized no speech in time |
+| `NO_WAKE_WORD` | The speech model did not confirm the wake word of a `WAKE_WORD` capture, which was heard by mistake. It ends without a card. |
 | `MAX_DURATION` | It reached the longest duration |
 | `AUDIO_TIMEOUT` | No audio arrived in time |
 | `ERROR` | The service failed, see its log |
@@ -304,6 +306,37 @@ clips, decoded whole by `examples/speech_commands/evaluate.py`, both
 recognized 20 of the 24 commands, as the model after two epochs recognized
 21 at -1.5, and took none of the other words for one.
 
+## Wake word
+
+Started with `--wake-word`, a model of `examples/olivia/train.py`, the
+service listens to its microphone for the wake word, "olivia", while
+`IDLE`, and starts a `WAKE_WORD` capture itself when it hears it, as in
+"olivia, what's the weather in hamburg?". It needs the microphone's
+audio, not the client's. With `--vad`, a voice activity detector, it
+listens for the wake word only while someone speaks, and the captures
+that end by themselves end when it hears speech end.
+
+The capture starts with the last 2 seconds of the microphone's audio,
+which hold the wake word and what was said right after it, so a request
+said in one breath with the wake word is heard whole. Its transcript,
+`TranscriptUpdated`, the cards and `CaptureFinished`, start after the
+wake word.
+
+The capture is announced as the wake word is heard, with
+`DialogStateChanged` `LISTENING` and the "Listening…" card, so clients
+chime then. The speech model then confirms the wake word, from 1 second
+of audio after it was heard. A wake word heard by mistake ends the
+capture at once with `NO_WAKE_WORD`, which clears its card and answers
+nothing, so clients can leave out their end chime.
+
+The capture ends as a `TAP_TO_TALK` one does, at the end of speech. If
+nothing is said after the wake word, it ends with `NO_SPEECH` and clears
+its card, without a notice.
+
+See [examples/olivia](../examples/olivia/README.md) for the model, how
+it is trained, and how often it misses the wake word or hears it in
+other speech.
+
 ## Audio streaming
 
 With audio input from the client, start-capture's response and the
@@ -474,6 +507,24 @@ Client                                     Service
   |  <------ CaptureFinished STOP_CAPTURE    |
   |  <------ DialogStateChanged IDLE         |
   | POST card-dismissed {cardId}  -------->  |  after showing the score
+```
+
+The wake word, with the microphone of the service's device:
+
+```
+Client                                     Service
+  |                                          |  "olivia, what's the weather?"
+  |  <------ DialogStateChanged LISTENING    |  the wake word is heard
+  |  <------ ShowCard "Listening…"           |
+  |                                          |  and confirmed a second later
+  |  <------ TranscriptUpdated               |  "what's the weather"
+  |  <------ ShowCard (updated)              |
+  |  <------ EndOfSpeechDetected             |  a pause
+  |  <------ DialogStateChanged THINKING     |
+  |  <------ CaptureFinished {text, reason}  |
+  |  <------ IntentRecognized GetWeather     |
+  |  <------ ShowCard WeatherCard            |
+  |  <------ DialogStateChanged IDLE         |
 ```
 
 Hold to talk, with audio from the client:

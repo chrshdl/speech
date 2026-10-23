@@ -66,6 +66,7 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
+        recognizer.start()
         if microphone is not None:
             microphone.start(asyncio.get_running_loop())
         try:
@@ -123,7 +124,10 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
         status_code=status.HTTP_202_ACCEPTED,
         responses={
             409: {"description": "Not IDLE"},
-            422: {"description": "COMMANDS, and the service recognizes none"},
+            422: {
+                "description": "COMMANDS, and the service recognizes none, or "
+                "WAKE_WORD, which only the wake word starts"
+            },
         },
     )
     async def start_capture(request: StartCaptureRequest) -> StartCaptureResponse:

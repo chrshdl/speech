@@ -103,6 +103,10 @@ class Transcriber:
         """
         frames = self.specgram.push(audio)
         probs, self.state = self.model.stream(frames, self.state, final)
+        self._decode(probs)
+
+    def _decode(self, probs):
+        """Adds the output probabilities of the next frames to the transcript."""
         self.frames.append(probs)
 
         # Greedy CTC decoding: merge repeats, then drop blanks. It also
@@ -161,6 +165,16 @@ class Transcriber:
         line = self.text(final=True).strip()
         self.clear()
         return line
+
+    def drop(self, frames):
+        """
+        Drops the transcript's first frames, such as those of a wake word,
+        keeping the stream going, as if the transcript started after them.
+        """
+        kept = self.probs()[frames:]
+        self.clear()
+        self.prev = self.model.blank
+        self._decode(kept)
 
     def clear(self):
         """Starts a new transcript, keeping the stream going."""
