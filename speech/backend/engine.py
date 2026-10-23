@@ -182,6 +182,11 @@ class WakeWord:
     # Below it, the wake word was heard by mistake, and the capture ends
     # quietly. See examples/olivia/README.md.
     threshold: float = wake_word_module.ASR_THRESHOLD
+    # Hears the wake word instead of the detector while a card plays on,
+    # such as the radio, as the detector does, if given, such as a
+    # speech.wake_word.SpeechModelDetector behind a GatedDetector: a
+    # speakerphone's echo canceller distorts a voice over what it plays.
+    playing_detector: object | None = None
 
 
 @dataclasses.dataclass
@@ -535,18 +540,28 @@ class Recognizer:
 
     async def _spot_wake_word(self):
         """Starts a WAKE_WORD capture when the audio while IDLE says the wake word."""
-        detector = self.wake_word.detector
+        wake = self.wake_word
+        detector = wake.detector
         while True:
             chunks = [await self.wake_audio.get()]
             while not self.wake_audio.empty():
                 chunks.append(self.wake_audio.get_nowait())
-            if self.wake_reset:
-                # The audio went to a capture since, so the window has a gap.
-                detector.reset()
+            hearing = wake.detector
+            if self.playing is not None and wake.playing_detector is not None:
+                hearing = wake.playing_detector
+            if self.wake_reset or hearing is not detector:
+                # The audio went to a capture, or the other detector, since,
+                # so the window has a gap.
+                hearing.reset()
                 self.wake_reset = False
+            detector = hearing
             heard = await asyncio.to_thread(detector.push, np.concatenate(chunks))
             if heard and self.state == DialogState.IDLE and self.capture is None:
-                log.info("Heard the wake word, score %.3f", detector.score)
+                log.info(
+                    "Heard the wake word, score %.3f%s",
+                    detector.score,
+                    ", while playing" if detector is wake.playing_detector else "",
+                )
                 self._start_capture(Initiator.WAKE_WORD, self.lookback.read())
 
     def _confirm_wake_word(self, capture):

@@ -52,6 +52,16 @@ HANGOVER_SECONDS = 1.0
 LOOKBACK_SECONDS = 2.0
 CONFIRM_SECONDS = 1.0
 ASR_THRESHOLD = -2.0
+# The SpeechModelDetector aligns the wake word to the speech model's output
+# of the last SPOT_WINDOW_SECONDS every SPOT_HOP_SECONDS, and hears it at a
+# score of SPOT_THRESHOLD, stricter than the confirmation, as nothing
+# confirms it but the capture's own confirmation by the same model. With
+# the stride 3 model after epoch 4, -1.25 missed 10% of the recorded test
+# clips, none of 15 said over the radio playing on a Jabra SPEAK 510, and
+# heard it 3 times in the 5.4 hours of LibriSpeech's dev-clean.
+SPOT_WINDOW_SECONDS = 1.5
+SPOT_HOP_SECONDS = 0.2
+SPOT_THRESHOLD = -1.25
 
 
 def mel_filterbank(sample_rate, fft_size, bands=MEL_BANDS, low=LOW_HZ, high=HIGH_HZ):
@@ -287,6 +297,7 @@ class GatedDetector:
         hop_seconds=HOP_SECONDS,
         lead_seconds=LEAD_SECONDS,
         hangover_seconds=HANGOVER_SECONDS,
+        new_detector=None,
     ):
         """
         Hears the wake word as a Detector does, but runs it only while a
@@ -300,13 +311,18 @@ class GatedDetector:
         the decisions on its end.
 
         Arguments:
-            model (WakeWordModel): The wake word model.
+            model (WakeWordModel): The wake word model, or with new_detector,
+                anything with the audio's sample_rate.
             vad (speech.vad.VadModel): The voice activity detector.
             threshold, smoothing, hop_seconds: As the Detector's.
+            new_detector (optional): Creates the detector to run instead of a
+                Detector of the model, such as a SpeechModelDetector.
         """
         self.model = model
         self.vad = vad
-        self.new_detector = lambda: Detector(model, threshold, smoothing, hop_seconds)
+        self.new_detector = new_detector or (
+            lambda: Detector(model, threshold, smoothing, hop_seconds)
+        )
         self.lead = RingBuffer(round(lead_seconds * model.sample_rate))
         self.hangover = round(hangover_seconds * model.sample_rate)
         self.reset()
@@ -346,6 +362,77 @@ class GatedDetector:
                 if self.left <= 0:
                     self.detector = None
         return heard
+
+
+class SpeechModelDetector:
+    def __init__(
+        self,
+        transcriber,
+        labels,
+        blank,
+        threshold=SPOT_THRESHOLD,
+        window_seconds=SPOT_WINDOW_SECONDS,
+        hop_seconds=SPOT_HOP_SECONDS,
+    ):
+        """
+        Hears the wake word with the speech model, as a Detector does with
+        the wake word model, for where that misses it: a speakerphone's echo
+        canceller, such as a Jabra SPEAK 510's, removes what it plays, such
+        as the radio, from the microphone's audio, and with it much of a
+        voice over it, which the wake word model then hardly ever hears as
+        the wake word, while the speech model, trained on masked
+        spectrograms, still does. Every hop_seconds of audio, the wake word
+        is aligned to the model's output of the last window_seconds, see
+        align, and heard at a score of threshold. It costs as much compute
+        as transcribing, so run it behind a GatedDetector.
+
+        Arguments:
+            transcriber: A new speech.streaming.Transcriber, whose
+                push(audio) adds audio, whose probs() are its output so
+                far, whose frame_seconds is the time of a frame, and whose
+                model's sample_rate is the audio's.
+            labels (ndarray): The wake word in the model's labels.
+            blank (int): The model's blank label.
+        """
+        self.transcriber = transcriber
+        self.labels = labels
+        self.blank = blank
+        self.threshold = threshold
+        self.window = round(window_seconds / transcriber.frame_seconds)
+        self.hop = round(hop_seconds * transcriber.model.sample_rate)
+        # The decisions skipped after hearing it, until the window holds
+        # new audio, so the same word is heard once.
+        self.blocked = math.ceil(window_seconds / hop_seconds)
+        self.pushed = 0
+        self.skip = 0
+        # The latest alignment's score, the Detector's probability.
+        self.score = float("-inf")
+
+    def push(self, audio):
+        """
+        Adds the next chunk of 16 bit samples, and returns whether the
+        wake word was heard in it.
+        """
+        self.transcriber.push(audio)
+        self.pushed += len(audio)
+        if self.pushed < self.hop:
+            return False
+        self.pushed %= self.hop
+        aligned = align(
+            self.transcriber.probs()[-self.window :], self.labels, self.blank
+        )
+        self.score = aligned[0] if aligned is not None else float("-inf")
+        if self.skip > 0:
+            self.skip -= 1
+            return False
+        if self.score < self.threshold:
+            return False
+        self.skip = self.blocked
+        return True
+
+    def reset(self):
+        """Skips the decisions until a window of new audio, as a Detector's."""
+        self.skip = self.blocked
 
 
 class RingBuffer:

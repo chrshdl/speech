@@ -94,13 +94,14 @@ class FakeModel:
 
 def test_gated_detector_runs_only_around_speech():
     log, made = [], []
-    gated = wake_word.GatedDetector(FakeModel(), FakeVad(), hangover_seconds=0.25)
 
     def new_detector():
         made.append(len(log))
         return CountingDetector(log)
 
-    gated.new_detector = new_detector
+    gated = wake_word.GatedDetector(
+        FakeModel(), FakeVad(), hangover_seconds=0.25, new_detector=new_detector
+    )
     quiet, loud = np.zeros(1600, np.int16), np.full(1600, 5000, np.int16)
     for _ in range(12):
         gated.push(quiet)

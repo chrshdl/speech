@@ -179,3 +179,50 @@ def test_word_end():
     probs = ctc_probs([0, 1, 1, 1, 1, 1], blank)
     assert wake_word.word_end(probs, 1, blank, space, 3) == 4
     assert wake_word.word_end(ctc_probs([0, space, 1], blank), 1, blank, space, 3) == 1
+
+
+class SpellingTranscriber:
+    """
+    Outputs 5 frames for each 0.1 seconds pushed: the wake word, labels 0 and
+    1, in those of a chunk that starts loud, and else the blank, 2.
+    """
+
+    frame_seconds = 0.02
+
+    class model:
+        sample_rate = 16000
+
+    def __init__(self):
+        self.path = []
+
+    def push(self, audio, final=False):
+        loud = len(audio) and audio[0] > 1000
+        self.path += [2, 0, 2, 1, 2] if loud else [2] * 5
+
+    def probs(self):
+        probs = np.full((len(self.path), 3), 0.01, np.float32)
+        probs[np.arange(len(self.path)), self.path] = 0.98
+        return probs
+
+
+def test_speech_model_detector():
+    """
+    Hears the wake word in the speech model's output once, not again while
+    the word is in its window, and again in new speech.
+    """
+    detector = wake_word.SpeechModelDetector(
+        SpellingTranscriber(), np.array([0, 1]), 2, threshold=-1.0
+    )
+    quiet, loud = np.zeros(1600, np.int16), np.full(1600, 5000, np.int16)
+    # It decides every 0.2 seconds, 2 chunks.
+    heard = [detector.push(chunk) for chunk in [quiet] * 4 + [loud, quiet]]
+    assert heard == [False] * 5 + [True]
+    assert detector.score == pytest.approx(0, abs=0.1)
+    assert not any(detector.push(quiet) for _ in range(20))
+    # Out of the window, it scores low.
+    assert detector.score < -2
+    heard = [detector.push(chunk) for chunk in [loud, quiet]]
+    assert heard == [False, True]
+    # Reset, it skips decisions until the window holds new audio.
+    detector.reset()
+    assert not any(detector.push(chunk) for chunk in [loud, quiet] * 4)
