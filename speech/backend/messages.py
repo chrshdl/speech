@@ -187,9 +187,41 @@ class KeyboardCard(CamelModel):
     url: str
 
 
+class RadioCard(CamelModel):
+    """
+    Play a web radio station: the client streams its audio from url, 16 bit
+    little-endian samples at sample_rate, channels of them interleaved, which
+    the service decodes as the station plays, and shows what plays, which the service updates, with the same id, as the
+    song changes. It plays on beneath the cards shown over it, such as the
+    volume's, which once they go show it again, until the user closes it or
+    asks to stop it, and the service clears it, or another card that stays
+    until dismissed, such as a song's, replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    PLAYS_ON: ClassVar[bool] = True
+    type: Literal["RadioCard"] = "RadioCard"
+    id: str
+    # The station's name.
+    title: str
+    url: str
+    sample_rate: int
+    channels: int
+    # The station's logo, an image.
+    logo: str
+    # What plays, empty when the station does not say, and the song's cover,
+    # an image, if one was found.
+    song: str = ""
+    artist: str = ""
+    cover: str | None = None
+    encoding: Literal["LINEAR16"] = "LINEAR16"
+
+
 class BrightnessCard(CamelModel):
     """The brightness of the screen, just set, in percent."""
 
+    # Shown as briefly as a transcript, as it is read at a glance.
+    BRIEF: ClassVar[bool] = True
     type: Literal["BrightnessCard"] = "BrightnessCard"
     id: str
     title: str
@@ -199,6 +231,7 @@ class BrightnessCard(CamelModel):
 class VolumeCard(CamelModel):
     """The volume of the speaker, just turned, in percent."""
 
+    BRIEF: ClassVar[bool] = True
     type: Literal["VolumeCard"] = "VolumeCard"
     id: str
     title: str
@@ -248,6 +281,7 @@ Card = Annotated[
     | GameCard
     | SongCard
     | KeyboardCard
+    | RadioCard
     | BrightnessCard
     | VolumeCard,
     Field(discriminator="type"),
@@ -455,6 +489,9 @@ class State(CamelModel):
     dialog_request_id: str | None
     # The card shown, if any.
     card: Card | None
+    # The card that plays on beneath the cards shown, such as a RadioCard,
+    # if any, also when it is the card shown.
+    playing: Card | None = None
 
 
 class Info(CamelModel):

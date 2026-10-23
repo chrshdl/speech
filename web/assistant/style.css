@@ -325,6 +325,9 @@ main {
   position: relative;
   height: 100%;
   container-type: size;
+  /* The meadow is cut to the screen. Overflowing, on a narrow screen it made
+     a phone lay the page out wider, the microphone button beyond its edge. */
+  overflow: clip;
 }
 
 /* The meadow's 1600 by 900 grid, cut to fill main like an svg's xMidYMax
@@ -934,6 +937,150 @@ body.has-card .step-aside {
   font-weight: 600;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* The radio card: the song's cover, or the station's logo, beside what
+   plays, under bars that bounce while it sounds. */
+
+.radio {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 24px;
+}
+
+.radio-cover {
+  width: 168px;
+  height: 168px;
+  border-radius: 24px;
+  background: #f3edff;
+  box-shadow: 0 10px 26px rgba(139, 92, 246, 0.22);
+  overflow: hidden;
+}
+
+.radio-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.radio-cover img.loaded {
+  opacity: 1;
+}
+
+.radio-info {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.radio-live {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 6px;
+  padding: 6px 14px 6px 12px;
+  border-radius: 999px;
+  background: #fff0f7;
+  color: var(--pink);
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.radio-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 16px;
+}
+
+/* Scaled rather than resized, which the browser does without laying out
+   and painting the card again: on the Pi, bars of a changing height kept
+   WPE WebKit busy for most of a core. */
+.radio-bars span {
+  width: 4px;
+  height: 100%;
+  border-radius: 2px;
+  background: currentColor;
+  transform: scaleY(0.35);
+  transform-origin: bottom;
+}
+
+.playing .radio-bars span {
+  animation: radio-bar 0.9s ease-in-out infinite;
+}
+
+.playing .radio-bars span:nth-child(2) {
+  animation-delay: -0.45s;
+}
+
+.playing .radio-bars span:nth-child(3) {
+  animation-delay: -0.2s;
+}
+
+.playing .radio-bars span:nth-child(4) {
+  animation-delay: -0.65s;
+}
+
+@keyframes radio-bar {
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+.radio-song {
+  display: -webkit-box;
+  margin: 0;
+  color: var(--ink);
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.radio-artist {
+  max-width: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 22px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.radio-song:empty,
+.radio-artist:empty {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .radio {
+    column-gap: 18px;
+  }
+
+  .radio-cover {
+    width: 112px;
+    height: 112px;
+    border-radius: 18px;
+  }
+
+  .radio-song {
+    font-size: 24px;
+  }
+
+  .radio-artist {
+    font-size: 18px;
+  }
 }
 
 /* The song card: notes that dance while the song plays, and a rainbow

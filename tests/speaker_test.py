@@ -44,15 +44,16 @@ def expected(seconds):
     return VOLUME * 0.9 * np.sin(2 * np.pi * 440 * t)
 
 
-def play(tmp_path, messages, seconds):
+def play(tmp_path, messages, seconds, both=False, **options):
     """
     The samples of the speaker sent the messages, each [frame, data], for
-    seconds, what it posted, and the frame it ended at.
+    seconds, of its first channel, or with both, of its two, what it posted,
+    and the frame it ended at.
     """
     data = {
         "processor": "speaker",
         "module": "speaker.js",
-        "options": {"sampleRate": SPEECH_SR, "volume": VOLUME},
+        "options": {"sampleRate": SPEECH_SR, "volume": VOLUME} | options,
         "messages": messages,
     }
     (tmp_path / "speech.json").write_text(json.dumps(data))
@@ -62,7 +63,9 @@ def play(tmp_path, messages, seconds):
     )
     report = json.loads(result.stdout)
     samples = np.fromfile(tmp_path / "out.f32", dtype=np.float32).reshape(-1, 2)
-    return samples[:, 0], report["posted"], report["returnedFalse"]
+    if not both:
+        samples = samples[:, 0]
+    return samples, report["posted"], report["returnedFalse"]
 
 
 def test_resamples_to_the_context(tmp_path):
@@ -125,3 +128,68 @@ def test_stop_while_waiting_ends_at_once(tmp_path):
     assert np.abs(samples[round(0.6 * SR) :]).max() == 0
     assert posted == [[stop, "ended"]]
     assert ended == stop + BLOCK
+
+
+def test_stereo(tmp_path):
+    """Interleaved channels, as of the radio, each on its own."""
+    left, right = tone(1.0), tone(1.0, hz=660)
+    interleaved = np.stack([left, right], axis=1).reshape(-1)
+    messages = [[0, int16(interleaved)], [0, "end"]]
+    samples, posted, _ = play(tmp_path, messages, 1.5, both=True, channels=2)
+    t = np.arange(SR) / SR
+    for channel, hz in ((0, 440), (1, 660)):
+        played = samples[:SR, channel]
+        error = played - VOLUME * 0.9 * np.sin(2 * np.pi * hz * t)
+        assert np.sqrt(np.mean(error**2)) < 1e-3 * np.sqrt(np.mean(played**2))
+    assert [message for _, message in posted] == ["ended"]
+
+
+def test_prebuffers_a_live_stream(tmp_path):
+    """
+    A live stream, such as the radio, plays once it holds enough, and after
+    it ran dry, waits until it holds enough again, rather than stutter.
+    """
+    audio = tone(3.0)
+    second = SPEECH_SR
+    messages = [
+        # Too little, and then enough to start.
+        [0, int16(audio[: second // 4])],
+        [block(0.5), int16(audio[second // 4 : second])],
+        # Running dry at 1.5 seconds, a trickle comes, and then enough.
+        [block(2.0), int16(audio[second : second + second // 4])],
+        [block(3.0), int16(audio[second + second // 4 : 3 * second])],
+    ]
+    samples, posted, _ = play(tmp_path, messages, 5.0, prebuffer=0.5)
+    sounding = np.abs(samples) > 0
+    assert not sounding[: block(0.5)].any()
+    assert [message for _, message in posted] == ["playing", "waiting", "playing"]
+    (started, _), (waited, _), (resumed, _) = posted
+    assert started == block(0.5)
+    assert waited == pytest.approx(block(0.5) + SR, abs=BLOCK)
+    # Not with the trickle, but once it holds half a second.
+    assert not sounding[waited + BLOCK : block(3.0)].any()
+    assert resumed == block(3.0)
+    # Losing nothing.
+    played = samples[sounding]
+    assert len(played) == pytest.approx(3 * SR, abs=2 * BLOCK)
+
+
+def test_long_stream_plays_whole(tmp_path):
+    """
+    A stream longer than the speaker's buffer, arriving as it plays, as the
+    radio does, plays without a gap or a sample lost where it drops what
+    has played.
+    """
+    seconds = 6.0
+    audio = tone(seconds)
+    piece = SPEECH_SR // 10
+    messages = [
+        [block(i / 10), int16(audio[i * piece : (i + 1) * piece])]
+        for i in range(round(seconds * 10))
+    ]
+    samples, posted, _ = play(tmp_path, messages, seconds + 1, prebuffer=0.5)
+    start = posted[0][0]
+    played = samples[start : start + round((seconds - 0.1) * SR)]
+    error = played - expected(seconds - 0.1)
+    assert np.sqrt(np.mean(error**2)) < 1e-3 * np.sqrt(np.mean(played**2))
+    assert [message for _, message in posted][:1] == ["playing"]
