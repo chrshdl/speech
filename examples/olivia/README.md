@@ -252,6 +252,37 @@ What each stage does, for the baseline at 0.9 on the test sets:
 - With the stride 3 model after epoch 4, the confirmation let only 3 of
   the same 219 false alarms through at -2.0, and kept every wake word.
 
+### While the radio plays
+
+A speakerphone's echo canceller removes what it plays from its
+microphone's audio, such as the radio's music, which then never reaches
+the wake word model. But it takes a voice over it apart too: recorded on a
+Jabra SPEAK 510 playing the radio, "olivia" lost everything above 4 kHz,
+and gaps were cut into the rest, where it removed the music. Said as loud
+as without the radio, the wake word model heard it in 1 of 3 with the
+radio at 73% of the volume, at probabilities of 0.07 and 0.08 for the
+others, and in all 3 without the radio.
+
+The speech model, trained on masked spectrograms, still hears it, so
+while a `RadioCard` plays, it hears the wake word instead, behind the voice
+activity detector: a `speech.wake_word.SpeechModelDetector` aligns "olivia"
+to its output of the last 1.5 seconds every 0.2 seconds, as the
+confirmation does, and hears it at `--wake-word-playing-threshold`.
+Streaming LibriSpeech's dev-clean, the recorded test clips, and 15
+"olivia"s recorded on the Jabra, 9 of them over the radio, 3 at 73%:
+
+| Threshold | Missed, test clips | Missed, on the Jabra | False alarms per hour, LibriSpeech |
+|---|---|---|---|
+| -2.0 | 4.0% | 0 of 15 | 4.8 |
+| -1.5 | 6.9% | 0 of 15 | 1.3 |
+| -1.25 | 10.1% | 0 of 15 | 0.6 |
+| -1.0 | 17.7% | 2 of 15 | 0 |
+
+-1.25, the default, misses fewer of the test clips than the wake word
+model with its confirmation, and the false alarms are of speech, which
+reaches it only while the radio plays. It costs as much as transcribing,
+about a third of a core of the Pi while someone speaks.
+
 ## Speed
 
 On a Raspberry Pi 4 at 1.5 GHz, with the service running, a decision

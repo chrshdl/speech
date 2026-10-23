@@ -157,17 +157,32 @@ def load(args, jukebox, screen, speaker_volume=None, station=None):
         if spotter.sample_rate != model.sample_rate:
             raise ValueError("The wake word model needs audio at another sample rate.")
         labels = tokens.tokenize(spotter.keyword, model.char_to_int)
+        labels = np.array([model.char_to_int[t] for t in labels])
         detector = wake_word.Detector(spotter, args.wake_word_threshold)
+        playing_detector = None
         if voice_activity is not None:
             detector = wake_word.GatedDetector(
                 spotter, voice_activity, args.wake_word_threshold
             )
+            # While the radio plays, the speech model hears the wake word,
+            # while the voice activity detector hears speech.
+            playing_detector = wake_word.GatedDetector(
+                model,
+                voice_activity,
+                new_detector=lambda: wake_word.SpeechModelDetector(
+                    streaming.Transcriber(model),
+                    labels,
+                    model.blank,
+                    args.wake_word_playing_threshold,
+                ),
+            )
         wake = WakeWord(
             detector,
-            np.array([model.char_to_int[t] for t in labels]),
+            labels,
             model.blank,
             model.char_to_int.get(" "),
             args.wake_word_asr_threshold,
+            playing_detector,
         )
     return (
         lambda: streaming.Transcriber(model, new_search()),
@@ -297,6 +312,16 @@ def make_parser():
         "that confirms it was heard, see examples/olivia/README.md. Higher drops "
         "more of what other speech, music or a TV set it off by, and more wake "
         "words.",
+    )
+    parser.add_argument(
+        "--wake-word-playing-threshold",
+        type=float,
+        default=wake_word.SPOT_THRESHOLD,
+        help="While the radio plays, with --vad, the speech model rather than the "
+        "wake word model hears the wake word, as a speakerphone's echo canceller "
+        "distorts a voice over what it plays: the lowest score of its alignment, "
+        "see examples/olivia/README.md. Higher hears it less often in other "
+        "speech, and misses it more often.",
     )
     parser.add_argument(
         "--weather-location",

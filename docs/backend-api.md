@@ -362,6 +362,13 @@ The capture ends as a `TAP_TO_TALK` one does, at the end of speech. If
 nothing is said after the wake word, it ends with `NO_SPEECH` and clears
 its card, without a notice.
 
+While a card plays on, such as the radio, and with `--vad`, the speech
+model hears the wake word instead of the wake word model: a
+speakerphone's echo canceller removes the music from the microphone's
+audio, but distorts a voice over it, which the wake word model then
+hardly hears. `--wake-word-playing-threshold` sets how well it must fit,
+see [examples/olivia](../examples/olivia/README.md#while-the-radio-plays).
+
 See [examples/olivia](../examples/olivia/README.md) for the model, how
 it is trained, and how often it misses the wake word or hears it in
 other speech.

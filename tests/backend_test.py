@@ -1410,6 +1410,54 @@ def test_wake_word_starts_a_capture():
     assert recognizer.wake_word.detector.resets == 1
 
 
+class PlayingDetector(FakeDetector):
+    """Hears the wake word in each chunk that starts a little louder."""
+
+    def push(self, audio):
+        return bool(len(audio)) and audio[0] == LOUD + 1
+
+
+def test_wake_word_while_playing():
+    """
+    While the radio plays, the playing detector hears the wake word instead
+    of the detector, each reset as it takes over, as it missed the audio.
+    """
+    transcriber = WakeTranscriber(["lights"])
+    station = Station()
+    recognizer = Recognizer(
+        lambda: transcriber,
+        16000,
+        AudioInputKind.MICROPHONE,
+        Settings(end_of_speech=0.2, wake_word_lookback=0.5),
+        handlers=station.handlers,
+        wake_word=engine.WakeWord(
+            FakeDetector(), np.array([0, 1]), 3, playing_detector=PlayingDetector()
+        ),
+    )
+
+    async def run():
+        async with service(recognizer, radio=station) as svc:
+            await say(recognizer, 0)
+            await svc.post("/v1/intents/PlayRadio")
+            await svc.events.until("ShowCard")
+            # What the detector takes for the wake word is not heard.
+            await say(recognizer, 0, LOUD, 0)
+            await asyncio.sleep(0.1)
+            ignored = recognizer.state
+            await say(recognizer, LOUD + 1, 0, 6000, 6000, *[0] * 10)
+            events = await svc.events.until("CaptureFinished")
+            await svc.events.until("DialogStateChanged")
+            await say(recognizer, 0)
+            return ignored, events
+
+    ignored, events = asyncio.run(run())
+    assert ignored == "IDLE"
+    assert events[-1]["payload"]["text"] == "lights"
+    # Reset taking over, and after the capture.
+    wake = recognizer.wake_word
+    assert (wake.detector.resets, wake.playing_detector.resets) == (0, 2)
+
+
 def test_wake_word_without_a_request_ends_quietly():
     transcriber = WakeTranscriber([])
     recognizer = wake_recognizer(transcriber, no_speech_timeout=0.3)
