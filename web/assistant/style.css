@@ -2319,9 +2319,11 @@ body.playing .bubble {
   animation-delay: 0.8s;
 }
 
-/* Narrow screens: the score goes below the bar. */
+/* Narrow screens: the score, and the keyboard's name with the button that
+   closes it, go below the bar, whose buttons they ran under. */
 @media (max-width: 640px) {
-  .game-hud {
+  .game-hud,
+  .keys-hud {
     top: 112px;
   }
 
