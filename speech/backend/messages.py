@@ -66,6 +66,9 @@ class CaptureEndReason(enum.StrEnum):
     # The speech model did not confirm the wake word of a WAKE_WORD
     # capture, which was heard by mistake. It ends without a card.
     NO_WAKE_WORD = "NO_WAKE_WORD"
+    # The client dismissed the capture's card while it listened, so it
+    # ended at once, without an answer.
+    CANCELLED = "CANCELLED"
     # The service failed, see its log.
     ERROR = "ERROR"
 

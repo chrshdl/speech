@@ -44,6 +44,7 @@ def main(args):
         max_capture=args.max_capture,
         audio_timeout=args.audio_timeout,
         card_timeout=args.card_timeout,
+        brief_card_timeout=args.brief_card_timeout,
         answer_card_timeout=args.answer_card_timeout,
         wake_word_lookback=args.wake_word_lookback,
     )
@@ -421,6 +422,13 @@ def make_parser():
         type=float,
         default=defaults.card_timeout,
         help="A card with the final transcript is cleared after this long.",
+    )
+    limits.add_argument(
+        "--brief-card-timeout",
+        type=float,
+        default=defaults.brief_card_timeout,
+        help="A card read at a glance, such as the volume just turned, is cleared "
+        "after this long.",
     )
     limits.add_argument(
         "--answer-card-timeout",
