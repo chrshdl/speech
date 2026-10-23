@@ -196,6 +196,15 @@ class BrightnessCard(CamelModel):
     percent: int
 
 
+class VolumeCard(CamelModel):
+    """The volume of the speaker, just turned, in percent."""
+
+    type: Literal["VolumeCard"] = "VolumeCard"
+    id: str
+    title: str
+    percent: int
+
+
 class SongNote(CamelModel):
     """
     A note of a song, played with the voice of an additive synthesizer, or
@@ -239,7 +248,8 @@ Card = Annotated[
     | GameCard
     | SongCard
     | KeyboardCard
-    | BrightnessCard,
+    | BrightnessCard
+    | VolumeCard,
     Field(discriminator="type"),
 ]
 

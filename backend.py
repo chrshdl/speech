@@ -12,7 +12,16 @@ import numpy as np
 import uvicorn
 
 from speech import streaming, tokens, vad, wake_word
-from speech.backend import brightness, game, keyboard, songs, voice, weather, wifi
+from speech.backend import (
+    brightness,
+    game,
+    keyboard,
+    songs,
+    voice,
+    volume,
+    weather,
+    wifi,
+)
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings, WakeWord
 from speech.backend.messages import AudioInputKind
@@ -40,6 +49,10 @@ def main(args):
     if args.backlight:
         state = os.path.join(args.state_dir, "brightness") if args.state_dir else None
         screen = brightness.Brightness(args.backlight, state)
+    speaker_volume = None
+    if args.volume_control:
+        state = os.path.join(args.state_dir, "volume") if args.state_dir else None
+        speaker_volume = volume.Volume(volume.Mixer(args.volume_control), state)
     speaker = None
     if args.voice:
         speaker = voice.Voice(args.voice)
@@ -47,7 +60,7 @@ def main(args):
         # question asked before it is loaded waits for it to be spoken.
         threading.Thread(target=speaker.load, daemon=True).start()
     new_transcriber, sample_rate, intents, commands, wake, voice_activity = load(
-        args, jukebox, screen
+        args, jukebox, screen, speaker_volume
     )
     recognizer = Recognizer(
         new_transcriber,
@@ -63,6 +76,7 @@ def main(args):
             keyboard.INTENT.name: keyboard.Keyboard(),
             songs.NAME: jukebox,
             brightness.INTENT.name: screen,
+            **(speaker_volume.handlers if speaker_volume is not None else {}),
         },
         commands=commands,
         voice=speaker,
@@ -85,12 +99,13 @@ def main(args):
     Server(config, recognizer).run()
 
 
-def load(args, jukebox, screen):
+def load(args, jukebox, screen, speaker_volume=None):
     """
     Loads the streaming CTC model and returns a function that creates the
     transcriber of a capture, the sample rate, and the recognizers of the
     intents, with asking for one of the songs, a songs.Songs, and with a
-    screen, a brightness.Brightness, for its brightness, and of the game's
+    screen, a brightness.Brightness, for its brightness, and with a
+    speaker_volume, a volume.Volume, for turning it up and down, and of the game's
     commands, which match the model's output, and the engine.WakeWord, if
     there is a wake word model, and the voice activity detector, if there
     is one. The models are all loaded now, so a capture starts at once when
@@ -111,6 +126,8 @@ def load(args, jukebox, screen):
         intents.append(jukebox.intent)
     if screen is not None:
         intents.append(brightness.INTENT)
+    if speaker_volume is not None:
+        intents.extend(volume.INTENTS)
     intents = IntentRecognizer(
         intents,
         model.char_to_int,
@@ -291,9 +308,15 @@ def make_parser():
         "for the only one.",
     )
     parser.add_argument(
+        "--volume-control",
+        help='Let the user turn the speaker up and down, as in "volume up" and '
+        '"turn it down", with this ALSA mixer control, as "card:control", such '
+        'as "usbaudio:PCM", see `amixer -c usbaudio scontrols`.',
+    )
+    parser.add_argument(
         "--state-dir",
-        help="A directory the service keeps settings in, such as the brightness, "
-        "to set them again when it starts.",
+        help="A directory the service keeps settings in, such as the brightness "
+        "and the volume, to set them again when it starts.",
     )
     parser.add_argument(
         "--wifi-interface",

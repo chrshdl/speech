@@ -629,7 +629,9 @@ At http://127.0.0.1:8080 it serves a client with a landing page and a
 microphone button. See [docs/backend-api.md](docs/backend-api.md) for the
 API, and `deploy/speech-backend.service` to start it with the Pi. With
 `--wifi-interface wlan0` the client can also join a Wi-Fi network from the
-screen, see [Wi-Fi](docs/backend-api.md#wi-fi).
+screen, see [Wi-Fi](docs/backend-api.md#wi-fi). With `--volume-control
+usbaudio:PCM` it turns the speaker up and down when asked, as in "volume
+up" and "turn it down", see [Intents](docs/backend-api.md#intents).
 
 With `--wake-word model.onnx` it also listens for the wake word "olivia",
 and starts a capture by itself when it hears it, without a tap, as in
