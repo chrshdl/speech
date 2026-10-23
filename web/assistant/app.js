@@ -45,6 +45,9 @@ let commands = null; // The id of the capture that hears the game's commands.
 let lastCommands = null; // The last such id, also once that capture finished.
 let startingCommands = false; // Whether such a capture is being started.
 let listening = null; // The id of the capture listening, if any.
+// The id of the last capture of a wake word heard by mistake, which ends
+// without the end chime.
+let mistaken = null;
 let restarts = []; // When listening for commands restarted by itself.
 let wifi = null; // Joining a Wi-Fi network, where the service can, see wifi.js.
 
@@ -130,14 +133,17 @@ function connectEvents() {
       }
       chimed = false;
     } else if (wasListening && state !== "LISTENING") {
-      if (!isCommands(listening)) {
+      if (!isCommands(listening) && listening !== mistaken) {
         playTone(END_TONE);
       }
       listening = null;
     }
     listenForCommands();
   });
-  on("Recognition.CaptureFinished", ({ dialogRequestId, text }) => {
+  on("Recognition.CaptureFinished", ({ dialogRequestId, text, reason }) => {
+    if (reason === "NO_WAKE_WORD") {
+      mistaken = dialogRequestId;
+    }
     if (dialogRequestId === commands) {
       commands = null;
     } else {
@@ -224,16 +230,20 @@ RENDERERS.SongCard = (data, body) => {
     </div>`;
 };
 
-// The brightness just set: a sun, how full the bar is, and the percent.
-RENDERERS.BrightnessCard = (data, body) => {
+// A level just set, such as the brightness: its icon, how full the bar is,
+// and the percent.
+function renderMeter(body, kind, icon, percent) {
   body.innerHTML = `
-    <div class="brightness">
-      <svg class="brightness-icon" viewBox="0 0 64 64" aria-hidden="true">${sun()}</svg>
-      <div class="brightness-bar"><span class="brightness-level"></span></div>
-      <p class="brightness-percent">${data.percent}%</p>
+    <div class="meter meter-${kind}">
+      <svg class="meter-icon" viewBox="0 0 64 64" aria-hidden="true">${icon}</svg>
+      <div class="meter-bar"><span class="meter-fill"></span></div>
+      <p class="meter-percent">${percent}%</p>
     </div>`;
-  body.querySelector(".brightness-level").style.width = `${data.percent}%`;
-};
+  body.querySelector(".meter-fill").style.width = `${percent}%`;
+}
+
+RENDERERS.BrightnessCard = (data, body) => renderMeter(body, "brightness", sun(), data.percent);
+RENDERERS.VolumeCard = (data, body) => renderMeter(body, "volume", loudspeaker(), data.percent);
 
 const TITLES = {
   WeatherCard: (data) => `Weather in ${data.location}`,
@@ -284,6 +294,10 @@ function showCard(data) {
   document.body.classList.add("has-card");
   if (data.type === "SongCard") {
     playSong(card);
+  }
+  if (data.type === "VolumeCard" && fresh) {
+    // Heard at the new volume.
+    playTone(VOLUME_TONE);
   }
 }
 
@@ -349,6 +363,8 @@ function dismissCard() {
 // The start tone is the cue to speak, so it is the louder one.
 const START_TONE = { notes: [659.25, 987.77], volume: 0.32 }; // E5, then B5.
 const END_TONE = { notes: [987.77, 659.25], volume: 0.2 };
+// The volume just turned, at its new level.
+const VOLUME_TONE = { notes: [783.99], volume: 0.32 }; // G5.
 const NOTE_STEP = 0.09;
 const NOTE_LENGTH = 0.25;
 let tones = null;

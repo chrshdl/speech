@@ -243,6 +243,14 @@ class NoiseSource:
         """
         path = self.paths[_randint(0, len(self.paths) - 1)]
         audio = self.cache.get(path) if self.cache is not None else None
+        if audio is None and self.cache is None:
+            # Only the segment, of a long recording at the sample rate, as
+            # the whole of it gives the same samples.
+            with soundfile.SoundFile(path) as f:
+                if f.samplerate == sample_rate and f.frames >= frames:
+                    f.seek(_randint(0, f.frames - frames))
+                    segment = f.read(frames, dtype="float32", always_2d=True)
+                    return segment.mean(axis=1)
         if audio is None:
             audio, rate = soundfile.read(path, dtype="float32", always_2d=True)
             audio = audio.mean(axis=1)

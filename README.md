@@ -629,9 +629,23 @@ At http://127.0.0.1:8080 it serves a client with a landing page and a
 microphone button. See [docs/backend-api.md](docs/backend-api.md) for the
 API, and `deploy/speech-backend.service` to start it with the Pi. With
 `--wifi-interface wlan0` the client can also join a Wi-Fi network from the
-screen, see [Wi-Fi](docs/backend-api.md#wi-fi).
+screen, see [Wi-Fi](docs/backend-api.md#wi-fi). With `--volume-control
+usbaudio:PCM` it turns the speaker up and down when asked, as in "volume
+up" and "turn it down", see [Intents](docs/backend-api.md#intents).
+
+With `--wake-word model.onnx` it also listens for the wake word "olivia",
+and starts a capture by itself when it hears it, without a tap, as in
+"olivia, what's the weather in hamburg?". Both models stay loaded, and
+the capture starts with the 2 seconds of audio before the wake word was
+heard, so a request said in one breath with it is heard whole. With
+`--vad silero_vad.onnx`, a voice activity detector, it listens for the
+wake word only while someone speaks, and hears with it when they stop.
+See [examples/olivia](examples/olivia/README.md) for the model, a DS-CNN
+of [Hello Edge], and [Wake word](docs/backend-api.md#wake-word) for the
+API.
 
 [ONNX Runtime]: https://onnxruntime.ai
+[Hello Edge]: https://arxiv.org/abs/1711.07128
 
 ## Examples
 
@@ -651,6 +665,9 @@ in each example's `README.md`.
 - `examples/speech_commands`: Speech Commands, single words such as "left"
   and "right" said alone, which the Common Voice configs also train on, and
   an evaluation of how a model recognizes them.
+- `examples/olivia`: the wake word "olivia", spotted by a DS-CNN of
+  [Hello Edge] and confirmed by the speech model, which starts a capture
+  of `backend.py` without a tap.
 - `examples/timit` and `examples/wsj`: the original examples of this
   repository.
 

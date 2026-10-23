@@ -42,6 +42,7 @@ time.
 | `HOLD_TO_TALK` | When the client calls stop-capture, or closes its audio stream, as the button is released |
 | `TAP_TO_TALK` | At the end of speech: a pause of 1 second after the transcript starts. Also with stop-capture. |
 | `COMMANDS` | Only with stop-capture, or when the client closes its audio stream. It listens for short commands, such as "left" and "right" to steer a game, and reports each in a `CommandRecognized` event, see [Commands](#commands). |
+| `WAKE_WORD` | As `TAP_TO_TALK`. The service starts it itself when its microphone hears the wake word, see [Wake word](#wake-word). |
 
 A `HOLD_TO_TALK` or `TAP_TO_TALK` capture ends after 60 seconds, a
 `COMMANDS` capture after 30 minutes, and any when no audio arrives for 5
@@ -71,7 +72,7 @@ All bodies are JSON with camelCase names.
 | `GET /v1/info` | The model, its sample rate, the audio input and the language model |
 | `GET /v1/state` | The dialog state, the capture, and the card shown |
 | `GET /v1/events` | The event stream, see [Events](#events) |
-| `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none |
+| `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
 | `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is not shown |
 | `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
@@ -125,6 +126,7 @@ when there are no events for a while.
 | `END_OF_SPEECH` | A `TAP_TO_TALK` capture heard speech followed by a pause |
 | `STOP_CAPTURE` | The client called stop-capture or closed its audio stream |
 | `NO_SPEECH` | A `TAP_TO_TALK` capture recognized no speech in time |
+| `NO_WAKE_WORD` | The speech model did not confirm the wake word of a `WAKE_WORD` capture, which was heard by mistake. It ends without a card. |
 | `MAX_DURATION` | It reached the longest duration |
 | `AUDIO_TIMEOUT` | No audio arrived in time |
 | `ERROR` | The service failed, see its log |
@@ -151,6 +153,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
 | `BrightnessCard` | `title`, `percent` | The brightness of the screen, just set, in percent |
+| `VolumeCard` | `title`, `percent` | The volume of the speaker, just turned, in percent. The client plays a short tone, at the new volume |
 | `KeyboardCard` | `title`, `patch`, `url` | Show a keyboard that plays the Roland D-50 patch at `url`, titled with its name. It stays until the user closes it, or another card replaces it. |
 | `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
@@ -213,6 +216,7 @@ does not match.
 |---|---|
 | `PlayGame` | A `GameCard` at the level asked for, such as "play superball level three", or else 1 |
 | `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
+| `VolumeUp`, `VolumeDown` | A `VolumeCard`, having turned the speaker up or down a step, such as "volume up", "turn it down", "louder" or "quieter", never to silence, so an answer can still be heard. With `--volume-control`, see below |
 | `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
 | `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
 | `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, which `--weather-location` can name any place for. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. With `--voice`, it says the weather now, and today's and tomorrow's, see [Speech](#speech). |
@@ -247,6 +251,14 @@ use, see `speech/backend/d50.py`, which refuses a patch it cannot play.
 write. With `--state-dir`, it keeps the brightness there and sets it again
 when it starts, also once a backlight that appears later, as its driver
 loads, can be written, see `speech/backend/brightness.py`.
+
+`--volume-control` names the speaker's ALSA mixer control, as
+`card:control`, such as `usbaudio:PCM` for the USB speakerphone, whose
+own buttons turn the same control, see `amixer -c usbaudio scontrols`.
+The service turns it with `amixer`, a tenth of its range a step, or one
+step of a control with fewer, such as the Jabra SPEAK 510's 12 of 4 dB.
+With `--state-dir`, it keeps the volume there and sets it again when it
+starts, see `speech/backend/volume.py`.
 
 To add an intent, give `speech.intents.Intent` its samples, in the
 model's characters, and the values of its slots, and pass a handler whose
@@ -303,6 +315,37 @@ recognizes 678 rather than 701 of the 808 commands. Of the kid's
 clips, decoded whole by `examples/speech_commands/evaluate.py`, both
 recognized 20 of the 24 commands, as the model after two epochs recognized
 21 at -1.5, and took none of the other words for one.
+
+## Wake word
+
+Started with `--wake-word`, a model of `examples/olivia/train.py`, the
+service listens to its microphone for the wake word, "olivia", while
+`IDLE`, and starts a `WAKE_WORD` capture itself when it hears it, as in
+"olivia, what's the weather in hamburg?". It needs the microphone's
+audio, not the client's. With `--vad`, a voice activity detector, it
+listens for the wake word only while someone speaks, and the captures
+that end by themselves end when it hears speech end.
+
+The capture starts with the last 2 seconds of the microphone's audio,
+which hold the wake word and what was said right after it, so a request
+said in one breath with the wake word is heard whole. Its transcript,
+`TranscriptUpdated`, the cards and `CaptureFinished`, start after the
+wake word.
+
+The capture is announced as the wake word is heard, with
+`DialogStateChanged` `LISTENING` and the "Listening…" card, so clients
+chime then. The speech model then confirms the wake word, from 1 second
+of audio after it was heard. A wake word heard by mistake ends the
+capture at once with `NO_WAKE_WORD`, which clears its card and answers
+nothing, so clients can leave out their end chime.
+
+The capture ends as a `TAP_TO_TALK` one does, at the end of speech. If
+nothing is said after the wake word, it ends with `NO_SPEECH` and clears
+its card, without a notice.
+
+See [examples/olivia](../examples/olivia/README.md) for the model, how
+it is trained, and how often it misses the wake word or hears it in
+other speech.
 
 ## Audio streaming
 
@@ -474,6 +517,24 @@ Client                                     Service
   |  <------ CaptureFinished STOP_CAPTURE    |
   |  <------ DialogStateChanged IDLE         |
   | POST card-dismissed {cardId}  -------->  |  after showing the score
+```
+
+The wake word, with the microphone of the service's device:
+
+```
+Client                                     Service
+  |                                          |  "olivia, what's the weather?"
+  |  <------ DialogStateChanged LISTENING    |  the wake word is heard
+  |  <------ ShowCard "Listening…"           |
+  |                                          |  and confirmed a second later
+  |  <------ TranscriptUpdated               |  "what's the weather"
+  |  <------ ShowCard (updated)              |
+  |  <------ EndOfSpeechDetected             |  a pause
+  |  <------ DialogStateChanged THINKING     |
+  |  <------ CaptureFinished {text, reason}  |
+  |  <------ IntentRecognized GetWeather     |
+  |  <------ ShowCard WeatherCard            |
+  |  <------ DialogStateChanged IDLE         |
 ```
 
 Hold to talk, with audio from the client:

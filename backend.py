@@ -8,12 +8,22 @@ import logging
 import os
 import threading
 
+import numpy as np
 import uvicorn
 
-from speech import streaming
-from speech.backend import brightness, game, keyboard, songs, voice, weather, wifi
+from speech import streaming, tokens, vad, wake_word
+from speech.backend import (
+    brightness,
+    game,
+    keyboard,
+    songs,
+    voice,
+    volume,
+    weather,
+    wifi,
+)
 from speech.backend.app import create_app
-from speech.backend.engine import Microphone, Recognizer, Settings
+from speech.backend.engine import Microphone, Recognizer, Settings, WakeWord
 from speech.backend.messages import AudioInputKind
 from speech.intents import THRESHOLD, IntentRecognizer
 from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
@@ -31,6 +41,7 @@ def main(args):
         audio_timeout=args.audio_timeout,
         card_timeout=args.card_timeout,
         answer_card_timeout=args.answer_card_timeout,
+        wake_word_lookback=args.wake_word_lookback,
     )
     # Read before the model loads, so a bad song file fails at once.
     jukebox = songs.Songs(songs.load(args.songs) if args.songs else [])
@@ -38,13 +49,19 @@ def main(args):
     if args.backlight:
         state = os.path.join(args.state_dir, "brightness") if args.state_dir else None
         screen = brightness.Brightness(args.backlight, state)
+    speaker_volume = None
+    if args.volume_control:
+        state = os.path.join(args.state_dir, "volume") if args.state_dir else None
+        speaker_volume = volume.Volume(volume.Mixer(args.volume_control), state)
     speaker = None
     if args.voice:
         speaker = voice.Voice(args.voice)
         # Alongside the model, rather than after it, as it takes as long. A
         # question asked before it is loaded waits for it to be spoken.
         threading.Thread(target=speaker.load, daemon=True).start()
-    new_transcriber, sample_rate, intents, commands = load(args, jukebox, screen)
+    new_transcriber, sample_rate, intents, commands, wake, voice_activity = load(
+        args, jukebox, screen, speaker_volume
+    )
     recognizer = Recognizer(
         new_transcriber,
         sample_rate,
@@ -59,9 +76,12 @@ def main(args):
             keyboard.INTENT.name: keyboard.Keyboard(),
             songs.NAME: jukebox,
             brightness.INTENT.name: screen,
+            **(speaker_volume.handlers if speaker_volume is not None else {}),
         },
         commands=commands,
         voice=speaker,
+        wake_word=wake,
+        vad=voice_activity,
     )
     microphone = None
     if recognizer.audio_input == AudioInputKind.MICROPHONE:
@@ -79,13 +99,17 @@ def main(args):
     Server(config, recognizer).run()
 
 
-def load(args, jukebox, screen):
+def load(args, jukebox, screen, speaker_volume=None):
     """
     Loads the streaming CTC model and returns a function that creates the
     transcriber of a capture, the sample rate, and the recognizers of the
     intents, with asking for one of the songs, a songs.Songs, and with a
-    screen, a brightness.Brightness, for its brightness, and of the game's
-    commands, which match the model's output.
+    screen, a brightness.Brightness, for its brightness, and with a
+    speaker_volume, a volume.Volume, for turning it up and down, and of the game's
+    commands, which match the model's output, and the engine.WakeWord, if
+    there is a wake word model, and the voice activity detector, if there
+    is one. The models are all loaded now, so a capture starts at once when
+    the wake word is heard.
     """
     model = streaming.load(args.model, "best", "cpu", args.threads)
     new_search = streaming.search_factory(
@@ -102,6 +126,8 @@ def load(args, jukebox, screen):
         intents.append(jukebox.intent)
     if screen is not None:
         intents.append(brightness.INTENT)
+    if speaker_volume is not None:
+        intents.extend(volume.INTENTS)
     intents = IntentRecognizer(
         intents,
         model.char_to_int,
@@ -109,11 +135,34 @@ def load(args, jukebox, screen):
         model.frame_seconds,
         args.intent_threshold,
     )
+    voice_activity = vad.VadModel(args.vad) if args.vad else None
+    if voice_activity is not None and voice_activity.sample_rate != model.sample_rate:
+        raise ValueError("The voice activity detector needs audio at another rate.")
+    wake = None
+    if args.wake_word:
+        spotter = wake_word.WakeWordModel(args.wake_word)
+        if spotter.sample_rate != model.sample_rate:
+            raise ValueError("The wake word model needs audio at another sample rate.")
+        labels = tokens.tokenize(spotter.keyword, model.char_to_int)
+        detector = wake_word.Detector(spotter, args.wake_word_threshold)
+        if voice_activity is not None:
+            detector = wake_word.GatedDetector(
+                spotter, voice_activity, args.wake_word_threshold
+            )
+        wake = WakeWord(
+            detector,
+            np.array([model.char_to_int[t] for t in labels]),
+            model.blank,
+            model.char_to_int.get(" "),
+            args.wake_word_asr_threshold,
+        )
     return (
         lambda: streaming.Transcriber(model, new_search()),
         model.sample_rate,
         intents,
         game.commands(model, args.command_threshold),
+        wake,
+        voice_activity,
     )
 
 
@@ -207,6 +256,36 @@ def make_parser():
         "commands.",
     )
     parser.add_argument(
+        "--wake-word",
+        help="Start a capture when the microphone hears the wake word, with this "
+        "model of examples/olivia/train.py, a .onnx file. Needs the microphone's "
+        "audio.",
+    )
+    parser.add_argument(
+        "--wake-word-threshold",
+        type=float,
+        default=wake_word.THRESHOLD,
+        help="The lowest probability of the wake word, averaged over the last "
+        "decisions, that hears it, see examples/olivia/README.md. Higher hears it "
+        "less often in other speech, and misses it more often.",
+    )
+    parser.add_argument(
+        "--vad",
+        help="A voice activity detector, Silero VAD's silero_vad.onnx, version 5. "
+        "The wake word model then runs only while it hears speech, and the "
+        "captures that end by themselves end when it hears speech end, see "
+        "examples/olivia/README.md.",
+    )
+    parser.add_argument(
+        "--wake-word-asr-threshold",
+        type=float,
+        default=wake_word.ASR_THRESHOLD,
+        help="The lowest score of the wake word in the speech model's transcript "
+        "that confirms it was heard, see examples/olivia/README.md. Higher drops "
+        "more of what other speech, music or a TV set it off by, and more wake "
+        "words.",
+    )
+    parser.add_argument(
         "--weather-location",
         default="Berlin",
         help="The place to answer questions for the weather for.",
@@ -229,9 +308,15 @@ def make_parser():
         "for the only one.",
     )
     parser.add_argument(
+        "--volume-control",
+        help='Let the user turn the speaker up and down, as in "volume up" and '
+        '"turn it down", with this ALSA mixer control, as "card:control", such '
+        'as "usbaudio:PCM", see `amixer -c usbaudio scontrols`.',
+    )
+    parser.add_argument(
         "--state-dir",
-        help="A directory the service keeps settings in, such as the brightness, "
-        "to set them again when it starts.",
+        help="A directory the service keeps settings in, such as the brightness "
+        "and the volume, to set them again when it starts.",
     )
     parser.add_argument(
         "--wifi-interface",
@@ -269,6 +354,13 @@ def make_parser():
         type=float,
         default=defaults.audio_timeout,
         help="A capture ends when no audio arrives this long.",
+    )
+    limits.add_argument(
+        "--wake-word-lookback",
+        type=float,
+        default=defaults.wake_word_lookback,
+        help="The audio before the wake word was heard that its capture starts "
+        "with, which holds the wake word and what was said right after it.",
     )
     limits.add_argument(
         "--card-timeout",

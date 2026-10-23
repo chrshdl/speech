@@ -14,6 +14,7 @@ import uuid
 import numpy as np
 import sounddevice
 
+from speech import wake_word as wake_word_module
 from speech.backend.messages import (
     AudioInputKind,
     CaptureEndReason,
@@ -44,6 +45,16 @@ _STOP = object()
 # is this long and this quiet, keeping the stream going.
 _DROP_SILENCE = 2.0
 _DROP_PAUSE = 1.0
+# The longest rest of the word after the wake word's alignment that is
+# also dropped from the transcript.
+_WAKE_WORD_REST = 0.3
+# With a voice activity detector, the speech a WAKE_WORD capture needs to
+# hear after the wake word, in frames of speech, which start this long
+# after the transcript of the wake word ends, as the sound can last longer.
+_WAKE_WORD_SPEECH = 0.2
+_WAKE_WORD_MARGIN = 0.25
+# The captures that end at the end of speech.
+_ENDS_BY_ITSELF = {Initiator.TAP_TO_TALK, Initiator.WAKE_WORD}
 # How a capture can end and still ask for an intent.
 _ANSWERABLE = {
     CaptureEndReason.END_OF_SPEECH,
@@ -80,6 +91,10 @@ class Settings:
     answer_card_timeout: float = 30.0
     # The longest wait for the answer to an intent.
     answer_timeout: float = 10.0
+    # The audio before the wake word was heard that a WAKE_WORD capture
+    # starts with, which holds the wake word and what was said right
+    # after it.
+    wake_word_lookback: float = wake_word_module.LOOKBACK_SECONDS
 
 
 class Busy(Exception):
@@ -147,12 +162,39 @@ class EventBus:
 
 
 @dataclasses.dataclass
+class WakeWord:
+    """Starts a capture when the microphone's audio says the wake word."""
+
+    # Hears the wake word, such as a speech.wake_word.Detector. Its
+    # push(audio) adds audio and returns whether the wake word was heard,
+    # score is the latest decision's, and reset() skips the decisions
+    # until a window of new audio.
+    detector: object
+    # The wake word in the transcriber's labels, and the blank label,
+    # with which the capture finds where the wake word ends, to transcribe
+    # what was said after it.
+    labels: np.ndarray
+    blank: int
+    # The transcriber's space label, or None if it has none.
+    space: int | None = None
+    # The lowest alignment score of the wake word in the capture's
+    # transcript, see speech.wake_word.align, that confirms it was said.
+    # Below it, the wake word was heard by mistake, and the capture ends
+    # quietly. See examples/olivia/README.md.
+    threshold: float = wake_word_module.ASR_THRESHOLD
+
+
+@dataclasses.dataclass
 class Capture:
     id: str
     initiator: Initiator
     # Such as a streaming.Transcriber.
     transcriber: object
     audio: asyncio.Queue
+    # The audio of a WAKE_WORD capture from before the wake word was heard.
+    lookback: np.ndarray | None = None
+    # Whether anything was said, after the wake word of a WAKE_WORD capture.
+    said: bool = False
     # With audio input from the client, the stream to read from and
     # whether a client is streaming it.
     stream_id: str | None = None
@@ -212,6 +254,8 @@ class Recognizer:
         handlers=None,
         commands=None,
         voice=None,
+        wake_word=None,
+        vad=None,
     ):
         """
         Arguments:
@@ -239,6 +283,15 @@ class Recognizer:
                 speech(card) that returns what to say, such as a
                 voice.Voice. Its sample_rate is the audio's, and its
                 sentences(text) yields each sentence's 16 bit samples.
+            wake_word (WakeWord, optional): Starts a WAKE_WORD capture
+                when the microphone's audio says the wake word, while
+                IDLE, from start until close.
+            vad (optional): Hears when speech ends, for the captures that
+                end by themselves, such as a speech.vad.VadModel. Its
+                stream(history=True) returns a stream whose push(audio)
+                adds audio, whose silence_seconds is the time since speech
+                ended, and whose speech_seconds(after) is the speech after
+                a time in the stream.
         """
         self.new_transcriber = new_transcriber
         self._sample_rate = sample_rate
@@ -260,6 +313,19 @@ class Recognizer:
         self.dismissed = None
         # The answer spoken last, until it is stopped.
         self.speech = None
+        self.wake_word = wake_word
+        self.vad = vad
+        if wake_word is not None and audio_input != AudioInputKind.MICROPHONE:
+            raise ValueError("The wake word needs the microphone's audio.")
+        # The microphone's latest audio, and its audio while IDLE, in which
+        # the wake word is spotted.
+        size = round(self.settings.wake_word_lookback * sample_rate)
+        self.lookback = wake_word_module.RingBuffer(size)
+        self.wake_audio = asyncio.Queue()
+        # Set by a capture, after which the wake word is only heard in new
+        # audio.
+        self.wake_reset = False
+        self.wake_task = None
 
     @property
     def sample_rate(self):
@@ -272,27 +338,41 @@ class Recognizer:
             events.append(ShowCard(card=self.card))
         return events
 
+    def start(self):
+        """Starts listening for the wake word, if there is one."""
+        if self.wake_word is not None and self.wake_task is None:
+            self.wake_task = asyncio.create_task(self._spot_wake_word())
+
     def start_capture(self, initiator):
         """
         Starts a capture and returns it. Raises Busy unless IDLE, and
-        Unsupported for a COMMANDS capture without commands to recognize.
+        Unsupported for a COMMANDS capture without commands to recognize,
+        and for a WAKE_WORD capture, which only the wake word starts.
         """
-        if self.state != DialogState.IDLE:
+        if self.state != DialogState.IDLE or self.capture is not None:
             raise Busy(f"Cannot start a capture while {self.state}.")
         if initiator == Initiator.COMMANDS and self.commands is None:
             raise Unsupported("This service recognizes no commands.")
-        # Neither talked over nor heard by the microphone.
-        self._stop_speaking()
+        if initiator == Initiator.WAKE_WORD:
+            raise Unsupported("A WAKE_WORD capture starts when the wake word is heard.")
+        return self._start_capture(initiator)
+
+    def _start_capture(self, initiator, lookback=None):
         capture = Capture(
             id=uuid.uuid4().hex,
             initiator=initiator,
             transcriber=self.new_transcriber(),
             audio=asyncio.Queue(),
+            lookback=lookback,
         )
+        if self.wake_word is not None:
+            self.wake_reset = True
         if self.audio_input == AudioInputKind.CLIENT:
             capture.stream_id = uuid.uuid4().hex
         self.capture = capture
         log.info("Capture %s started with %s", capture.id, initiator)
+        # Neither talked over nor heard by the microphone.
+        self._stop_speaking()
         self._set_state(DialogState.LISTENING)
         # Commands steer what is shown, such as a game, rather than show
         # their transcript.
@@ -326,8 +406,13 @@ class Recognizer:
     def deliver(self, audio, stream_id=None):
         """
         Adds audio to the capture, if LISTENING to one from this source:
-        the microphone, or the client stream with the id.
+        the microphone, or the client stream with the id. The microphone's
+        audio while IDLE is searched for the wake word.
         """
+        if self.wake_word is not None and stream_id is None:
+            self.lookback.write(audio)
+            if self.state == DialogState.IDLE and self.capture is None:
+                self.wake_audio.put_nowait(audio)
         capture = self.capture
         if capture is None or capture.ended.is_set() or capture.stream_id != stream_id:
             return
@@ -405,16 +490,62 @@ class Recognizer:
             self.capture.audio.put_nowait(_STOP)
 
     async def close(self):
-        """Ends the capture and the event subscriptions."""
-        if self.capture is not None and self.capture.task is not None:
-            self.capture.task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.capture.task
+        """Ends the capture, listening for the wake word and the event subscriptions."""
+        tasks = [self.wake_task]
+        if self.capture is not None:
+            tasks.append(self.capture.task)
+        for task in tasks:
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
         self._cancel_card_timer()
         self._stop_speaking()
         self.bus.close()
         for handler in self.handlers.values():
             await handler.close()
+
+    async def _spot_wake_word(self):
+        """Starts a WAKE_WORD capture when the audio while IDLE says the wake word."""
+        detector = self.wake_word.detector
+        while True:
+            chunks = [await self.wake_audio.get()]
+            while not self.wake_audio.empty():
+                chunks.append(self.wake_audio.get_nowait())
+            if self.wake_reset:
+                # The audio went to a capture since, so the window has a gap.
+                detector.reset()
+                self.wake_reset = False
+            heard = await asyncio.to_thread(detector.push, np.concatenate(chunks))
+            if heard and self.state == DialogState.IDLE and self.capture is None:
+                log.info("Heard the wake word, score %.3f", detector.score)
+                self._start_capture(Initiator.WAKE_WORD, self.lookback.read())
+
+    def _confirm_wake_word(self, capture):
+        """
+        Starts the WAKE_WORD capture's transcript after the wake word, if it
+        says the wake word, and returns the seconds of audio before that, or
+        None if it does not say it.
+        """
+        transcriber = capture.transcriber
+        wake = self.wake_word
+        probs = transcriber.probs()
+        aligned = wake_word_module.align(probs, wake.labels, wake.blank)
+        score = aligned[0] if aligned is not None else -np.inf
+        if score < wake.threshold:
+            log.info(
+                "Capture %s does not say the wake word, score %.2f", capture.id, score
+            )
+            return None
+        log.info("Capture %s says the wake word, score %.2f", capture.id, score)
+        # Also the rest of the word, when the transcript spells the wake
+        # word another way, such as "olivier".
+        longest = round(_WAKE_WORD_REST / transcriber.frame_seconds)
+        end = wake_word_module.word_end(
+            probs, aligned[2], wake.blank, wake.space, longest
+        )
+        transcriber.drop(end)
+        return end * transcriber.frame_seconds
 
     async def _run(self, capture):
         """Transcribes the capture's audio until the capture ends."""
@@ -456,8 +587,25 @@ class Recognizer:
     async def _listen(self, capture):
         settings = self.settings
         transcriber = capture.transcriber
+        # The audio after the capture started, so the time limits count
+        # from when the wake word was heard.
         heard = 0.0
         text = ""
+        # Hears when speech ends, if there is a voice activity detector, or
+        # else the transcript's pauses do.
+        voice = self.vad.stream(history=True) if self.vad is not None else None
+
+        def push(audio):
+            transcriber.push(audio)
+            if voice is not None:
+                voice.push(audio)
+
+        # Whether the transcript starts where it should, after the wake word
+        # of a WAKE_WORD capture, and the seconds of audio before that.
+        started = capture.lookback is None
+        after = 0.0
+        if not started:
+            await asyncio.to_thread(push, capture.lookback)
         while True:
             try:
                 chunks, stop = await self._next_chunks(capture)
@@ -465,9 +613,25 @@ class Recognizer:
                 return CaptureEndReason.AUDIO_TIMEOUT
             if chunks:
                 audio = np.concatenate(chunks)
-                await asyncio.to_thread(transcriber.push, audio)
+                await asyncio.to_thread(push, audio)
                 heard += len(audio) / self.sample_rate
-            if (new_text := transcriber.text().strip()) != text:
+            if not started:
+                if heard < wake_word_module.CONFIRM_SECONDS and not stop:
+                    continue
+                after = await asyncio.to_thread(self._confirm_wake_word, capture)
+                if after is None:
+                    return CaptureEndReason.NO_WAKE_WORD
+                started = True
+            # Whether anything was said, after the wake word. The transcript
+            # can keep a letter of the wake word, so with a voice activity
+            # detector, it must also hear speech after the wake word.
+            speech = transcriber.heard_speech
+            if voice is not None and capture.lookback is not None:
+                speech = speech and (
+                    voice.speech_seconds(after + _WAKE_WORD_MARGIN) >= _WAKE_WORD_SPEECH
+                )
+            capture.said = speech
+            if speech and (new_text := transcriber.text().strip()) != text:
                 text = new_text
                 self.bus.publish(
                     TranscriptUpdated(dialog_request_id=capture.id, text=text)
@@ -476,9 +640,12 @@ class Recognizer:
 
             if stop:
                 return CaptureEndReason.STOP_CAPTURE
-            if capture.initiator == Initiator.TAP_TO_TALK:
-                speech = transcriber.heard_speech
-                if speech and transcriber.pause_seconds >= settings.end_of_speech:
+            if capture.initiator in _ENDS_BY_ITSELF:
+                # Something was said, and then nothing.
+                pause = transcriber.pause_seconds
+                if voice is not None:
+                    pause = voice.silence_seconds
+                if speech and pause >= settings.end_of_speech:
                     self.bus.publish(EndOfSpeechDetected(dialog_request_id=capture.id))
                     return CaptureEndReason.END_OF_SPEECH
                 if not speech and heard >= settings.no_speech_timeout:
@@ -567,6 +734,10 @@ class Recognizer:
             self.capture = None
             self._set_state(DialogState.IDLE)
             return
+        if reason == CaptureEndReason.NO_WAKE_WORD:
+            # Heard by mistake, it ends quietly, without a transcript or notice.
+            self._end_quietly(capture, reason, "")
+            return
         self._set_state(DialogState.THINKING)
         if capture.stream_id is not None:
             self.bus.publish(StopAudioStream(stream_id=capture.stream_id))
@@ -577,6 +748,11 @@ class Recognizer:
         )
         text = capture.transcriber.text(final=True).strip()
         log.info("Capture %s finished with %s: %r", capture.id, reason, text)
+        if capture.initiator == Initiator.WAKE_WORD and not (text and capture.said):
+            # Nothing was said after the wake word, so the capture ends
+            # quietly, without a notice.
+            self._end_quietly(capture, reason, text)
+            return
         self.bus.publish(
             CaptureFinished(dialog_request_id=capture.id, text=text, reason=reason)
         )
@@ -725,6 +901,20 @@ class Recognizer:
             self._stop_speaking()
         self.card = card
         self.bus.publish(ShowCard(card=card))
+
+    def _end_quietly(self, capture, reason, text):
+        """Ends the capture without showing a card, and clears its own."""
+        if reason == CaptureEndReason.NO_WAKE_WORD:
+            log.info("Capture %s finished with %s", capture.id, reason)
+        self.bus.publish(
+            CaptureFinished(dialog_request_id=capture.id, text=text, reason=reason)
+        )
+        if self.card is not None and self.card.id == capture.id:
+            self._cancel_card_timer()
+            self.card = None
+            self.bus.publish(ClearCard(card_id=capture.id))
+        self.capture = None
+        self._set_state(DialogState.IDLE)
 
     def _start_card_timer(self, timeout):
         if self.card is None:

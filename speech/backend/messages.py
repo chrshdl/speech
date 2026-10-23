@@ -28,6 +28,11 @@ class Initiator(enum.StrEnum):
     # game, each reported by a CommandRecognized event as soon as it is
     # said, until stop-capture.
     COMMANDS = "COMMANDS"
+    # The service heard the wake word, such as "olivia", in its
+    # microphone's audio. The capture starts with the audio before it was
+    # heard, so a request said right after it is heard whole, and ends at
+    # the end of speech, as TAP_TO_TALK.
+    WAKE_WORD = "WAKE_WORD"
 
 
 class DialogState(enum.StrEnum):
@@ -58,6 +63,9 @@ class CaptureEndReason(enum.StrEnum):
     # No audio arrived in the time allowed, such as when the client did
     # not stream any.
     AUDIO_TIMEOUT = "AUDIO_TIMEOUT"
+    # The speech model did not confirm the wake word of a WAKE_WORD
+    # capture, which was heard by mistake. It ends without a card.
+    NO_WAKE_WORD = "NO_WAKE_WORD"
     # The service failed, see its log.
     ERROR = "ERROR"
 
@@ -188,6 +196,15 @@ class BrightnessCard(CamelModel):
     percent: int
 
 
+class VolumeCard(CamelModel):
+    """The volume of the speaker, just turned, in percent."""
+
+    type: Literal["VolumeCard"] = "VolumeCard"
+    id: str
+    title: str
+    percent: int
+
+
 class SongNote(CamelModel):
     """
     A note of a song, played with the voice of an additive synthesizer, or
@@ -231,7 +248,8 @@ Card = Annotated[
     | GameCard
     | SongCard
     | KeyboardCard
-    | BrightnessCard,
+    | BrightnessCard
+    | VolumeCard,
     Field(discriminator="type"),
 ]
 

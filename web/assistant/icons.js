@@ -10,6 +10,7 @@ const ICON_COLORS = {
   snow: "#7fc4ff",
   bolt: "#ffbf2e",
   fog: "#9fb0cc",
+  loudspeaker: "#ff5fa2",
 };
 
 function cloud(fill = ICON_COLORS.cloud, transform = "") {
@@ -29,6 +30,14 @@ function sun(cx = 32, cy = 32, r = 11) {
   }
   return `<g stroke="${ICON_COLORS.sun}" stroke-width="3.5" stroke-linecap="round">${rays.join("")}</g>
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="${ICON_COLORS.sun}"/>`;
+}
+
+// A speaker with two waves of sound, for the volume.
+function loudspeaker(color = ICON_COLORS.loudspeaker) {
+  return `<path fill="${color}" d="M8 25h11l15-13v40L19 39H8z" stroke="${color}" stroke-width="2" stroke-linejoin="round"/>
+    <g fill="none" stroke="${color}" stroke-width="4" stroke-linecap="round">
+      <path d="M41 24a11 11 0 0 1 0 16"/><path d="M47 17a21 21 0 0 1 0 30"/>
+    </g>`;
 }
 
 function moon(cx = 30, cy = 32, r = 16) {

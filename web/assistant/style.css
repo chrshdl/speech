@@ -891,35 +891,42 @@ body.has-card .step-aside {
   color: var(--faint);
 }
 
-/* The brightness card. */
+/* The meter of a level just set, on its card: the brightness and the volume. */
 
-.brightness {
+.meter {
+  --meter: #ffbf2e;
+  --meter-track: #fff3d1;
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   column-gap: 20px;
 }
 
-.brightness-icon {
+.meter-volume {
+  --meter: var(--pink);
+  --meter-track: #ffe3f0;
+}
+
+.meter-icon {
   width: 72px;
   height: 72px;
 }
 
-.brightness-bar {
+.meter-bar {
   height: 18px;
   border-radius: 999px;
-  background: #fff3d1;
+  background: var(--meter-track);
   overflow: hidden;
 }
 
-.brightness-level {
+.meter-fill {
   display: block;
   height: 100%;
   border-radius: 999px;
-  background: #ffbf2e;
+  background: var(--meter);
 }
 
-.brightness-percent {
+.meter-percent {
   margin: 0;
   min-width: 3.2ch;
   color: var(--ink);

@@ -272,6 +272,27 @@ def test_noise(tmp_path):
         loader.NoiseSource(str(tmp_path / "empty"))
 
 
+def test_noise_segment_of_a_dataset(tmp_path):
+    """
+    A segment of a recording of a dataset, read alone, is the one the
+    whole recording gives, with the same random numbers.
+    """
+    rng = np.random.RandomState(0)
+    long = rng.uniform(-0.5, 0.5, 48000).astype(np.float32)
+    soundfile.write(tmp_path / "long.wav", long, 16000, subtype="FLOAT")
+    with open(tmp_path / "noise.json", "w") as fid:
+        fid.write(json.dumps({"audio": str(tmp_path / "long.wav"), "text": ""}) + "\n")
+    source = loader.NoiseSource(str(tmp_path / "noise.json"))
+    torch.manual_seed(0)
+    segment = source.segment(16000, 16000)
+    torch.manual_seed(0)
+    loader._randint(0, 0)
+    start = loader._randint(0, len(long) - 16000)
+    np.testing.assert_array_equal(segment, long[start : start + 16000])
+    # A recording shorter than the segment is looped, as before.
+    assert len(source.segment(60000, 16000)) == 60000
+
+
 def test_from_epoch():
     preproc = loader.Preprocessor("test.json", start_and_end=False)
     volume = {"dbfs": [-6, -6]}
