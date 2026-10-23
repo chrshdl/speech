@@ -325,6 +325,9 @@ main {
   position: relative;
   height: 100%;
   container-type: size;
+  /* The meadow is cut to the screen. Overflowing, on a narrow screen it made
+     a phone lay the page out wider, the microphone button beyond its edge. */
+  overflow: clip;
 }
 
 /* The meadow's 1600 by 900 grid, cut to fill main like an svg's xMidYMax
