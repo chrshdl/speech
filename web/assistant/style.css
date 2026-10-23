@@ -166,7 +166,8 @@ body {
 }
 
 .mic,
-.keys-open {
+.keys-open,
+.drums-open {
   position: relative;
   display: grid;
   place-items: center;
@@ -191,17 +192,20 @@ body {
 }
 
 .mic:hover,
-.keys-open:hover {
+.keys-open:hover,
+.drums-open:hover {
   transform: scale(1.05);
 }
 
 .mic:active,
-.keys-open:active {
+.keys-open:active,
+.drums-open:active {
   transform: scale(0.94);
 }
 
 .mic:focus-visible,
-.keys-open:focus-visible {
+.keys-open:focus-visible,
+.drums-open:focus-visible {
   outline: 4px solid var(--pink);
   outline-offset: 6px;
 }
@@ -224,7 +228,8 @@ body {
 
 /* A rainbow ring around the button, which spins while listening. */
 .mic-ring,
-.keys-open-ring {
+.keys-open-ring,
+.drums-open-ring {
   position: absolute;
   inset: -7px;
   border-radius: 50%;
@@ -263,10 +268,12 @@ body[data-connection="offline"] .mic {
   }
 }
 
-/* The button that opens the synthesizer's keyboard, as round as the
-   microphone button, in the lower right corner, on the landing page only:
-   not over a card, the keyboard, a game, or while the service listens. */
-.keys-open {
+/* The buttons that open the synthesizer's keyboard, in the lower right
+   corner, and the drums, in the lower left, as round as the microphone
+   button, on the landing page only: not over a card, the keyboard, the
+   drums, a game, or while the service listens. */
+.keys-open,
+.drums-open {
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -277,24 +284,31 @@ body[data-connection="offline"] .mic {
     visibility 250ms;
 }
 
-body.has-card .keys-open,
-body.keyboard .keys-open,
-body.playing .keys-open,
-body:not([data-state="IDLE"]) .keys-open {
+.drums-open {
+  right: auto;
+  left: 20px;
+}
+
+body.has-card :is(.keys-open, .drums-open),
+body.keyboard :is(.keys-open, .drums-open),
+body.drums :is(.keys-open, .drums-open),
+body.playing :is(.keys-open, .drums-open),
+body:not([data-state="IDLE"]) :is(.keys-open, .drums-open) {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
 }
 
-body[data-connection="connecting"] .keys-open,
-body[data-connection="offline"] .keys-open {
+body[data-connection="connecting"] :is(.keys-open, .drums-open),
+body[data-connection="offline"] :is(.keys-open, .drums-open) {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* The keys fill the button, cut round, under the lip the microphone
-   button has. */
-.keys-open::after {
+/* The keys, or the drum, fill the button, cut round, under the lip the
+   microphone button has. */
+.keys-open::after,
+.drums-open::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -303,7 +317,8 @@ body[data-connection="offline"] .keys-open {
   pointer-events: none;
 }
 
-.keys-open-face {
+.keys-open-face,
+.drums-open-face {
   position: relative;
   width: 100%;
   height: 100%;
@@ -317,6 +332,12 @@ body[data-connection="offline"] .keys-open {
 
 .keys-open-black {
   fill: var(--ink);
+}
+
+.drums-open-stick {
+  stroke: #d9a066;
+  stroke-width: 7;
+  stroke-linecap: round;
 }
 
 /* The landing page. */
@@ -629,7 +650,8 @@ body.has-card .bubble {
   transition: translate 600ms cubic-bezier(0.34, 1.3, 0.64, 1);
 }
 
-body.has-card .step-aside {
+body.has-card .step-aside,
+body.drums .step-aside {
   translate: calc(300 * var(--u)) 0;
 }
 
@@ -1191,7 +1213,8 @@ body.keyboard .bubble {
   display: none;
 }
 
-.keys-hud {
+.keys-hud,
+.drums-hud {
   position: absolute;
   top: 34px;
   left: 50%;
@@ -1215,13 +1238,15 @@ body.keyboard .bubble {
   fill: var(--pink);
 }
 
-.keys-title {
+.keys-title,
+.drums-title {
   color: var(--purple);
   font-size: 24px;
   font-weight: 600;
 }
 
-.keys-hud .card-close {
+.keys-hud .card-close,
+.drums-hud .card-close {
   margin: 0;
 }
 
@@ -1352,6 +1377,143 @@ body.keyboard .bubble {
 .keys-key.black.down {
   background: var(--pink);
   box-shadow: inset 0 4px 0 rgba(0, 0, 0, 0.15);
+}
+
+/* The drums: their name above, as the keyboard's patch, and the kit below
+   it, as large as fits. Only the drums take taps, not the space between
+   them, and a drum hit only changes its colors, at once, as a key does. */
+
+body.drums .greeting-text,
+body.drums .bubble {
+  opacity: 0;
+}
+
+.drums {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.drums[hidden] {
+  display: none;
+}
+
+.drums-hud-icon {
+  width: 28px;
+  height: 28px;
+  color: var(--pink);
+  fill: var(--pink);
+}
+
+.drums-kit {
+  position: absolute;
+  left: 24px;
+  top: 110px;
+  width: calc(100% - 48px);
+  height: calc(100% - 126px);
+  overflow: visible;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* On a tall screen, such as a phone's, the drums in rows on drums.js's
+   tall grid, without their stands: the cymbals, the hi-hat and the toms,
+   the snare and the floor tom, and the bass drum. */
+.drums-kit.tall .drums-stand {
+  display: none;
+}
+
+.drums-kit.tall [data-drum="crash"] {
+  translate: -90px 10px;
+}
+
+.drums-kit.tall [data-drum="ride"] {
+  translate: -330px 40px;
+}
+
+.drums-kit.tall [data-drum="hihat"] {
+  translate: -10px 60px;
+}
+
+.drums-kit.tall [data-drum="tom1"] {
+  translate: -90px 120px;
+}
+
+.drums-kit.tall [data-drum="tom2"] {
+  translate: -110px 120px;
+}
+
+.drums-kit.tall [data-drum="snare"] {
+  translate: -30px 145px;
+}
+
+.drums-kit.tall [data-drum="floor"] {
+  translate: -370px 140px;
+}
+
+.drums-kit.tall [data-drum="kick"] {
+  translate: -200px 350px;
+}
+
+.drums-kit [data-drum] {
+  pointer-events: visiblePainted;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.drums-stand {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.drum-shell {
+  fill: var(--shell);
+}
+
+.drum-stripe {
+  fill: rgba(255, 255, 255, 0.35);
+}
+
+.drum-head {
+  fill: #fffaf0;
+  stroke: var(--hoop);
+  stroke-width: 7;
+}
+
+.drum.hit .drum-head {
+  fill: var(--hit);
+}
+
+.kick-rainbow {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+}
+
+.cymbal-top {
+  fill: #ffd43b;
+  stroke: #f2b705;
+  stroke-width: 4;
+}
+
+.cymbal-groove {
+  fill: none;
+  stroke: #f2b705;
+  stroke-width: 3;
+}
+
+.cymbal-bell {
+  fill: #fcc419;
+}
+
+.cymbal.hit .cymbal-top,
+.cymbal.hit .cymbal-bell {
+  fill: #fff3bf;
 }
 
 /* Superball. */
@@ -2319,12 +2481,19 @@ body.playing .bubble {
   animation-delay: 0.8s;
 }
 
-/* Narrow screens: the score, and the keyboard's name with the button that
-   closes it, go below the bar, whose buttons they ran under. */
+/* Narrow screens: the score, and the keyboard's and the drums' names with
+   the buttons that close them, go below the bar, whose buttons they ran
+   under. */
 @media (max-width: 640px) {
   .game-hud,
-  .keys-hud {
+  .keys-hud,
+  .drums-hud {
     top: 112px;
+  }
+
+  .drums-kit {
+    top: 184px;
+    height: calc(100% - 200px);
   }
 
   .game-banner {

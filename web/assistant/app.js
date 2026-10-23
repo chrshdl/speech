@@ -28,6 +28,11 @@ const ui = {
   keysDown: $("keys-down"),
   keysUp: $("keys-up"),
   keysOctave: $("keys-octave"),
+  drums: $("drums"),
+  drumsTitle: $("drums-title"),
+  drumsKit: $("drums-kit"),
+  drumsClose: $("drums-close"),
+  drumsOpen: $("drums-open"),
 };
 
 // Audio is sent in chunks of 100 ms.
@@ -41,6 +46,7 @@ let starting = false;
 let heard = null; // The final transcript of the last capture, by its id.
 let game = null; // The Superball being played, and the id of its card.
 let keyboard = null; // The synthesizer's keyboard shown, and the id of its card.
+let drums = null; // The drums shown, and the id of their card.
 let commands = null; // The id of the capture that hears the game's commands.
 let lastCommands = null; // The last such id, also once that capture finished.
 let startingCommands = false; // Whether such a capture is being started.
@@ -314,14 +320,19 @@ function showCard(data) {
     startKeyboard(data);
     return;
   }
+  if (data.type === "DrumsCard") {
+    startDrums(data);
+    return;
+  }
   const render = RENDERERS[data.type];
   if (!render) {
     return; // A card type this client does not know.
   }
   // Another card, such as the answer to a question, ends the game, or
-  // closes the keyboard.
+  // closes the keyboard or the drums.
   endGame();
   endKeyboard();
+  endDrums();
   // A card with the id of the card shown updates it in place.
   const fresh = !card || card.data.id !== data.id || card.data.type !== data.type;
   if (fresh) {
@@ -375,6 +386,10 @@ function hideCard() {
   }
   if (data.type === "KeyboardCard") {
     endKeyboard();
+    return;
+  }
+  if (data.type === "DrumsCard") {
+    endDrums();
     return;
   }
   if (data.type === "SongCard") {
@@ -457,17 +472,19 @@ function prepareSound() {
     tones ??= new AudioContext();
     loadSynth().catch(() => {});
     loadSpeaker().catch(() => {});
+    loadDrumSounds().catch(() => {});
   } catch {
     // Without Web Audio there are no tones, songs or speech.
   }
 }
 
 // Suspends the tones' context once nothing played for IDLE_MS, also not a
-// song, and while the keyboard is shown, so a key sounds at once.
+// song, and while the keyboard or the drums are shown, so a key or a drum
+// sounds at once.
 function idleTones() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (song || keyboard || speaking || radio || tones.state !== "running") {
+    if (song || keyboard || drums || speaking || radio || tones.state !== "running") {
       return;
     }
     suspending = tones.suspend().catch(() => {}).finally(() => {
@@ -1091,6 +1108,129 @@ function endKeyboard() {
   idleTones();
 }
 
+// The drums, see drums.js: their card shows them, and each drum hit plays
+// its recording, decoded once, on the tones' context, until they are closed.
+
+// Below full scale, as speech, so a chime over a drum does not clip. The
+// recordings peak at full scale.
+const DRUMS_VOLUME = 0.8;
+// The drums' sounds are mixed through a limiter, as several drums hit at once
+// add up: up to DRUMS_LIMIT, as loud as one drum, they pass as they are, and
+// above it they are bent by tanh toward full scale. A WaveShaperNode does
+// that without delay, unlike a DynamicsCompressorNode, which looks ahead.
+const DRUMS_LIMIT = DRUMS_VOLUME;
+let drumSounds = null; // Decoding the drums' sounds, see decodeDrums().
+
+function loadDrumSounds() {
+  drumSounds ??= decodeDrums(tones).catch((error) => {
+    drumSounds = null;
+    throw error;
+  });
+  return drumSounds;
+}
+
+function startDrums(data) {
+  if (drums && drums.id === data.id) {
+    return;
+  }
+  hideCard();
+  card = { data, element: null };
+  const shown = { id: data.id, kit: null, sounds: null, mix: null };
+  drums = shown;
+  ui.drumsTitle.textContent = data.title;
+  ui.drums.hidden = false;
+  document.body.classList.add("drums");
+  // A tap allows sound, so a drum also wakes the context, as a key does,
+  // also on lifting, which WPE WebKit takes as the tap.
+  const wake = () => {
+    if (tones && tones.state !== "running") {
+      tones.resume().catch(() => {});
+    }
+  };
+  shown.kit = new DrumKit({
+    element: ui.drumsKit,
+    onHit: (name) => {
+      wake();
+      playDrum(shown, name);
+    },
+    onLift: wake,
+  });
+  loadDrums(shown);
+}
+
+// Readies the drums' sounds and their mix.
+async function loadDrums(shown) {
+  try {
+    unlockTones();
+    const sounds = await loadDrumSounds();
+    await wakeTones();
+    if (drums !== shown) {
+      return; // Closed while loading.
+    }
+    if (tones.state !== "running") {
+      tones.resume().catch(() => {});
+    }
+    // The limiter's curve spans twice full scale, which the gain before it
+    // halves into the curve's -1 to 1.
+    const gain = tones.createGain();
+    gain.gain.value = DRUMS_VOLUME / 2;
+    const limiter = tones.createWaveShaper();
+    const curve = new Float32Array(1025);
+    for (let i = 0; i < curve.length; i++) {
+      const x = 2 * ((2 * i) / (curve.length - 1) - 1);
+      const over = Math.max(Math.abs(x) - DRUMS_LIMIT, 0);
+      const bent = (1 - DRUMS_LIMIT) * Math.tanh(over / (1 - DRUMS_LIMIT));
+      curve[i] = Math.sign(x) * (Math.min(Math.abs(x), DRUMS_LIMIT) + bent);
+    }
+    limiter.curve = curve;
+    gain.connect(limiter).connect(tones.destination);
+    shown.mix = { gain, limiter };
+    shown.sounds = sounds;
+  } catch (error) {
+    console.error("Could not ready the drums:", error);
+  }
+}
+
+function playDrum(shown, name) {
+  if (!shown.sounds) {
+    return;
+  }
+  const source = tones.createBufferSource();
+  source.buffer = shown.sounds.get(name);
+  source.connect(shown.mix.gain);
+  source.start();
+}
+
+// The drums button asks the service for the drums, as asking for them by
+// voice does, and its tap allows sound, so the first drum sounds at once.
+function openDrums() {
+  unlockTones();
+  if (document.body.dataset.connection !== "online") {
+    return;
+  }
+  post("/v1/intents/PlayDrums").catch(() => {});
+}
+
+function endDrums() {
+  if (!drums) {
+    return;
+  }
+  const { kit, mix } = drums;
+  drums = null;
+  kit.destroy();
+  if (mix) {
+    // What still rings, such as a cymbal, fades rather than clicks.
+    mix.gain.gain.setTargetAtTime(0, tones.currentTime, 0.02);
+    setTimeout(() => {
+      mix.gain.disconnect();
+      mix.limiter.disconnect();
+    }, 150);
+  }
+  ui.drums.hidden = true;
+  document.body.classList.remove("drums");
+  idleTones();
+}
+
 // Capturing.
 
 async function toggleCapture() {
@@ -1107,8 +1247,8 @@ async function toggleCapture() {
     }
     dismissCard();
   }
-  if (keyboard) {
-    // The button closes the keyboard, to ask something else.
+  if (keyboard || drums) {
+    // The button closes the keyboard or the drums, to ask something else.
     dismissCard();
   }
   if (dialogState === "LISTENING") {
@@ -1275,12 +1415,15 @@ async function start() {
   ui.themeToggle.addEventListener("click", toggleTheme);
   ui.mic.addEventListener("click", toggleCapture);
   ui.keysOpen.addEventListener("click", openKeyboard);
+  ui.drumsOpen.addEventListener("click", openDrums);
   ui.steerLeft.addEventListener("click", () => steer("LEFT"));
   ui.steerRight.addEventListener("click", () => steer("RIGHT"));
   // Also on lifting, as a click may not come: WPE WebKit makes none while
   // it takes another finger as down, such as of a chord on the keys.
   ui.keysClose.addEventListener("pointerup", () => dismissCard());
   ui.keysClose.addEventListener("click", () => dismissCard());
+  ui.drumsClose.addEventListener("pointerup", () => dismissCard());
+  ui.drumsClose.addEventListener("click", () => dismissCard());
   // The octave buttons shift on touching, at once, which is also why no
   // click is needed, and on a click from the keyboard, without a pointer.
   for (const [button, octaves] of [

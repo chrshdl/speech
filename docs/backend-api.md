@@ -162,6 +162,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `VolumeCard` | `title`, `percent` | The volume of the speaker, just turned, in percent. The client plays a short tone, at the new volume |
 | `RadioCard` | `title`, `url`, `sampleRate`, `channels`, `encoding` (`LINEAR16`), `logo`, `song`, `artist`, `cover` | Play the web radio station `title`, whose audio streams from `url`, `GET /v1/radio/stream`, and show what plays: the `song` and its `artist`, empty when the station does not say, and the song's `cover`, an image, or else the station's `logo`, both from `GET /v1/radio/images/{key}`. The service updates it, with the same id, as each song starts. It plays on beneath the cards shown over it, see below, until the user closes it or asks to stop it, when the service clears it, or another card that stays until dismissed, such as a `SongCard`, replaces it. |
 | `KeyboardCard` | `title`, `patch`, `url` | Show a keyboard that plays the Roland D-50 patch at `url`, titled with its name. It stays until the user closes it, or another card replaces it. |
+| `DrumsCard` | `title` | Show a drum kit to tap, which plays recordings of its own. It stays until the user closes it, or another card replaces it. |
 | `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
 
@@ -177,7 +178,7 @@ The lifecycle of a capture's card:
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
    for an answer, which takes longer to read, or 5 seconds later for a
    `BrightnessCard` or `VolumeCard`, read at a glance, but never for a `GameCard`, a
-   `SongCard`, a `KeyboardCard` or a `RadioCard`. A new capture replaces
+   `SongCard`, a `KeyboardCard`, a `DrumsCard` or a `RadioCard`. A new capture replaces
    the card sooner, except a `COMMANDS` capture, which shows no cards.
 
 When the user dismisses the card, such as by tapping its X, tell the
@@ -238,6 +239,7 @@ does not match.
 | `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
 | `VolumeUp`, `VolumeDown` | A `VolumeCard`, having turned the speaker up or down a step, such as "volume up", "turn it down", "louder" or "quieter", never to silence, so an answer can still be heard. With `--volume-control`, see below. Its `percent` is of the device's levels: a Jabra SPEAK 510 has 12, which its dots show, so 1 dot is 8%. Its control's 12 values reach only 8 of them (1, 2, 3, 4, 6, 7, 10 and 12 dots), so asking turns to the next of those. When the speakerphone's own + and - turn it a level, the service shows that too, in a `VolumeCard` for the intent `ShowVolume`, except while it listens, and keeps it: they turn the volume themselves without telling ALSA's driver, so the service counts the presses, see `speech/backend/volume.py`. That needs the service's user in the group `input` |
 | `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
+| `PlayDrums` | A `DrumsCard` of the drums, such as "play the drums" or "drum kit" |
 | `PlayRadio` | A `RadioCard` of TOGGO Radio, the children's station of Super RTL, such as "play toggo radio", "play webradio" or "turn on the radio". The song playing is pushed by the station's host, streamABC, and its cover is looked up with the iTunes Search API, preferring a release without a Parental Advisory label, see `speech/backend/radio.py`. Needs ffmpeg, without which the service does not recognize it, and internet, without which the station plays without its song. |
 | `StopRadio` | No card: stops the radio, clearing its card and the capture's, for the landing page, such as "stop the radio", "turn off the radio" or "stop" |
 | `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
@@ -601,8 +603,15 @@ while listening and thinking, and the page shows the cards the service
 sends, for which the unicorn steps aside. A round button with keys in the
 lower right corner, as big as the microphone button, opens the
 synthesizer's keyboard, with `POST /v1/intents/PlayKeyboard`, for a child
-who would rather press than ask; it shows only on the landing page, with
-no card, game or capture. The button in the upper left
+who would rather press than ask, and a round drum in the lower left
+corner opens the drums, with `POST /v1/intents/PlayDrums`; they show only
+on the landing page, with no card, game or capture. The drums are a kit
+of eight, a bass drum, a snare, three toms, a hi-hat, a crash and a ride,
+which a tap plays, also with several fingers at once. Their sounds are
+recordings, in `web/assistant/drums`, decoded once when the page loads,
+so a tap sounds at once, and mixed through a limiter, so drums hit
+together do not distort, see `web/assistant/drums.js`. On a tall screen,
+such as a phone's, the drums are arranged in rows. The button in the upper left
 corner switches to a night sky, with a sleepy moon, stars and fireflies,
 and the page remembers the choice. Above an answer, such as the
 weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka font is in

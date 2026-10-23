@@ -190,6 +190,19 @@ class KeyboardCard(CamelModel):
     url: str
 
 
+class DrumsCard(CamelModel):
+    """
+    Play the drums: the client shows a drum kit, which plays recordings of
+    its own. The card stays until the user closes it, or another card
+    replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["DrumsCard"] = "DrumsCard"
+    id: str
+    title: str
+
+
 class RadioCard(CamelModel):
     """
     Play a web radio station: the client streams its audio from url, 16 bit
@@ -284,6 +297,7 @@ Card = Annotated[
     | GameCard
     | SongCard
     | KeyboardCard
+    | DrumsCard
     | RadioCard
     | BrightnessCard
     | VolumeCard,
