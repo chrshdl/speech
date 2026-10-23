@@ -108,6 +108,7 @@ function connectEvents() {
   events.onopen = () => {
     document.body.dataset.connection = "online";
     setStatus("");
+    checkShown();
   };
   events.onerror = () => {
     // EventSource reconnects by itself.
@@ -138,6 +139,7 @@ function connectEvents() {
       }
       listening = null;
     }
+    duckRadio();
     listenForCommands();
   });
   on("Recognition.CaptureFinished", ({ dialogRequestId, text, reason }) => {
@@ -160,10 +162,35 @@ function connectEvents() {
     if (card && card.data.id === cardId) {
       hideCard();
     }
+    // Also beneath another card.
+    if (radio && radio.id === cardId) {
+      stopRadio();
+    }
   });
   on("Audio.StopAudioStream", () => stopAudio());
   on("Speech.Speak", (speech) => speak(speech));
   on("Speech.StopSpeaking", ({ speechId }) => stopSpeaking(speechId));
+}
+
+// After the events reconnect, such as when the service restarted, the card
+// shown before stays only if the service still shows it, and the radio plays
+// on only if it still plays it. What came since is the service's own.
+async function checkShown() {
+  const [shown, playing] = [card, radio];
+  if (!shown && !playing) {
+    return;
+  }
+  try {
+    const state = await (await fetch("/v1/state")).json();
+    if (playing && radio === playing && state.playing?.id !== playing.id) {
+      stopRadio();
+    }
+    if (shown && card === shown && state.card?.id !== shown.data.id) {
+      hideCard();
+    }
+  } catch {
+    // Checked again when the events reconnect.
+  }
 }
 
 // Cards.
@@ -242,6 +269,29 @@ function renderMeter(body, kind, icon, percent) {
   body.querySelector(".meter-fill").style.width = `${percent}%`;
 }
 
+// The radio: the song's cover, or else the station's logo, beside what
+// plays, under bars that bounce while it sounds.
+RENDERERS.RadioCard = (data, body) => {
+  body.innerHTML = `
+    <div class="radio">
+      <div class="radio-cover"><img alt="" /></div>
+      <div class="radio-info">
+        <p class="radio-live">
+          <span class="radio-bars" aria-hidden="true"><span></span><span></span><span></span><span></span></span>
+          Live
+        </p>
+        <p class="radio-song"></p>
+        <p class="radio-artist"></p>
+      </div>
+    </div>`;
+  const cover = body.querySelector(".radio-cover img");
+  // Faded in once loaded, rather than drawn as it arrives.
+  cover.addEventListener("load", () => cover.classList.add("loaded"), { once: true });
+  cover.src = data.cover || data.logo;
+  body.querySelector(".radio-song").textContent = data.song;
+  body.querySelector(".radio-artist").textContent = data.artist;
+};
+
 RENDERERS.BrightnessCard = (data, body) => renderMeter(body, "brightness", sun(), data.percent);
 RENDERERS.VolumeCard = (data, body) => renderMeter(body, "volume", loudspeaker(), data.percent);
 
@@ -294,6 +344,10 @@ function showCard(data) {
   document.body.classList.add("has-card");
   if (data.type === "SongCard") {
     playSong(card);
+  }
+  if (data.type === "RadioCard") {
+    playRadio(data);
+    showRadioSounding();
   }
   if (data.type === "VolumeCard" && fresh) {
     // Heard at the new volume.
@@ -353,6 +407,9 @@ function dismissCard() {
   }
   const { id } = card.data;
   hideCard();
+  if (radio && radio.id === id) {
+    stopRadio();
+  }
   post("/v1/display/card-dismissed", { cardId: id });
 }
 
@@ -410,7 +467,7 @@ function prepareSound() {
 function idleTones() {
   clearTimeout(idleTimer);
   idleTimer = setTimeout(() => {
-    if (song || keyboard || speaking || tones.state !== "running") {
+    if (song || keyboard || speaking || radio || tones.state !== "running") {
       return;
     }
     suspending = tones.suspend().catch(() => {}).finally(() => {
@@ -610,6 +667,7 @@ async function speak({ speechId, cardId, url, sampleRate }) {
   }
   const playing = { id: speechId, cardId, request: new AbortController(), node: null };
   speaking = playing;
+  duckRadio();
   try {
     const [response] = await Promise.all([fetch(url, { signal: playing.request.signal }), loadSpeaker()]);
     if (!response.ok) {
@@ -635,29 +693,13 @@ async function speak({ speechId, cardId, url, sampleRate }) {
       if (data === "ended" && speaking === playing) {
         speaking = null;
         node.disconnect();
+        duckRadio();
         idleTones();
       }
     };
     node.connect(tones.destination);
     playing.node = node;
-    // The samples as they come, which can split one between two reads.
-    const reader = response.body.getReader();
-    let odd = null;
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done || speaking !== playing) {
-        break;
-      }
-      const bytes = odd ? new Uint8Array(odd.length + value.length) : new Uint8Array(value.length);
-      if (odd) {
-        bytes.set(odd);
-      }
-      bytes.set(value, odd ? odd.length : 0);
-      const even = bytes.length & ~1;
-      odd = even < bytes.length ? bytes.slice(even) : null;
-      const samples = bytes.buffer.slice(0, even);
-      node.port.postMessage(samples, [samples]);
-    }
+    await feedSpeaker(response, node, 1, () => speaking === playing);
     node.port.postMessage("end");
   } catch (error) {
     if (error.name !== "AbortError") {
@@ -669,6 +711,37 @@ async function speak({ speechId, cardId, url, sampleRate }) {
   }
 }
 
+// Posts the 16 bit samples of the response to the speaker node as they
+// arrive, in whole frames of so many channels, which a read can split, until
+// the response ends or playing() is false.
+async function feedSpeaker(response, node, channels, playing) {
+  const frame = 2 * channels;
+  const reader = response.body.getReader();
+  let rest = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done || !playing()) {
+      return;
+    }
+    const bytes = new Uint8Array((rest ? rest.length : 0) + value.length);
+    if (rest) {
+      bytes.set(rest);
+    }
+    bytes.set(value, rest ? rest.length : 0);
+    const whole = bytes.length - (bytes.length % frame);
+    rest = whole < bytes.length ? bytes.slice(whole) : null;
+    const samples = bytes.buffer.slice(0, whole);
+    node.port.postMessage(samples, [samples]);
+  }
+}
+
+// Stops the speaker node, which fades out, and disconnects it once it has.
+function silenceSpeaker(node) {
+  node.port.onmessage = null;
+  node.port.postMessage("stop");
+  setTimeout(() => node.disconnect(), (SPEECH_FADE + 0.05) * 1000);
+}
+
 // Stops the speech playing, or only the one with the id.
 function stopSpeaking(id) {
   if (!speaking || (id && speaking.id !== id)) {
@@ -678,12 +751,168 @@ function stopSpeaking(id) {
   speaking = null;
   request.abort();
   if (node) {
-    node.port.onmessage = null;
-    node.port.postMessage("stop");
-    setTimeout(() => node.disconnect(), (SPEECH_FADE + 0.05) * 1000);
+    silenceSpeaker(node);
   }
+  duckRadio();
   idleTones();
 }
+
+// Web radio: a RadioCard streams the station's audio from the service, which
+// decodes it, and a speaker of speaker.js plays it as it arrives, as speech,
+// so the page needs neither the internet nor codecs. It is turned down while
+// the service listens or speaks, plays on beneath the cards shown over it,
+// such as the volume's, and stops when its card is cleared or closed.
+
+// Below full scale, as speech, so a chime over it does not clip.
+const RADIO_VOLUME = 0.8;
+// The share of its volume it keeps while turned down.
+const RADIO_DUCKED = 0.15;
+// The seconds of audio it holds before it plays, also after it ran dry, so a
+// slow network makes it pause rather than stutter.
+const RADIO_PREBUFFER = 1;
+// How long it waits to connect again when the stream ended or failed, and
+// how often in a row it tries before it gives up.
+const RADIO_RETRY_MS = 3000;
+const RADIO_RETRIES = 5;
+let radio = null; // The station playing: its card's id, its stream and its nodes.
+
+async function playRadio({ id, url, sampleRate, channels }) {
+  if (radio && radio.url === url) {
+    // Asked for again, it plays on, for its new card.
+    radio.id = id;
+    return;
+  }
+  stopRadio();
+  if (!tones) {
+    return;
+  }
+  const playing = { id, url, sampleRate, channels, gain: null, request: null, node: null };
+  Object.assign(playing, { retry: null, failures: 0, error: null, sounding: false });
+  radio = playing;
+  try {
+    unlockTones();
+    await loadSpeaker();
+    await wakeTones();
+    if (tones.state !== "running") {
+      // Before a tap allows sound, it does not resume, as for songs.
+      await Promise.race([tones.resume(), new Promise((resolve) => setTimeout(resolve, 1000))]);
+      if (tones.state !== "running") {
+        throw new Error("Sound is not allowed before a tap");
+      }
+    }
+  } catch (error) {
+    if (radio === playing) {
+      console.error("Could not play the radio:", error);
+      giveUpRadio();
+    }
+    return;
+  }
+  if (radio !== playing) {
+    return; // Stopped while starting.
+  }
+  playing.gain = tones.createGain();
+  playing.gain.gain.value = radioVolume();
+  playing.gain.connect(tones.destination);
+  streamRadio(playing);
+}
+
+// Plays the radio's stream on a speaker of its own until the stream ends,
+// such as when the station's connection dropped, and then connects again.
+async function streamRadio(playing) {
+  const request = new AbortController();
+  const node = new AudioWorkletNode(tones, "speaker", {
+    numberOfInputs: 0,
+    outputChannelCount: [playing.channels],
+    processorOptions: { sampleRate: playing.sampleRate, channels: playing.channels, prebuffer: RADIO_PREBUFFER },
+  });
+  node.port.onmessage = ({ data }) => {
+    if (data === "playing") {
+      playing.failures = 0;
+    }
+    playing.sounding = data === "playing";
+    showRadioSounding();
+  };
+  node.connect(playing.gain);
+  Object.assign(playing, { request, node });
+  const current = () => radio === playing && playing.node === node;
+  try {
+    const response = await fetch(playing.url, { signal: request.signal });
+    if (!response.ok) {
+      throw new Error(`${playing.url}: ${response.status}`);
+    }
+    await feedSpeaker(response, node, playing.channels, current);
+  } catch (error) {
+    playing.error = error;
+  }
+  if (!current()) {
+    return; // Stopped.
+  }
+  silenceSpeaker(node);
+  playing.node = null;
+  playing.sounding = false;
+  showRadioSounding();
+  if (++playing.failures > RADIO_RETRIES) {
+    console.error("Could not play the radio:", playing.error);
+    giveUpRadio();
+    return;
+  }
+  playing.retry = setTimeout(() => {
+    playing.retry = null;
+    if (radio === playing) {
+      streamRadio(playing);
+    }
+  }, RADIO_RETRY_MS);
+}
+
+// Stops the radio that cannot play, and closes its card.
+function giveUpRadio() {
+  const { id } = radio;
+  stopRadio();
+  if (card && card.data.id === id) {
+    dismissCard();
+  } else {
+    post("/v1/display/card-dismissed", { cardId: id });
+  }
+}
+
+function stopRadio() {
+  if (!radio) {
+    return;
+  }
+  const { request, node, gain, retry } = radio;
+  radio = null;
+  clearTimeout(retry);
+  request?.abort();
+  if (node) {
+    silenceSpeaker(node);
+  }
+  if (gain) {
+    setTimeout(() => gain.disconnect(), (SPEECH_FADE + 0.05) * 1000);
+  }
+  showRadioSounding();
+  idleTones();
+}
+
+function radioVolume() {
+  const ducked = starting || dialogState !== "IDLE" || speaking;
+  return RADIO_VOLUME * (ducked ? RADIO_DUCKED : 1);
+}
+
+// Turns the radio down while listening or speaking, and up again after.
+function duckRadio() {
+  if (radio && radio.gain) {
+    radio.gain.gain.setTargetAtTime(radioVolume(), tones.currentTime, 0.08);
+  }
+}
+
+// The bars of the radio's card bounce while it sounds.
+function showRadioSounding() {
+  if (card && card.element && card.data.type === "RadioCard") {
+    card.element.classList.toggle("playing", Boolean(radio && radio.sounding));
+  }
+}
+
+
 
 function isCommands(id) {
   return startingCommands || (id !== null && id === lastCommands);
@@ -892,6 +1121,7 @@ async function toggleCapture() {
 async function startCapture(initiator) {
   starting = true;
   startingCommands = initiator === "COMMANDS";
+  duckRadio();
   try {
     // Chime before listening, so the microphone opening never dulls the
     // tone, which is the cue to speak, and the microphone misses it.
@@ -936,6 +1166,7 @@ async function startCapture(initiator) {
   } finally {
     starting = false;
     startingCommands = false;
+    duckRadio();
   }
 }
 

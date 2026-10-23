@@ -275,8 +275,11 @@ class Recognizer:
                 a speech.intents.IntentRecognizer.
             handlers (dict, optional): Answers each intent by name, with an
                 object whose async card(card_id, slots) returns the card to
-                show for the intent's slots and whose async close()
-                releases it.
+                show for the intent's slots, or None to show none, and whose
+                async close() releases it. For a card that plays on, such
+                as a RadioCard, its updates(card), if it has one, yields the
+                card again as what plays changes. A handler whose
+                stops_playing is true stops what plays.
             commands (optional): Recognizes the commands of a COMMANDS
                 capture, as intents does the intents.
             voice (optional): Speaks the answers whose handler has a
@@ -311,6 +314,10 @@ class Recognizer:
         self.card_timer = None
         # A card the client dismissed, which later updates must not show.
         self.dismissed = None
+        # The card that plays on beneath the cards shown over it, such as a
+        # RadioCard, and the task that follows its updates.
+        self.playing = None
+        self.follow_task = None
         # The answer spoken last, until it is stopped.
         self.speech = None
         self.wake_word = wake_word
@@ -334,6 +341,11 @@ class Recognizer:
     def snapshot(self):
         """The events that bring a new subscriber up to date."""
         events = [self._state_event()]
+        # What plays first, so a client plays it beneath the card shown.
+        if self.playing is not None and (
+            self.card is None or self.card.id != self.playing.id
+        ):
+            events.append(ShowCard(card=self.playing))
         if self.card is not None:
             events.append(ShowCard(card=self.card))
         return events
@@ -451,8 +463,9 @@ class Recognizer:
     async def answer(self, name):
         """
         Answers the intent by name as if it was heard, without slots, such as
-        for a button, shows its card and returns it. Raises Busy unless IDLE,
-        and KeyError for an intent the service does not answer.
+        for a button, shows its card and returns it, or None if it shows
+        none. Raises Busy unless IDLE, and KeyError for an intent the service
+        does not answer.
         """
         if self.handlers.get(name) is None:
             raise KeyError(name)
@@ -461,21 +474,30 @@ class Recognizer:
         card_id = uuid.uuid4().hex
         log.info("Answering %s for %s", name, card_id)
         card = await self._card(name, card_id, {})
-        self._show(card)
-        self._speak(name, card)
-        if not getattr(card, "UNTIL_DISMISSED", False):
-            self._start_card_timer(self.settings.answer_card_timeout)
+        self._present(name, card, card_id, self.settings.answer_card_timeout)
         return card
 
     def card_dismissed(self, card_id):
-        """The client dismissed the card. Raises Busy if it is not shown."""
-        if self.card is None or self.card.id != card_id:
+        """
+        The client dismissed the card. Raises Busy if it is neither shown nor
+        plays beneath the card shown.
+        """
+        shown = self.card is not None and self.card.id == card_id
+        playing = self.playing is not None and self.playing.id == card_id
+        if not (shown or playing):
             raise Busy(f"No card {card_id} is shown.")
-        self._cancel_card_timer()
-        self.card = None
         self.dismissed = card_id
-        if self.speech is not None and self.speech.card_id == card_id:
-            self._stop_speaking()
+        if playing:
+            # The client stopped it already.
+            self._stop_playing(publish=False)
+        if shown:
+            self._cancel_card_timer()
+            self.card = None
+            if self.speech is not None and self.speech.card_id == card_id:
+                self._stop_speaking()
+            # What plays beneath it shows again.
+            if self.playing is not None:
+                self._show(self.playing)
 
     def shutdown(self):
         """
@@ -490,8 +512,11 @@ class Recognizer:
             self.capture.audio.put_nowait(_STOP)
 
     async def close(self):
-        """Ends the capture, listening for the wake word and the event subscriptions."""
-        tasks = [self.wake_task]
+        """
+        Ends the capture, listening for the wake word, following what plays
+        and the event subscriptions.
+        """
+        tasks = [self.wake_task, self.follow_task]
         if self.capture is not None:
             tasks.append(self.capture.task)
         for task in tasks:
@@ -760,12 +785,7 @@ class Recognizer:
             CaptureFinished(dialog_request_id=capture.id, text=text, reason=reason)
         )
         card, timeout, intent = await self._answer(capture, text, reason)
-        self._show(card)
-        if intent is not None:
-            self._speak(intent, card)
-        # A card such as a game's stays until the client dismisses it.
-        if not getattr(card, "UNTIL_DISMISSED", False):
-            self._start_card_timer(timeout)
+        self._present(intent, card, capture.id, timeout)
         self.capture = None
         self._set_state(DialogState.IDLE)
 
@@ -809,14 +829,37 @@ class Recognizer:
         card = await self._card(name, capture.id, match.slots)
         return card, self.settings.answer_card_timeout, name
 
+    def _present(self, name, card, card_id, timeout):
+        """
+        Shows the card that answers the intent by name, or with no intent the
+        capture's last, for so many seconds, speaks it and follows what it
+        plays. With no card to show, the card with card_id, the capture's
+        transcript, goes.
+        """
+        if card is None:
+            self._uncover(card_id)
+            return
+        self._show(card)
+        if name is not None:
+            self._speak(name, card)
+            self._follow(name, card)
+        if getattr(card, "BRIEF", False):
+            timeout = self.settings.card_timeout
+        # A card such as a game's stays until the client dismisses it.
+        if not getattr(card, "UNTIL_DISMISSED", False):
+            self._start_card_timer(timeout)
+
     async def _card(self, name, card_id, slots):
         """
-        The card of the handler of the intent by name, or a notice that it
-        could not answer.
+        The card of the handler of the intent by name, None for none, or a
+        notice that it could not answer.
         """
+        handler = self.handlers[name]
+        if getattr(handler, "stops_playing", False):
+            self._stop_playing()
         try:
             return await asyncio.wait_for(
-                self.handlers[name].card(card_id, slots),
+                handler.card(card_id, slots),
                 self.settings.answer_timeout,
             )
         except Exception:
@@ -902,20 +945,87 @@ class Recognizer:
         self._cancel_card_timer()
         if self.speech is not None and self.speech.card_id != card.id:
             self._stop_speaking()
+        ended = None
+        if (
+            self.playing is not None
+            and self.playing.id != card.id
+            and getattr(card, "UNTIL_DISMISSED", False)
+        ):
+            # A card that stays, such as a song's or the radio asked for
+            # again, ends what plays, cleared after the card shows, so a
+            # client can play on what both play.
+            ended = self.playing
+            self._stop_playing(publish=False)
+        if getattr(card, "PLAYS_ON", False):
+            self.playing = card
         self.card = card
         self.bus.publish(ShowCard(card=card))
+        if ended is not None:
+            self.bus.publish(ClearCard(card_id=ended.id))
+
+    def _uncover(self, card_id):
+        """
+        The card with the id goes, if shown: the card that plays beneath it
+        shows again, or else it is cleared.
+        """
+        if self.card is None or self.card.id != card_id:
+            return
+        self._cancel_card_timer()
+        if self.playing is not None and self.playing.id != card_id:
+            self._show(self.playing)
+        else:
+            self.card = None
+            self.bus.publish(ClearCard(card_id=card_id))
+
+    def _follow(self, name, card):
+        """
+        Follows the updates of the card, if it plays on, from the handler of
+        the intent by name, such as the song on the radio.
+        """
+        updates = getattr(self.handlers.get(name), "updates", None)
+        if updates is None or self.playing is not card:
+            return
+        self.follow_task = asyncio.create_task(self._follow_updates(updates(card)))
+
+    async def _follow_updates(self, updates):
+        try:
+            async with contextlib.aclosing(updates):
+                async for card in updates:
+                    if self.playing is None or self.playing.id != card.id:
+                        return
+                    self.playing = card
+                    if self.card is not None and self.card.id == card.id:
+                        self.card = card
+                        self.bus.publish(ShowCard(card=card))
+        except Exception:
+            log.exception("Following what plays failed")
+
+    def _stop_playing(self, publish=True):
+        """Stops what plays, and with publish, clears its card on the clients."""
+        playing = self.playing
+        if playing is None:
+            return
+        log.info("Stopped playing %s", playing.id)
+        self.playing = None
+        if self.follow_task is not None:
+            self.follow_task.cancel()
+            self.follow_task = None
+        if self.card is not None and self.card.id == playing.id:
+            self.card = None
+        if publish:
+            self.bus.publish(ClearCard(card_id=playing.id))
 
     def _end_quietly(self, capture, reason, text):
-        """Ends the capture without showing a card, and clears its own."""
+        """
+        Ends the capture without showing a card, and its own goes, for what
+        plays beneath it.
+        """
         if reason == CaptureEndReason.NO_WAKE_WORD:
             log.info("Capture %s finished with %s", capture.id, reason)
         self.bus.publish(
             CaptureFinished(dialog_request_id=capture.id, text=text, reason=reason)
         )
-        if self.card is not None and self.card.id == capture.id:
-            self._cancel_card_timer()
-            self.card = None
-            self.bus.publish(ClearCard(card_id=capture.id))
+        self._uncover(capture.id)
         self.capture = None
         self._set_state(DialogState.IDLE)
 
@@ -927,11 +1037,10 @@ class Recognizer:
         async def clear():
             await asyncio.sleep(timeout)
             if self.card is not None and self.card.id == card_id:
-                self.card = None
                 self.card_timer = None
                 if self.speech is not None and self.speech.card_id == card_id:
                     self._stop_speaking()
-                self.bus.publish(ClearCard(card_id=card_id))
+                self._uncover(card_id)
 
         self.card_timer = asyncio.create_task(clear())
 

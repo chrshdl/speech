@@ -7,6 +7,7 @@ import contextlib
 import os
 from collections.abc import AsyncIterator
 
+import httpx
 import numpy as np
 from fastapi import FastAPI, HTTPException, Response, WebSocket, status
 from fastapi.responses import RedirectResponse, StreamingResponse
@@ -22,6 +23,7 @@ from speech.backend.messages import (
     CardDismissedRequest,
     Info,
     Message,
+    RadioCard,
     SongScore,
     StartCaptureRequest,
     StartCaptureResponse,
@@ -53,12 +55,13 @@ class RevalidatedFiles(StaticFiles):
         return response
 
 
-def create_app(recognizer, microphone=None, wifi=None, songs=None):
+def create_app(recognizer, microphone=None, wifi=None, songs=None, radio=None):
     """
     Returns the service for the recognizer, an engine.Recognizer, which
     with a microphone, an engine.Microphone, listens to it while running.
     With wifi, a wifi.Wifi, the client can join a Wi-Fi network. With
-    songs, a songs.Songs, it serves the notes its SongCards play.
+    songs, a songs.Songs, it serves the notes its SongCards play, and with
+    radio, a radio.Radio, the audio and images of its RadioCards.
 
     The endpoints are all async, so they run on the event loop, as the
     recognizer must.
@@ -97,12 +100,13 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
 
     @app.get("/v1/state")
     async def state() -> State:
-        """The dialog state and the card shown."""
+        """The dialog state, the card shown and the card that plays on."""
         capture = recognizer.capture
         return State(
             dialog_state=recognizer.state,
             dialog_request_id=capture.id if capture is not None else None,
             card=recognizer.card,
+            playing=recognizer.playing,
         )
 
     @app.get("/v1/events", response_class=EventSourceResponse)
@@ -179,11 +183,12 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
             409: {"description": "Not IDLE"},
         },
     )
-    async def answer_intent(intent: str) -> Card:
+    async def answer_intent(intent: str) -> Card | None:
         """
         Answers the intent as if it was heard, without slots, such as for a
         button that opens the synthesizer's keyboard: shows its card, in a
-        ShowCard event as for speech, and returns it.
+        ShowCard event as for speech, and returns it, or null for an intent
+        that shows none, such as StopRadio.
         """
         try:
             return await recognizer.answer(intent)
@@ -351,6 +356,61 @@ def create_app(recognizer, microphone=None, wifi=None, songs=None):
             return d50.load(patch)
         except ValueError:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "No such patch.") from None
+
+    @app.get(
+        "/v1/radio/stream",
+        response_class=StreamingResponse,
+        responses={
+            200: {"content": {"audio/L16": {}}},
+            404: {"description": "No radio plays"},
+        },
+    )
+    async def radio_stream():
+        """
+        The audio of the radio playing, a RadioCard's: 16 bit little-endian
+        samples at its sampleRate, its channels interleaved, streamed as the
+        station plays. It ends when the radio stops.
+        """
+        playing = recognizer.playing
+        if radio is None or not isinstance(playing, RadioCard):
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No radio plays.")
+
+        async def audio():
+            async with contextlib.aclosing(radio.stream()) as chunks:
+                async for chunk in chunks:
+                    if not isinstance(recognizer.playing, RadioCard):
+                        return
+                    yield chunk
+
+        return StreamingResponse(
+            audio(),
+            media_type=f"audio/L16;rate={playing.sample_rate};"
+            f"channels={playing.channels}",
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @app.get(
+        "/v1/radio/images/{key}",
+        response_class=Response,
+        responses={
+            200: {"content": {"image/*": {}}},
+            404: {"description": "No such image"},
+            502: {"description": "The image could not be fetched"},
+        },
+    )
+    async def radio_image(key: str):
+        """A RadioCard's logo or cover, which the service fetches."""
+        try:
+            image = await radio.image(key) if radio is not None else None
+        except httpx.HTTPError as error:
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, str(error)) from None
+        if image is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "No such image.")
+        content, media_type = image
+        # Its key names its URL, so it never changes.
+        return Response(
+            content, media_type=media_type, headers={"Cache-Control": "max-age=86400"}
+        )
 
     @app.get("/", include_in_schema=False)
     async def home():

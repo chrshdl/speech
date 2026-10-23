@@ -70,18 +70,20 @@ All bodies are JSON with camelCase names.
 | Request | Response |
 |---|---|
 | `GET /v1/info` | The model, its sample rate, the audio input and the language model |
-| `GET /v1/state` | The dialog state, the capture, and the card shown |
+| `GET /v1/state` | The dialog state, the capture, the card shown, and the card that plays on beneath it, `playing`, such as a `RadioCard`, or null |
 | `GET /v1/events` | The event stream, see [Events](#events) |
 | `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
-| `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is not shown |
-| `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
+| `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is neither shown nor plays beneath the card shown |
+| `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event, or null for an intent that shows none, such as `StopRadio`; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
 | `WS /v1/audio/{streamId}` | Takes a capture's audio, see [Audio streaming](#audio-streaming) |
 | `GET /v1/speech/{speechId}` | A spoken answer's audio, streamed as it is synthesized, see [Speech](#speech); `404` unless it is the speech spoken last and not stopped |
 | `GET /v1/wifi` | The Wi-Fi status, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/scan` | `{"networks": […]}`, the networks in reach, see [Wi-Fi](#wi-fi) |
 | `POST /v1/wifi/connect` `{"ssid": "…", "password": "…"}` | `{"status": {…}, "error": null}` once joined, see [Wi-Fi](#wi-fi) |
 | `GET /v1/songs/{songId}` | A song's notes, `{"seconds": …, "loop": …, "notes": [{"start", "seconds", "frequency", "partials", "volume", "attack", "release", "patch"}, …], "patches": {…}}` in seconds and Hz, which a `SongCard` plays, `404` for no such song. A note's `patch`, if not null, names one of the `patches`, the Roland D-50 patches that play those notes, see below |
+| `GET /v1/radio/stream` | The audio of the radio playing, a `RadioCard`'s, 16 bit little-endian samples at its `sampleRate`, its `channels` interleaved, which the service decodes from the station as it plays, with ffmpeg, from about 3 seconds before live: of the 20 seconds or so the station sends at once on connecting, it keeps the newest 3, so the song shown is what is heard. It ends when the radio stops; `404` while no radio plays |
+| `GET /v1/radio/images/{key}` | A `RadioCard`'s `logo` or `cover`, which the service fetches; `404` for no such image, `502` if it could not be fetched |
 | `GET /v1/patches/{patch}` | A Roland D-50 patch's parameters, which a `KeyboardCard` plays, `404` for no such patch, see below |
 
 Errors have a `detail` with the reason, such as
@@ -100,8 +102,11 @@ data: {"id": 42, "topic": "Recognition", "action": "CaptureFinished", "timestamp
 ```
 
 The `id` grows by one with each message. The stream starts with the
-dialog state and the card shown, if any, so a client that connects or
-reconnects can draw the screen from them. It sends a keep-alive comment
+dialog state, the card that plays on beneath the card shown, if any, and
+the card shown, if any, so a client that connects or reconnects can draw
+the screen from them. A client that reconnects should also drop a card it
+showed, and stop what it played, that `GET /v1/state` no longer has, as
+after the service restarted. It sends a keep-alive comment
 when there are no events for a while.
 
 | Event | Payload | When |
@@ -154,6 +159,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
 | `BrightnessCard` | `title`, `percent` | The brightness of the screen, just set, in percent |
 | `VolumeCard` | `title`, `percent` | The volume of the speaker, just turned, in percent. The client plays a short tone, at the new volume |
+| `RadioCard` | `title`, `url`, `sampleRate`, `channels`, `encoding` (`LINEAR16`), `logo`, `song`, `artist`, `cover` | Play the web radio station `title`, whose audio streams from `url`, `GET /v1/radio/stream`, and show what plays: the `song` and its `artist`, empty when the station does not say, and the song's `cover`, an image, or else the station's `logo`, both from `GET /v1/radio/images/{key}`. The service updates it, with the same id, as each song starts. It plays on beneath the cards shown over it, see below, until the user closes it or asks to stop it, when the service clears it, or another card that stays until dismissed, such as a `SongCard`, replaces it. |
 | `KeyboardCard` | `title`, `patch`, `url` | Show a keyboard that plays the Roland D-50 patch at `url`, titled with its name. It stays until the user closes it, or another card replaces it. |
 | `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
@@ -168,13 +174,24 @@ The lifecycle of a capture's card:
    final transcript, titled "You said", or a `NoticeCard` if no speech
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
-   for an answer, which takes longer to read, but never for a
-   `GameCard`, a `SongCard` or a `KeyboardCard`. A new capture replaces the
-   card sooner, except a `COMMANDS` capture, which shows no cards.
+   for an answer, which takes longer to read, except a `BrightnessCard` or
+   `VolumeCard`, read at a glance, but never for a `GameCard`, a
+   `SongCard`, a `KeyboardCard` or a `RadioCard`. A new capture replaces
+   the card sooner, except a `COMMANDS` capture, which shows no cards.
 
 When the user dismisses the card, such as by tapping its X, tell the
 service with card-dismissed. It then neither updates the card nor sends
 `ClearCard` for it, even while the capture goes on.
+
+A `RadioCard` plays on beneath the cards shown over it, such as a
+capture's and a `VolumeCard` for "volume up": when the card over it goes,
+the service shows the `RadioCard` again, with `ShowCard` rather than
+`ClearCard`, so keep playing it while another card is shown, and stop it
+when its own `ClearCard` comes, also while another card is shown, or when
+the user closes it. A new subscriber is sent it before the card shown over
+it. A card that stays until dismissed, such as a `SongCard`, ends it: its
+`ClearCard` follows that card's `ShowCard`, so a client asked for the same
+station again can play on.
 
 Clients should render the card types they know and ignore the others, so
 new types can be added.
@@ -218,6 +235,8 @@ does not match.
 | `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
 | `VolumeUp`, `VolumeDown` | A `VolumeCard`, having turned the speaker up or down a step, such as "volume up", "turn it down", "louder" or "quieter", never to silence, so an answer can still be heard. With `--volume-control`, see below |
 | `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
+| `PlayRadio` | A `RadioCard` of TOGGO Radio, the children's station of Super RTL, such as "play toggo radio", "play webradio" or "turn on the radio". The song playing is pushed by the station's host, streamABC, and its cover is looked up with the iTunes Search API, preferring a release without a Parental Advisory label, see `speech/backend/radio.py`. Needs ffmpeg, without which the service does not recognize it, and internet, without which the station plays without its song. |
+| `StopRadio` | No card: stops the radio, clearing its card and the capture's, for the landing page, such as "stop the radio", "turn off the radio" or "stop" |
 | `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
 | `GetWeather` | A `WeatherCard` from [Open-Meteo](https://open-meteo.com) for the city asked for, or else for `--weather-location`, by default Berlin. A city is looked up in `speech/backend/places.tsv`, also when misspelled, such as "breman" for Bremen, and else with Open-Meteo, which `--weather-location` can name any place for. A place Open-Meteo does not know gives a `NoticeCard`, and so does no internet access. With `--voice`, it says the weather now, and today's and tomorrow's, see [Speech](#speech). |
 
@@ -591,6 +610,19 @@ farther from the one before than the unicorn can move in time, so each
 can be caught. Tapping the microphone button
 ends it sooner. While playing, the page listens with a `COMMANDS`
 capture, see `web/assistant/game.js`.
+
+Asked to "play toggo radio", it plays TOGGO Radio and shows the song
+playing, its artist and cover, which change as each song starts. The radio
+goes on beneath other cards, such as the volume's for "volume up", which
+make way for it again once they go, and is turned down while the page
+listens or speaks. "Stop the radio", or its card's X, stops it and shows
+the landing page again. The page plays the samples the service decodes,
+as it plays speech, see `web/assistant/speaker.js`, holding a second of
+them before it plays, so a slow network makes it pause rather than
+stutter, and it fetches the images through the service. So the page
+needs no internet and no codecs: on the Pi, WPE WebKit cannot fetch
+HTTPS, and a media element there would open an ALSA device of its own,
+which Web Audio holds already.
 
 Where the service can join a Wi-Fi network, a Wi-Fi button next to the
 day and night button shows whether one is joined, with a badge when not,

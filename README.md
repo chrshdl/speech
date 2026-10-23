@@ -792,7 +792,9 @@ It listens to the Pi's microphone, or with `--audio-input client` to
 audio the client streams. It recognizes intents in what is said, such as
 "what's the weather in hamburg?", and shows the answer, a card with the
 weather, and asked to "play superball", it starts a game steered by
-saying "left" and "right". With `--voice` and a
+saying "left" and "right". Asked to "play toggo radio", it plays TOGGO
+Radio with the song playing and its cover, until asked to "stop the
+radio". With `--voice` and a
 [Piper](https://github.com/OHF-Voice/piper1-gpl) voice it also says the
 weather, see [Speech](docs/backend-api.md#speech).
 At http://127.0.0.1:8080 it serves a client with a landing page and a
