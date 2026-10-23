@@ -429,8 +429,8 @@ def make_parser():
         "--brief-card-timeout",
         type=float,
         default=defaults.brief_card_timeout,
-        help="A card read at a glance, such as the volume just turned, is cleared "
-        "after this long.",
+        help="A popup read at a glance, such as the volume just turned, is "
+        "cleared after this long.",
     )
     limits.add_argument(
         "--answer-card-timeout",

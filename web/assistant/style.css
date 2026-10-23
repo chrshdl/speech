@@ -916,7 +916,7 @@ body.drums .step-aside {
   color: var(--faint);
 }
 
-/* The meter of a level just set, on its card: the brightness and the volume. */
+/* The meter of a level just set, on its popup: the brightness and the volume. */
 
 .meter {
   --meter: #ffbf2e;
@@ -959,6 +959,67 @@ body.drums .step-aside {
   font-weight: 600;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* A popup with a level just set, at the top of the screen over whatever
+   shows, also the keyboard, the drums and the Wi-Fi sheet. It takes no
+   taps, and goes by itself. */
+.popup {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  translate: -50% 0;
+  z-index: 4;
+  display: grid;
+  align-items: center;
+  width: min(440px, calc(100% - 2 * var(--mic) - 88px));
+  height: var(--mic);
+  padding: 0 26px 0 18px;
+  border: 4px solid var(--card-border);
+  border-radius: 999px;
+  background: var(--card);
+  box-shadow: 0 12px 34px rgba(139, 92, 246, 0.3);
+  pointer-events: none;
+  animation: popup-in 320ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.popup[hidden] {
+  display: none;
+}
+
+.popup.leaving {
+  animation: popup-out 200ms ease forwards;
+}
+
+@keyframes popup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.9);
+  }
+}
+
+@keyframes popup-out {
+  to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+  }
+}
+
+.popup .meter {
+  column-gap: 14px;
+}
+
+.popup .meter-icon {
+  width: 52px;
+  height: 52px;
+}
+
+.popup .meter-bar {
+  height: 16px;
+}
+
+.popup .meter-percent {
+  font-size: 30px;
 }
 
 /* The radio card: the song's cover, or the station's logo, beside what
@@ -2489,6 +2550,11 @@ body.playing .bubble {
   .keys-hud,
   .drums-hud {
     top: 112px;
+  }
+
+  .popup {
+    top: 112px;
+    width: calc(100% - 32px);
   }
 
   .drums-kit {

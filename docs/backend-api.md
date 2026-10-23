@@ -70,7 +70,7 @@ All bodies are JSON with camelCase names.
 | Request | Response |
 |---|---|
 | `GET /v1/info` | The model, its sample rate, the audio input and the language model |
-| `GET /v1/state` | The dialog state, the capture, the card shown, and the card that plays on beneath it, `playing`, such as a `RadioCard`, or null |
+| `GET /v1/state` | The dialog state, the capture, the card shown, the card that plays on beneath it, `playing`, such as a `RadioCard`, or null, and the `popup` over them, such as a `VolumeCard`, or null |
 | `GET /v1/events` | The event stream, see [Events](#events) |
 | `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
@@ -118,7 +118,8 @@ when there are no events for a while.
 | `Recognition.IntentRecognized` | `dialogRequestId`, `intent`, `score`, `slots` | The capture asked for an intent, such as `GetWeather` with `{"city": "hamburg"}`. The card with the answer follows. |
 | `Recognition.CommandRecognized` | `dialogRequestId`, `command`, `score`, `text` | A `COMMANDS` capture heard a command, such as `LEFT`, as soon as it was said. `text` is its transcript so far. |
 | `Display.ShowCard` | `card` | Show the card, see [Display cards](#display-cards) |
-| `Display.ClearCard` | `cardId` | Dismiss the card with the id |
+| `Display.ShowPopup` | `card` | Show the card as a popup over the card shown, see [Popups](#popups) |
+| `Display.ClearCard` | `cardId` | Dismiss the card, or the popup, with the id |
 | `Audio.StartAudioStream` | `streamId`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Stream the capture's audio, with audio input from the client |
 | `Audio.StopAudioStream` | `streamId` | Stop streaming |
 | `Speech.Speak` | `speechId`, `cardId`, `text`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Speak the answer on the card, see [Speech](#speech) |
@@ -158,8 +159,8 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `TranscriptCard` | `title`, `text`, `isFinal` | The transcript, growing while `isFinal` is false. Show words that can still change as such. |
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
-| `BrightnessCard` | `title`, `percent` | The brightness of the screen, just set, in percent |
-| `VolumeCard` | `title`, `percent` | The volume of the speaker, just turned, in percent. The client plays a short tone, at the new volume |
+| `BrightnessCard` | `title`, `percent` | A popup: the brightness of the screen, just set, in percent |
+| `VolumeCard` | `title`, `percent` | A popup: the volume of the speaker, just turned, in percent. The client plays a short tone, at the new volume |
 | `RadioCard` | `title`, `url`, `sampleRate`, `channels`, `encoding` (`LINEAR16`), `logo`, `song`, `artist`, `cover` | Play the web radio station `title`, whose audio streams from `url`, `GET /v1/radio/stream`, and show what plays: the `song` and its `artist`, empty when the station does not say, and the song's `cover`, an image, or else the station's `logo`, both from `GET /v1/radio/images/{key}`. The service updates it, with the same id, as each song starts. It plays on beneath the cards shown over it, see below, until the user closes it or asks to stop it, when the service clears it, or another card that stays until dismissed, such as a `SongCard`, replaces it. |
 | `KeyboardCard` | `title`, `patch`, `url` | Show a keyboard that plays the Roland D-50 patch at `url`, titled with its name. It stays until the user closes it, or another card replaces it. |
 | `DrumsCard` | `title` | Show a drum kit to tap, which plays recordings of its own. It stays until the user closes it, or another card replaces it. |
@@ -176,10 +177,11 @@ The lifecycle of a capture's card:
    final transcript, titled "You said", or a `NoticeCard` if no speech
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
-   for an answer, which takes longer to read, or 5 seconds later for a
-   `BrightnessCard` or `VolumeCard`, read at a glance, but never for a `GameCard`, a
-   `SongCard`, a `KeyboardCard`, a `DrumsCard` or a `RadioCard`. A new capture replaces
-   the card sooner, except a `COMMANDS` capture, which shows no cards.
+   for an answer, which takes longer to read, but never for a `GameCard`,
+   a `SongCard`, a `KeyboardCard`, a `DrumsCard` or a `RadioCard`. A new
+   capture replaces the card sooner, except a `COMMANDS` capture, which
+   shows no cards. An answer that is a popup, such as a `VolumeCard`,
+   clears the capture's card at once instead, see [Popups](#popups).
 
 When the user dismisses the card, such as by tapping its X, tell the
 service with card-dismissed. It then neither updates the card nor sends
@@ -188,7 +190,7 @@ ends it at once with `CANCELLED`, without an answer, and dismissed while
 the answer is found, the answer is neither shown nor spoken.
 
 A `RadioCard` plays on beneath the cards shown over it, such as a
-capture's and a `VolumeCard` for "volume up": when the card over it goes,
+capture's: when the card over it goes,
 the service shows the `RadioCard` again, with `ShowCard` rather than
 `ClearCard`, so keep playing it while another card is shown, and stop it
 when its own `ClearCard` comes, also while another card is shown, or when
@@ -199,6 +201,20 @@ station again can play on.
 
 Clients should render the card types they know and ignore the others, so
 new types can be added.
+
+### Popups
+
+A level just set, a `VolumeCard` or a `BrightnessCard`, comes in
+`ShowPopup` rather than `ShowCard`: show it over whatever shows, the card,
+the radio beneath it, a game, the keyboard or the drums, which all stay as
+they are, such as when the speakerphone's + and - turn the volume while a
+child plays the drums. A popup replaces the popup shown, and one with the
+id of the popup shown updates it. 5 seconds later (`--brief-card-timeout`)
+the service sends `ClearCard` with its id. A popup that answers a capture
+has the capture's id, so its card goes first, with `ClearCard`, or with the
+`RadioCard` shown again. A popup the user dismisses can be told with
+card-dismissed, after which the service does not clear it. A new
+subscriber is sent the popup after the card shown.
 
 ## Intents
 
@@ -610,8 +626,10 @@ of eight, a bass drum, a snare, three toms, a hi-hat, a crash and a ride,
 which a tap plays, also with several fingers at once. Their sounds are
 recordings, in `web/assistant/drums`, decoded once when the page loads,
 so a tap sounds at once, and mixed through a limiter, so drums hit
-together do not distort, see `web/assistant/drums.js`. On a tall screen,
-such as a phone's, the drums are arranged in rows. The button in the upper left
+together do not distort, see `web/assistant/drums.js`. The volume just
+turned, and the brightness, show in a popup at the top of the screen, over
+whatever shows, which takes no taps, so the drums can be played on. On a tall screen, such as a
+phone's, the drums are arranged in rows. The button in the upper left
 corner switches to a night sky, with a sleepy moon, stars and fireflies,
 and the page remembers the choice. Above an answer, such as the
 weather, it shows what was asked, from `CaptureFinished`. The rounded Fredoka font is in

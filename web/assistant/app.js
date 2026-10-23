@@ -33,6 +33,7 @@ const ui = {
   drumsKit: $("drums-kit"),
   drumsClose: $("drums-close"),
   drumsOpen: $("drums-open"),
+  popup: $("popup"),
 };
 
 // Audio is sent in chunks of 100 ms.
@@ -41,6 +42,7 @@ const CHUNK_SECONDS = 0.1;
 let info = null; // From /v1/info: the sample rate and where audio comes from.
 let dialogState = "IDLE";
 let card = null; // The card shown: its data and element.
+let popup = null; // The popup shown over it, such as the volume's: its data.
 let audio = null; // The microphone stream of the browser, while capturing.
 let starting = false;
 let heard = null; // The final transcript of the last capture, by its id.
@@ -164,7 +166,11 @@ function connectEvents() {
     }
   });
   on("Display.ShowCard", ({ card: data }) => showCard(data));
+  on("Display.ShowPopup", ({ card: data }) => showPopup(data));
   on("Display.ClearCard", ({ cardId }) => {
+    if (popup && popup.id === cardId) {
+      hidePopup();
+    }
     if (card && card.data.id === cardId) {
       hideCard();
     }
@@ -179,15 +185,19 @@ function connectEvents() {
 }
 
 // After the events reconnect, such as when the service restarted, the card
-// shown before stays only if the service still shows it, and the radio plays
-// on only if it still plays it. What came since is the service's own.
+// shown before stays only if the service still shows it, the radio plays on
+// only if it still plays it, and so for the popup. What came since is the
+// service's own.
 async function checkShown() {
-  const [shown, playing] = [card, radio];
-  if (!shown && !playing) {
+  const [shown, playing, popped] = [card, radio, popup];
+  if (!shown && !playing && !popped) {
     return;
   }
   try {
     const state = await (await fetch("/v1/state")).json();
+    if (popped && popup === popped && state.popup?.id !== popped.id) {
+      hidePopup();
+    }
     if (playing && radio === playing && state.playing?.id !== playing.id) {
       stopRadio();
     }
@@ -298,8 +308,11 @@ RENDERERS.RadioCard = (data, body) => {
   body.querySelector(".radio-artist").textContent = data.artist;
 };
 
-RENDERERS.BrightnessCard = (data, body) => renderMeter(body, "brightness", sun(), data.percent);
-RENDERERS.VolumeCard = (data, body) => renderMeter(body, "volume", loudspeaker(), data.percent);
+// Popups, over whatever shows.
+const POPUPS = {
+  BrightnessCard: (data, body) => renderMeter(body, "brightness", sun(), data.percent),
+  VolumeCard: (data, body) => renderMeter(body, "volume", loudspeaker(), data.percent),
+};
 
 const TITLES = {
   WeatherCard: (data) => `Weather in ${data.location}`,
@@ -360,10 +373,49 @@ function showCard(data) {
     playRadio(data);
     showRadioSounding();
   }
+}
+
+// Shows the popup over whatever shows, leaving it as it is. A popup with the
+// id of the one shown updates it.
+function showPopup(data) {
+  const render = POPUPS[data.type];
+  if (!render) {
+    return; // A popup type this client does not know.
+  }
+  const fresh = !popup || popup.id !== data.id;
+  popup = data;
+  ui.popup.replaceChildren();
+  render(data, ui.popup);
+  if (fresh) {
+    // Comes in again, also over one leaving.
+    ui.popup.classList.remove("leaving");
+    ui.popup.hidden = false;
+    ui.popup.style.animation = "none";
+    void ui.popup.offsetWidth;
+    ui.popup.style.animation = "";
+  }
   if (data.type === "VolumeCard" && fresh) {
     // Heard at the new volume.
     playTone(VOLUME_TONE);
   }
+}
+
+function hidePopup() {
+  if (!popup) {
+    return;
+  }
+  popup = null;
+  ui.popup.classList.add("leaving");
+  const hide = () => {
+    // Unless another came meanwhile.
+    if (!popup) {
+      ui.popup.hidden = true;
+      ui.popup.classList.remove("leaving");
+    }
+  };
+  ui.popup.addEventListener("animationend", hide, { once: true });
+  // Without animations, as with reduced motion, hide it at once.
+  setTimeout(hide, 300);
 }
 
 // Above an answer, such as the weather, what was asked for it. A
