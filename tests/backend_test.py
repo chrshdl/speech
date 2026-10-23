@@ -52,7 +52,12 @@ def make_recognizer(
 ):
     model = streaming.load(path)
     new_search = streaming.search_factory(model.blank, model.char_to_int)
-    settings = Settings(**({"card_timeout": 0.2, "audio_timeout": 1.0} | settings))
+    settings = Settings(
+        **(
+            {"card_timeout": 0.2, "brief_card_timeout": 0.2, "audio_timeout": 1.0}
+            | settings
+        )
+    )
     return Recognizer(
         lambda: streaming.Transcriber(model, new_search()),
         model.sample_rate,
@@ -407,34 +412,6 @@ def test_conflicts(model_path):
     asyncio.run(run())
 
 
-def test_display_card_cleared(model_path):
-    audio, _ = wave.array_from_wave("test0.wav")
-
-    async def run():
-        recognizer = make_recognizer(model_path)
-        async with service(recognizer) as svc:
-            cleared = "/v1/display/card-dismissed"
-            assert (await svc.post(cleared, {"cardId": "x"})).status_code == 409
-            start = await svc.start("HOLD_TO_TALK")
-            await svc.events.until("StartAudioStream")
-            # The user dismisses the card while speaking.
-            response = await svc.post(cleared, {"cardId": start["dialogRequestId"]})
-            assert response.status_code == 204
-            socket = await stream_audio(svc.address, start, audio)
-            await socket.close()
-            events = await svc.events.until("CaptureFinished")
-            events += await svc.events.until("DialogStateChanged")
-            await asyncio.sleep(recognizer.settings.card_timeout * 2)
-            return events, svc.events.queue.empty(), await svc.get("/v1/state")
-
-    events, no_more, state = asyncio.run(run())
-    # The card is neither shown again nor cleared, but the events go on.
-    assert "TranscriptUpdated" in actions(events)
-    assert "ShowCard" not in actions(events)
-    assert no_more
-    assert state["card"] is None
-
-
 class FakeInputStream:
     """Plays test0.wav to the callback in 100 ms chunks, as a microphone."""
 
@@ -596,6 +573,92 @@ class TalkingClock(Clock):
 
     def speech(self, card):
         return "It is noon. Time for lunch."
+
+
+class SlowClock(TalkingClock):
+    """Answers once the test lets it."""
+
+    def __init__(self):
+        super().__init__()
+        self.answer = asyncio.Event()
+
+    async def card(self, card_id, slots):
+        await self.answer.wait()
+        return await super().card(card_id, slots)
+
+
+class RecordingVoice:
+    """Says each text in a sentence of silence, and records it."""
+
+    sample_rate = 22050
+
+    def __init__(self):
+        self.said = []
+
+    def sentences(self, text):
+        self.said.append(text)
+        yield np.zeros(100, "<i2").tobytes()
+
+
+def test_display_card_cleared(model_path):
+    """
+    Dismissing the card of the capture listening ends it at once, without
+    an answer, and dismissing it while the answer is found shows and says
+    none.
+    """
+    audio, _ = wave.array_from_wave("test0.wav")
+    voice = RecordingVoice()
+    clock = SlowClock()
+    recognizer = make_recognizer(
+        model_path,
+        intents=FixedIntents(-0.5),
+        handlers={"GetTime": clock},
+        voice=voice,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            cleared = "/v1/display/card-dismissed"
+            assert (await svc.post(cleared, {"cardId": "x"})).status_code == 409
+            start = await svc.start("HOLD_TO_TALK")
+            await svc.events.until("StartAudioStream")
+            # The user dismisses the card while speaking.
+            response = await svc.post(cleared, {"cardId": start["dialogRequestId"]})
+            assert response.status_code == 204
+            cancelled = await svc.events.until("CaptureFinished")
+            cancelled += await svc.events.until("DialogStateChanged")
+            # And while the answer is found.
+            start = await svc.start("HOLD_TO_TALK")
+            socket = await stream_audio(svc.address, start, audio)
+            await socket.close()
+            answered = []
+            while not answered or answered[-1]["payload"].get("state") != "THINKING":
+                answered += await svc.events.until("DialogStateChanged")
+            await svc.post(cleared, {"cardId": start["dialogRequestId"]})
+            clock.answer.set()
+            answered += await svc.events.until("DialogStateChanged")
+            await asyncio.sleep(recognizer.settings.card_timeout * 2)
+            return (
+                cancelled,
+                answered,
+                svc.events.queue.empty(),
+                await svc.get("/v1/state"),
+            )
+
+    cancelled, answered, no_more, state = asyncio.run(run())
+    assert actions(cancelled) == [
+        "StopAudioStream",
+        "CaptureFinished",
+        "DialogStateChanged",
+    ]
+    assert cancelled[1]["payload"]["reason"] == "CANCELLED"
+    assert cancelled[-1]["payload"]["state"] == "IDLE"
+    # Answered, but neither shown, nor spoken, nor cleared.
+    after = actions(answered)[actions(answered).index("CaptureFinished") :]
+    assert after == ["CaptureFinished", "IntentRecognized", "DialogStateChanged"]
+    assert voice.said == []
+    assert no_more
+    assert state["card"] is None
 
 
 class GatedVoice:
@@ -1178,6 +1241,27 @@ def test_radio_streams_while_it_plays(model_path):
     assert (logo.status_code, logo.content) == (200, b"<svg/>")
     assert logo.headers["content-type"] == "image/svg+xml"
     assert missing.status_code == 404
+
+
+def test_glanceable_cards_go_sooner(model_path):
+    """A card read at a glance, such as the volume's, goes after its timeout."""
+    recognizer = make_recognizer(
+        model_path,
+        handlers={"VolumeUp": Meter()},
+        card_timeout=5,
+        brief_card_timeout=0.3,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            await svc.post("/v1/intents/VolumeUp")
+            events = await svc.events.until("ShowCard")
+            events += await svc.events.until("ClearCard", timeout=2)
+            return events
+
+    events = asyncio.run(run())
+    times = [datetime.datetime.fromisoformat(e["timestamp"]) for e in events[-2:]]
+    assert 0.3 <= (times[1] - times[0]).total_seconds() < 1
 
 
 class RadioIntents(FixedIntents):

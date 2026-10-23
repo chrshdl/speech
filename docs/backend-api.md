@@ -74,7 +74,7 @@ All bodies are JSON with camelCase names.
 | `GET /v1/events` | The event stream, see [Events](#events) |
 | `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
-| `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is neither shown nor plays beneath the card shown |
+| `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is neither shown nor plays beneath the card shown. The card of the capture listening ends it, see [Display cards](#display-cards) |
 | `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event, or null for an intent that shows none, such as `StopRadio`; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
 | `WS /v1/audio/{streamId}` | Takes a capture's audio, see [Audio streaming](#audio-streaming) |
 | `GET /v1/speech/{speechId}` | A spoken answer's audio, streamed as it is synthesized, see [Speech](#speech); `404` unless it is the speech spoken last and not stopped |
@@ -132,6 +132,7 @@ when there are no events for a while.
 | `STOP_CAPTURE` | The client called stop-capture or closed its audio stream |
 | `NO_SPEECH` | A `TAP_TO_TALK` capture recognized no speech in time |
 | `NO_WAKE_WORD` | The speech model did not confirm the wake word of a `WAKE_WORD` capture, which was heard by mistake. It ends without a card. |
+| `CANCELLED` | The client dismissed the capture's card while it listened. It ends at once, without an answer. |
 | `MAX_DURATION` | It reached the longest duration |
 | `AUDIO_TIMEOUT` | No audio arrived in time |
 | `ERROR` | The service failed, see its log |
@@ -174,14 +175,16 @@ The lifecycle of a capture's card:
    final transcript, titled "You said", or a `NoticeCard` if no speech
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
-   for an answer, which takes longer to read, except a `BrightnessCard` or
-   `VolumeCard`, read at a glance, but never for a `GameCard`, a
+   for an answer, which takes longer to read, or 5 seconds later for a
+   `BrightnessCard` or `VolumeCard`, read at a glance, but never for a `GameCard`, a
    `SongCard`, a `KeyboardCard` or a `RadioCard`. A new capture replaces
    the card sooner, except a `COMMANDS` capture, which shows no cards.
 
 When the user dismisses the card, such as by tapping its X, tell the
 service with card-dismissed. It then neither updates the card nor sends
-`ClearCard` for it, even while the capture goes on.
+`ClearCard` for it. The card of a capture still listening, "Listening…",
+ends it at once with `CANCELLED`, without an answer, and dismissed while
+the answer is found, the answer is neither shown nor spoken.
 
 A `RadioCard` plays on beneath the cards shown over it, such as a
 capture's and a `VolumeCard` for "volume up": when the card over it goes,

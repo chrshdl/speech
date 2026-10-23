@@ -39,8 +39,10 @@ from speech.backend.messages import (
 
 log = logging.getLogger(__name__)
 
-# Ends a capture's audio, see Recognizer.stop_capture.
+# Ends a capture's audio, see Recognizer.stop_capture, or the capture at
+# once, without an answer, see Recognizer.card_dismissed.
 _STOP = object()
+_CANCEL = object()
 # A COMMANDS capture drops the audio of a transcript without speech once it
 # is this long and this quiet, keeping the stream going.
 _DROP_SILENCE = 2.0
@@ -86,6 +88,9 @@ class Settings:
     audio_timeout: float = 5.0
     # A final card is cleared after this long.
     card_timeout: float = 8.0
+    # A card read at a glance, such as the volume just turned, is cleared
+    # after this long.
+    brief_card_timeout: float = 5.0
     # A card that answers an intent, such as the weather, is cleared after
     # this long, as it takes longer to read.
     answer_card_timeout: float = 30.0
@@ -479,8 +484,9 @@ class Recognizer:
 
     def card_dismissed(self, card_id):
         """
-        The client dismissed the card. Raises Busy if it is neither shown nor
-        plays beneath the card shown.
+        The client dismissed the card, which, of the capture listening,
+        ends it at once, without an answer. Raises Busy if it is neither
+        shown nor plays beneath the card shown.
         """
         shown = self.card is not None and self.card.id == card_id
         playing = self.playing is not None and self.playing.id == card_id
@@ -498,6 +504,13 @@ class Recognizer:
             # What plays beneath it shows again.
             if self.playing is not None:
                 self._show(self.playing)
+        capture = self.capture
+        if (
+            capture is not None
+            and capture.id == card_id
+            and self.state == DialogState.LISTENING
+        ):
+            capture.audio.put_nowait(_CANCEL)
 
     def shutdown(self):
         """
@@ -597,8 +610,8 @@ class Recognizer:
     async def _next_chunks(self, capture):
         """
         Waits for the capture's audio and returns all the chunks queued,
-        and whether the capture was stopped after them. Raises TimeoutError
-        when none arrives in time.
+        and what ended the capture after them, _STOP or _CANCEL, or None.
+        Raises TimeoutError when none arrives in time.
         """
         chunks = [
             await asyncio.wait_for(capture.audio.get(), self.settings.audio_timeout)
@@ -607,10 +620,12 @@ class Recognizer:
         while not capture.audio.empty():
             chunks.append(capture.audio.get_nowait())
         # Compared by identity, since the chunks are arrays.
-        stops = [i for i, chunk in enumerate(chunks) if chunk is _STOP]
-        if stops:
-            chunks = chunks[: stops[0]]
-        return chunks, bool(stops)
+        ends = [
+            i for i, chunk in enumerate(chunks) if chunk is _STOP or chunk is _CANCEL
+        ]
+        if ends:
+            return chunks[: ends[0]], chunks[ends[0]]
+        return chunks, None
 
     async def _listen(self, capture):
         settings = self.settings
@@ -639,6 +654,8 @@ class Recognizer:
                 chunks, stop = await self._next_chunks(capture)
             except TimeoutError:
                 return CaptureEndReason.AUDIO_TIMEOUT
+            if stop is _CANCEL:
+                return CaptureEndReason.CANCELLED
             if chunks:
                 audio = np.concatenate(chunks)
                 await asyncio.to_thread(push, audio)
@@ -723,6 +740,8 @@ class Recognizer:
                 elif said >= _DROP_SILENCE and transcriber.pause_seconds >= _DROP_PAUSE:
                     transcriber.clear()
                     said = 0.0
+            if stop is _CANCEL:
+                return CaptureEndReason.CANCELLED
             if stop:
                 return CaptureEndReason.STOP_CAPTURE
             if heard >= settings.max_commands_capture:
@@ -764,6 +783,11 @@ class Recognizer:
             return
         if reason == CaptureEndReason.NO_WAKE_WORD:
             # Heard by mistake, it ends quietly, without a transcript or notice.
+            self._end_quietly(capture, reason, "")
+            return
+        if reason == CaptureEndReason.CANCELLED:
+            if capture.stream_id is not None:
+                self.bus.publish(StopAudioStream(stream_id=capture.stream_id))
             self._end_quietly(capture, reason, "")
             return
         self._set_state(DialogState.THINKING)
@@ -839,12 +863,16 @@ class Recognizer:
         if card is None:
             self._uncover(card_id)
             return
+        if card.id == self.dismissed:
+            # Neither shown nor spoken, such as when the client dismissed the
+            # capture's card while its answer was found.
+            return
         self._show(card)
         if name is not None:
             self._speak(name, card)
             self._follow(name, card)
         if getattr(card, "BRIEF", False):
-            timeout = self.settings.card_timeout
+            timeout = self.settings.brief_card_timeout
         # A card such as a game's stays until the client dismisses it.
         if not getattr(card, "UNTIL_DISMISSED", False):
             self._start_card_timer(timeout)
