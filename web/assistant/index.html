@@ -68,6 +68,20 @@
       </svg>
     </button>
 
+    <!-- Opens the drums, as asking for them does, in the other lower corner.
+         Only on the landing page. -->
+    <button class="drums-open" id="drums-open" type="button" aria-label="Drums" title="Drums">
+      <span class="drums-open-ring" aria-hidden="true"></span>
+      <!-- A drum filling the button, two sticks crossed above it. -->
+      <svg class="drums-open-face" viewBox="0 0 100 100" aria-hidden="true">
+        <rect width="100" height="100" fill="#ffffff" />
+        <path class="drums-open-stick" d="M24 12L58 44M76 12L42 44" />
+        <path d="M10 54V100H90V54Z" fill="#ff6b6b" />
+        <path d="M10 62L23 92L36 62L50 92L64 62L77 92L90 62" fill="none" stroke="#ffd43b" stroke-width="5" stroke-linejoin="round" />
+        <ellipse cx="50" cy="54" rx="40" ry="13" fill="#fffaf0" stroke="#ffa94d" stroke-width="5" />
+      </svg>
+    </button>
+
     <main>
       <!-- The landing page: a meadow with a rainbow and a unicorn, drawn on a
            1600 by 900 grid that fills the screen, by day or by night. What
@@ -392,6 +406,79 @@
         </button>
         <div class="keys-board" id="keys-board" role="group" aria-label="Keyboard"></div>
       </section>
+
+      <!-- The drums, played by drums.js: a kit seen from the front, on a
+           1000 by 600 grid, each drum a group with the name of its sound,
+           and the button that closes it. -->
+      <section class="drums" id="drums" hidden>
+        <div class="drums-hud">
+          <svg class="drums-hud-icon" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M4 13V25C4 28 28 28 28 25V13Z" />
+            <ellipse cx="16" cy="13" rx="12" ry="4.5" fill="#ffffff" stroke="currentColor" stroke-width="2.5" />
+          </svg>
+          <span class="drums-title" id="drums-title"></span>
+          <button class="card-close" id="drums-close" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <svg class="drums-kit" id="drums-kit" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMax meet" role="group" aria-label="Drums">
+          <!-- Stands, legs and the toms' posts, behind the drums. -->
+          <path class="drums-stand" d="M125 262V588M90 594L125 560L160 594M245 100V588M210 594L245 560L280 594M775 115V588M740 594L775 560L810 594M395 255L470 300M605 255L530 300M190 470L150 594M190 470L230 594M725 450L715 594M905 450L915 594M365 500L335 594M635 500L665 594" />
+
+          <g class="cymbal" data-drum="crash" transform="rotate(-10 245 95)">
+            <ellipse class="cymbal-top" cx="245" cy="95" rx="135" ry="30" />
+            <ellipse class="cymbal-groove" cx="245" cy="95" rx="96" ry="20" />
+            <ellipse class="cymbal-groove" cx="245" cy="95" rx="58" ry="12" />
+            <ellipse class="cymbal-bell" cx="245" cy="88" rx="24" ry="11" />
+          </g>
+          <g class="cymbal" data-drum="ride" transform="rotate(8 775 112)">
+            <ellipse class="cymbal-top" cx="775" cy="112" rx="145" ry="32" />
+            <ellipse class="cymbal-groove" cx="775" cy="112" rx="104" ry="22" />
+            <ellipse class="cymbal-groove" cx="775" cy="112" rx="62" ry="13" />
+            <ellipse class="cymbal-bell" cx="775" cy="105" rx="26" ry="12" />
+          </g>
+          <g class="cymbal" data-drum="hihat">
+            <ellipse class="cymbal-top" cx="125" cy="264" rx="100" ry="18" />
+            <ellipse class="cymbal-top" cx="125" cy="248" rx="100" ry="18" />
+            <ellipse class="cymbal-groove" cx="125" cy="248" rx="64" ry="11" />
+            <ellipse class="cymbal-bell" cx="125" cy="242" rx="20" ry="9" />
+          </g>
+
+          <g class="drum" data-drum="tom1" transform="rotate(-8 395 225)" style="--shell: #ffa94d; --hoop: #f08c2e; --hit: #ffd8a8">
+            <path class="drum-shell" d="M315 175V265A80 22 0 0 0 475 265V175Z" />
+            <rect class="drum-stripe" x="315" y="205" width="160" height="16" />
+            <ellipse class="drum-head" cx="395" cy="175" rx="80" ry="22" />
+          </g>
+          <g class="drum" data-drum="tom2" transform="rotate(8 605 225)" style="--shell: #69db7c; --hoop: #40c057; --hit: #b2f2bb">
+            <path class="drum-shell" d="M525 175V265A80 22 0 0 0 685 265V175Z" />
+            <rect class="drum-stripe" x="525" y="205" width="160" height="16" />
+            <ellipse class="drum-head" cx="605" cy="175" rx="80" ry="22" />
+          </g>
+
+          <g class="drum" data-drum="snare" style="--shell: #ff6b6b; --hoop: #f03e3e; --hit: #ffc9c9">
+            <path class="drum-shell" d="M95 395V455A95 26 0 0 0 285 455V395Z" />
+            <rect class="drum-stripe" x="95" y="418" width="190" height="14" />
+            <ellipse class="drum-head" cx="190" cy="395" rx="95" ry="26" />
+          </g>
+          <g class="drum" data-drum="floor" style="--shell: #4dabf7; --hoop: #339af0; --hit: #a5d8ff">
+            <path class="drum-shell" d="M710 360V500A105 28 0 0 0 920 500V360Z" />
+            <rect class="drum-stripe" x="710" y="410" width="210" height="18" />
+            <ellipse class="drum-head" cx="815" cy="360" rx="105" ry="28" />
+          </g>
+
+          <!-- The bass drum, its front head with a rainbow. -->
+          <g class="drum" data-drum="kick" style="--shell: #9775fa; --hoop: #7950f2; --hit: #d0bfff">
+            <circle class="drum-shell" cx="500" cy="420" r="165" />
+            <circle class="drum-head" cx="500" cy="420" r="140" />
+            <g class="kick-rainbow">
+              <path d="M436 452A64 64 0 0 1 564 452" stroke="#ff6b6b" />
+              <path d="M450 452A50 50 0 0 1 550 452" stroke="#ffd43b" />
+              <path d="M464 452A36 36 0 0 1 536 452" stroke="#69db7c" />
+              <path d="M478 452A22 22 0 0 1 522 452" stroke="#4dabf7" />
+            </g>
+          </g>
+        </svg>
+      </section>
     </main>
 
     <!-- Joining a Wi-Fi network: pick one, type its password on the
@@ -473,6 +560,10 @@
       </div>
     </section>
 
+    <!-- A popup over whatever shows, such as the volume just turned. It
+         takes no taps, so what is beneath it can still be played. -->
+    <div class="popup" id="popup" role="status" hidden></div>
+
     <template id="card-template">
       <article class="card">
         <header class="card-header">
@@ -488,6 +579,7 @@
     <script src="icons.js"></script>
     <script src="game.js"></script>
     <script src="keyboard.js"></script>
+    <script src="drums.js"></script>
     <script src="wifi.js"></script>
     <script src="app.js"></script>
   </body>

@@ -29,6 +29,7 @@ from speech.backend.messages import (
     Message,
     NoticeCard,
     ShowCard,
+    ShowPopup,
     Speak,
     StartAudioStream,
     StopAudioStream,
@@ -88,7 +89,7 @@ class Settings:
     audio_timeout: float = 5.0
     # A final card is cleared after this long.
     card_timeout: float = 8.0
-    # A card read at a glance, such as the volume just turned, is cleared
+    # A popup read at a glance, such as the volume just turned, is cleared
     # after this long.
     brief_card_timeout: float = 5.0
     # A card that answers an intent, such as the weather, is cleared after
@@ -328,6 +329,10 @@ class Recognizer:
         # RadioCard, and the task that follows its updates.
         self.playing = None
         self.follow_task = None
+        # The popup over the card shown, such as the volume's, and the task
+        # that clears it.
+        self.popup = None
+        self.popup_timer = None
         # The answer spoken last, until it is stopped.
         self.speech = None
         self.wake_word = wake_word
@@ -358,6 +363,8 @@ class Recognizer:
             events.append(ShowCard(card=self.playing))
         if self.card is not None:
             events.append(ShowCard(card=self.card))
+        if self.popup is not None:
+            events.append(ShowPopup(card=self.popup))
         return events
 
     def start(self):
@@ -493,6 +500,10 @@ class Recognizer:
         ends it at once, without an answer. Raises Busy if it is neither
         shown nor plays beneath the card shown.
         """
+        if self.popup is not None and self.popup.id == card_id:
+            self._cancel_popup_timer()
+            self.popup = None
+            return
         shown = self.card is not None and self.card.id == card_id
         playing = self.playing is not None and self.playing.id == card_id
         if not (shown or playing):
@@ -543,6 +554,7 @@ class Recognizer:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
         self._cancel_card_timer()
+        self._cancel_popup_timer()
         self._stop_speaking()
         self.bus.close()
         for handler in self.handlers.values():
@@ -882,12 +894,15 @@ class Recognizer:
             # Neither shown nor spoken, such as when the client dismissed the
             # capture's card while its answer was found.
             return
+        if getattr(card, "POPUP", False):
+            # Over the card shown, which stays, but for the capture's own.
+            self._uncover(card_id)
+            self._pop_up(card)
+            return
         self._show(card)
         if name is not None:
             self._speak(name, card)
             self._follow(name, card)
-        if getattr(card, "BRIEF", False):
-            timeout = self.settings.brief_card_timeout
         # A card such as a game's stays until the client dismisses it.
         if not getattr(card, "UNTIL_DISMISSED", False):
             self._start_card_timer(timeout)
@@ -1005,6 +1020,29 @@ class Recognizer:
         self.bus.publish(ShowCard(card=card))
         if ended is not None:
             self.bus.publish(ClearCard(card_id=ended.id))
+
+    def _pop_up(self, card):
+        """
+        Shows the card as a popup over the card shown, and clears it after
+        brief_card_timeout, unless another popup replaces it sooner.
+        """
+        self._cancel_popup_timer()
+        self.popup = card
+        self.bus.publish(ShowPopup(card=card))
+
+        async def clear():
+            await asyncio.sleep(self.settings.brief_card_timeout)
+            if self.popup is card:
+                self.popup_timer = None
+                self.popup = None
+                self.bus.publish(ClearCard(card_id=card.id))
+
+        self.popup_timer = asyncio.create_task(clear())
+
+    def _cancel_popup_timer(self):
+        if self.popup_timer is not None:
+            self.popup_timer.cancel()
+            self.popup_timer = None
 
     def _uncover(self, card_id):
         """

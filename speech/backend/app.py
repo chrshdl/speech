@@ -105,13 +105,17 @@ def create_app(
 
     @app.get("/v1/state")
     async def state() -> State:
-        """The dialog state, the card shown and the card that plays on."""
+        """
+        The dialog state, the card shown, the card that plays on, and the
+        popup over them.
+        """
         capture = recognizer.capture
         return State(
             dialog_state=recognizer.state,
             dialog_request_id=capture.id if capture is not None else None,
             card=recognizer.card,
             playing=recognizer.playing,
+            popup=recognizer.popup,
         )
 
     @app.get("/v1/events", response_class=EventSourceResponse)

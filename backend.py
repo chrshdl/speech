@@ -15,6 +15,7 @@ import uvicorn
 from speech import streaming, tokens, vad, wake_word
 from speech.backend import (
     brightness,
+    drums,
     game,
     keyboard,
     radio,
@@ -33,7 +34,7 @@ from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
 log = logging.getLogger(__name__)
 
 # What the service answers.
-INTENTS = [weather.INTENT, game.INTENT, keyboard.INTENT]
+INTENTS = [weather.INTENT, game.INTENT, keyboard.INTENT, drums.INTENT]
 
 
 def main(args):
@@ -90,6 +91,7 @@ def main(args):
             weather.INTENT.name: weather.Weather(args.weather_location),
             game.INTENT.name: game.Game(),
             keyboard.INTENT.name: keyboard.Keyboard(),
+            drums.INTENT.name: drums.Drums(),
             **(station.handlers if station is not None else {}),
             songs.NAME: jukebox,
             brightness.INTENT.name: screen,
@@ -427,8 +429,8 @@ def make_parser():
         "--brief-card-timeout",
         type=float,
         default=defaults.brief_card_timeout,
-        help="A card read at a glance, such as the volume just turned, is cleared "
-        "after this long.",
+        help="A popup read at a glance, such as the volume just turned, is "
+        "cleared after this long.",
     )
     limits.add_argument(
         "--answer-card-timeout",

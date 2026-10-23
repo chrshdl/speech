@@ -190,6 +190,19 @@ class KeyboardCard(CamelModel):
     url: str
 
 
+class DrumsCard(CamelModel):
+    """
+    Play the drums: the client shows a drum kit, which plays recordings of
+    its own. The card stays until the user closes it, or another card
+    replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["DrumsCard"] = "DrumsCard"
+    id: str
+    title: str
+
+
 class RadioCard(CamelModel):
     """
     Play a web radio station: the client streams its audio from url, 16 bit
@@ -223,8 +236,9 @@ class RadioCard(CamelModel):
 class BrightnessCard(CamelModel):
     """The brightness of the screen, just set, in percent."""
 
-    # Shown as briefly as a transcript, as it is read at a glance.
-    BRIEF: ClassVar[bool] = True
+    # Shown as a popup over the card shown, which stays, and as briefly as a
+    # transcript, as it is read at a glance.
+    POPUP: ClassVar[bool] = True
     type: Literal["BrightnessCard"] = "BrightnessCard"
     id: str
     title: str
@@ -234,7 +248,7 @@ class BrightnessCard(CamelModel):
 class VolumeCard(CamelModel):
     """The volume of the speaker, just turned, in percent."""
 
-    BRIEF: ClassVar[bool] = True
+    POPUP: ClassVar[bool] = True
     type: Literal["VolumeCard"] = "VolumeCard"
     id: str
     title: str
@@ -284,6 +298,7 @@ Card = Annotated[
     | GameCard
     | SongCard
     | KeyboardCard
+    | DrumsCard
     | RadioCard
     | BrightnessCard
     | VolumeCard,
@@ -373,8 +388,19 @@ class ShowCard(Payload):
     card: Card
 
 
+class ShowPopup(Payload):
+    """
+    Show the card as a popup over the card shown, which stays as it is,
+    such as the volume just turned, replacing the popup shown. A popup with
+    the id of the popup shown updates it.
+    """
+
+    TOPIC = "Display"
+    card: Card
+
+
 class ClearCard(Payload):
-    """Dismiss the card with the id."""
+    """Dismiss the card with the id, or the popup."""
 
     TOPIC = "Display"
     card_id: str
@@ -442,6 +468,7 @@ EVENTS = (
     IntentRecognized,
     CommandRecognized,
     ShowCard,
+    ShowPopup,
     ClearCard,
     StartAudioStream,
     StopAudioStream,
@@ -495,6 +522,8 @@ class State(CamelModel):
     # The card that plays on beneath the cards shown, such as a RadioCard,
     # if any, also when it is the card shown.
     playing: Card | None = None
+    # The popup over the card shown, such as a VolumeCard, if any.
+    popup: Card | None = None
 
 
 class Info(CamelModel):

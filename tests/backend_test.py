@@ -14,7 +14,7 @@ import uvicorn
 import websockets
 
 from speech import export, loader, streaming
-from speech.backend import engine, game, keyboard, radio, songs
+from speech.backend import drums, engine, game, keyboard, radio, songs
 from speech.backend.app import create_app
 from speech.backend.engine import Microphone, Recognizer, Settings
 from speech.backend.messages import AudioInputKind, NoticeCard, RadioCard, VolumeCard
@@ -202,6 +202,7 @@ def test_info_and_state(model_path):
                 "dialogRequestId": None,
                 "card": None,
                 "playing": None,
+                "popup": None,
             }
             assert svc.events.first["payload"] == {
                 "state": "IDLE",
@@ -268,6 +269,7 @@ def test_hold_to_talk(model_path):
         "dialogRequestId": None,
         "card": None,
         "playing": None,
+        "popup": None,
     }
     ids = [e["id"] for e in events]
     assert ids == sorted(ids)
@@ -929,6 +931,7 @@ def test_commands():
         "dialogRequestId": None,
         "card": None,
         "playing": None,
+        "popup": None,
     }
     # Each command had a transcript of its own: 0.4 seconds of it, the
     # pause after it that ended it, and before it, what was left of the
@@ -1097,14 +1100,16 @@ def test_radio_plays_on_beneath_cards(model_path):
     """
     station = Station()
     recognizer = make_recognizer(
-        model_path, handlers={**station.handlers, "VolumeUp": Meter()}
+        model_path,
+        handlers={**station.handlers, "GetTime": Clock()},
+        answer_card_timeout=0.2,
     )
 
     async def run():
         async with service(recognizer) as svc:
             played = (await svc.post("/v1/intents/PlayRadio")).json()
             events = await svc.events.until("ShowCard")
-            turned = (await svc.post("/v1/intents/VolumeUp")).json()
+            turned = (await svc.post("/v1/intents/GetTime")).json()
             events += await svc.events.until("ShowCard")
             station.songs.put_nowait("Two")
             await asyncio.sleep(0.05)
@@ -1112,7 +1117,7 @@ def test_radio_plays_on_beneath_cards(model_path):
             # A client that connects now plays the radio beneath the card.
             async with Events(svc.address) as late:
                 snapshot = [await late.next(), await late.next()]
-            # The volume's card is brief.
+            # The clock's card goes.
             events += await svc.events.until("ShowCard")
             station.songs.put_nowait("Three")
             events += await svc.events.until("ShowCard")
@@ -1125,20 +1130,20 @@ def test_radio_plays_on_beneath_cards(model_path):
             return played, turned, events, covered, snapshot, stopped, more, state
 
     played, turned, events, covered, snapshot, stopped, more, state = asyncio.run(run())
-    radio_id, volume_id = played["id"], turned["id"]
+    radio_id, clock_id = played["id"], turned["id"]
     assert shown(events) == [
         ("RadioCard", radio_id, "One"),
-        ("VolumeCard", volume_id, None),
+        ("NoticeCard", clock_id, None),
         ("RadioCard", radio_id, "Two"),
         ("RadioCard", radio_id, "Three"),
     ]
     # Replaced rather than cleared.
     assert actions(events).count("ClearCard") == 1
-    assert covered["card"]["id"] == volume_id
+    assert covered["card"]["id"] == clock_id
     assert covered["playing"]["song"] == "Two"
     assert shown(snapshot) == [
         ("RadioCard", radio_id, "Two"),
-        ("VolumeCard", volume_id, None),
+        ("NoticeCard", clock_id, None),
     ]
     assert stopped.status_code == 200 and stopped.json() is None
     assert events[-1]["payload"] == {"cardId": radio_id}
@@ -1175,19 +1180,21 @@ def test_radio_dismissed(model_path):
     """
     station = Station()
     recognizer = make_recognizer(
-        model_path, handlers={**station.handlers, "VolumeUp": Meter()}
+        model_path,
+        handlers={**station.handlers, "GetTime": Clock()},
+        answer_card_timeout=0.2,
     )
 
     async def run():
         async with service(recognizer) as svc:
             dismissed = "/v1/display/card-dismissed"
             played = (await svc.post("/v1/intents/PlayRadio")).json()
-            turned = (await svc.post("/v1/intents/VolumeUp")).json()
+            turned = (await svc.post("/v1/intents/GetTime")).json()
             events = await svc.events.until("ShowCard")
             events += await svc.events.until("ShowCard")
             first = await svc.post(dismissed, {"cardId": turned["id"]})
             events += await svc.events.until("ShowCard")
-            turned = (await svc.post("/v1/intents/VolumeUp")).json()
+            turned = (await svc.post("/v1/intents/GetTime")).json()
             events += await svc.events.until("ShowCard")
             beneath = await svc.post(dismissed, {"cardId": played["id"]})
             again = await svc.post(dismissed, {"cardId": played["id"]})
@@ -1197,13 +1204,13 @@ def test_radio_dismissed(model_path):
     played, events, first, beneath, again, state = asyncio.run(run())
     assert [card[0] for card in shown(events)] == [
         "RadioCard",
-        "VolumeCard",
+        "NoticeCard",
         "RadioCard",
-        "VolumeCard",
+        "NoticeCard",
     ]
     assert (first.status_code, beneath.status_code) == (204, 204)
     assert again.status_code == 409
-    # The volume's card goes, with nothing beneath it any more.
+    # The clock's card goes, with nothing beneath it any more.
     assert events[-1]["payload"]["cardId"] != played["id"]
     assert (state["card"], state["playing"]) == (None, None)
 
@@ -1243,8 +1250,17 @@ def test_radio_streams_while_it_plays(model_path):
     assert missing.status_code == 404
 
 
-def test_glanceable_cards_go_sooner(model_path):
-    """A card read at a glance, such as the volume's, goes after its timeout."""
+def popups(events):
+    """The popups shown by the events, as (type, id)."""
+    return [
+        (e["payload"]["card"]["type"], e["payload"]["card"]["id"])
+        for e in events
+        if e["action"] == "ShowPopup"
+    ]
+
+
+def test_popup_goes_sooner(model_path):
+    """A popup read at a glance, such as the volume's, goes after its timeout."""
     recognizer = make_recognizer(
         model_path,
         handlers={"VolumeUp": Meter()},
@@ -1255,13 +1271,129 @@ def test_glanceable_cards_go_sooner(model_path):
     async def run():
         async with service(recognizer) as svc:
             await svc.post("/v1/intents/VolumeUp")
-            events = await svc.events.until("ShowCard")
+            events = await svc.events.until("ShowPopup")
             events += await svc.events.until("ClearCard", timeout=2)
             return events
 
     events = asyncio.run(run())
     times = [datetime.datetime.fromisoformat(e["timestamp"]) for e in events[-2:]]
     assert 0.3 <= (times[1] - times[0]).total_seconds() < 1
+
+
+def test_popup_leaves_the_card_shown(model_path):
+    """
+    The volume's popup shows over a card that stays, such as the drums',
+    which neither goes nor shows again, also for a client that connects
+    meanwhile, and goes by itself or when dismissed.
+    """
+    recognizer = make_recognizer(
+        model_path,
+        handlers={"VolumeUp": Meter(), drums.INTENT.name: drums.Drums()},
+        brief_card_timeout=0.3,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            played = (await svc.post("/v1/intents/PlayDrums")).json()
+            events = await svc.events.until("ShowCard")
+            turned = (await svc.post("/v1/intents/VolumeUp")).json()
+            events += await svc.events.until("ShowPopup")
+            covered = await svc.get("/v1/state")
+            async with Events(svc.address) as late:
+                snapshot = [await late.next(), await late.next()]
+            events += await svc.events.until("ClearCard", timeout=2)
+            gone = await svc.get("/v1/state")
+            again = (await svc.post("/v1/intents/VolumeUp")).json()
+            events += await svc.events.until("ShowPopup")
+            dismissed = await svc.post(
+                "/v1/display/card-dismissed", {"cardId": again["id"]}
+            )
+            await asyncio.sleep(0.5)
+            more = not svc.events.queue.empty()
+            return played, turned, events, covered, snapshot, gone, dismissed, more
+
+    played, turned, events, covered, snapshot, gone, dismissed, more = asyncio.run(
+        run()
+    )
+    assert actions(events) == ["ShowCard", "ShowPopup", "ClearCard", "ShowPopup"]
+    assert shown(events) == [("DrumsCard", played["id"], None)]
+    assert popups(events)[0] == ("VolumeCard", turned["id"])
+    assert events[2]["payload"] == {"cardId": turned["id"]}
+    assert covered["card"]["id"] == played["id"]
+    assert covered["popup"]["id"] == turned["id"]
+    assert actions(snapshot) == ["ShowCard", "ShowPopup"]
+    assert (gone["card"]["id"], gone["popup"]) == (played["id"], None)
+    # Dismissed by the client, it is not cleared again.
+    assert dismissed.status_code == 204
+    assert not more
+
+
+def test_popup_over_the_radio(model_path):
+    """The volume's popup leaves the radio's card as it is."""
+    station = Station()
+    recognizer = make_recognizer(
+        model_path,
+        handlers={**station.handlers, "VolumeUp": Meter()},
+        brief_card_timeout=0.2,
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            played = (await svc.post("/v1/intents/PlayRadio")).json()
+            events = await svc.events.until("ShowCard")
+            await svc.post("/v1/intents/VolumeUp")
+            events += await svc.events.until("ClearCard", timeout=2)
+            return played, events, await svc.get("/v1/state")
+
+    played, events, state = asyncio.run(run())
+    assert actions(events) == ["ShowCard", "ShowPopup", "ClearCard"]
+    assert events[-1]["payload"]["cardId"] != played["id"]
+    assert state["card"]["id"] == state["playing"]["id"] == played["id"]
+
+
+class VolumeIntents(FixedIntents):
+    """Hears each utterance as turning the volume up."""
+
+    def closest_heard(self, transcriber):
+        return Match(Intent("VolumeUp", ("volume up",)), self.score, "volume up")
+
+
+def test_popup_answers_a_capture(model_path):
+    """
+    Asked for by voice over the radio, the volume's popup shows once the
+    capture's transcript goes, over the radio's card shown again.
+    """
+    audio, _ = wave.array_from_wave("test0.wav")
+    station = Station()
+    recognizer = make_recognizer(
+        model_path,
+        intents=VolumeIntents(-0.5),
+        handlers={**station.handlers, "VolumeUp": Meter()},
+    )
+
+    async def run():
+        async with service(recognizer) as svc:
+            played = (await svc.post("/v1/intents/PlayRadio")).json()
+            await svc.events.until("ShowCard")
+            start = await svc.start("HOLD_TO_TALK")
+            socket = await stream_audio(svc.address, start, audio)
+            await socket.close()
+            events = await svc.events.until("CaptureFinished")
+            events += await svc.events.until("ShowPopup")
+            return played, start, events, await svc.get("/v1/state")
+
+    played, start, events, state = asyncio.run(run())
+    after = events[[e["action"] for e in events].index("CaptureFinished") :]
+    assert actions(after) == [
+        "CaptureFinished",
+        "IntentRecognized",
+        "ShowCard",
+        "ShowPopup",
+    ]
+    assert shown(after) == [("RadioCard", played["id"], "One")]
+    assert popups(after) == [("VolumeCard", start["dialogRequestId"])]
+    assert state["card"]["id"] == played["id"]
+    assert state["popup"]["id"] == start["dialogRequestId"]
 
 
 class RadioIntents(FixedIntents):
