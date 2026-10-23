@@ -540,7 +540,9 @@ def test_intents(model_path, score, fail, title):
     recognizer = make_recognizer(
         model_path,
         intents=FixedIntents(score),
-        handlers={"GetTime": clock},
+        # An intent it cannot answer, such as the brightness without a
+        # backlight, does not keep the others from closing.
+        handlers={"SetBrightness": None, "GetTime": clock},
         answer_card_timeout=0.4,
     )
 

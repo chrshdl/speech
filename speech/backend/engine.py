@@ -503,7 +503,10 @@ class Recognizer:
         self._stop_speaking()
         self.bus.close()
         for handler in self.handlers.values():
-            await handler.close()
+            # None for an intent the service cannot answer, such as the
+            # brightness without a backlight.
+            if handler is not None:
+                await handler.close()
 
     async def _spot_wake_word(self):
         """Starts a WAKE_WORD capture when the audio while IDLE says the wake word."""
