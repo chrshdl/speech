@@ -73,7 +73,7 @@ class Settings:
     # A pause after speech this long ends a TAP_TO_TALK capture.
     end_of_speech: float = 1.0
     # A TAP_TO_TALK capture that hears no speech for this long ends.
-    no_speech_timeout: float = 8.0
+    no_speech_timeout: float = 5.0
     # The longest TAP_TO_TALK or HOLD_TO_TALK capture.
     max_capture: float = 60.0
     # A pause after speech this long ends a command, in a COMMANDS

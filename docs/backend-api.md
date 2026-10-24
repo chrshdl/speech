@@ -47,7 +47,7 @@ time.
 
 A `HOLD_TO_TALK` or `TAP_TO_TALK` capture ends after 60 seconds, a
 `COMMANDS` capture after 30 minutes, and any when no audio arrives for 5
-seconds. A `TAP_TO_TALK` capture that recognizes no speech in 8 seconds
+seconds. A `TAP_TO_TALK` capture that recognizes no speech in 5 seconds
 ends too.
 `backend.py -h` lists the options that change these limits.
 
