@@ -19,16 +19,24 @@ def test_command_counts():
         ("left", "left", -1.2),
         ("right", "left", -0.8),
         ("right", None, None),
+        ("up", "up", -0.7),
+        ("down", "up", -1.1),
         ("yes", "left", -1.0),
         ("no", "right", -0.4),
         ("stop", None, None),
     ]
     assert evaluate.command_counts(heard, -1.5) == {
-        "commands": 4,
-        "recognized": 2,
-        "wrong": 1,
+        "commands": 6,
+        "recognized": 3,
+        "wrong": 2,
         "others": 3,
         "others taken": 2,
+        "left clips": 2,
+        "left recognized": 2,
+        "right clips": 2,
+        "up clips": 1,
+        "up recognized": 1,
+        "down clips": 1,
     }
     # A stricter threshold takes fewer of both.
     counts = evaluate.command_counts(heard, -0.6)

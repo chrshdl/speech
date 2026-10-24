@@ -42,9 +42,12 @@ the clips, such as `--threshold=-1.5,-1.25,-1.0` with an equals sign, as
 the values start with a minus.
 
 It prints how many clips are closest to their own of the 35 words, how
-many are transcribed exactly as the word, and how many of the "left" and
-"right" clips the game's commands recognize, as `backend.py` does, and of
-the other words it takes for one. For the 3,750 hour model after its
+many are transcribed exactly as the word, and how many of the clips of the
+games' commands, "left", "right", "up" and "down", the commands recognize,
+as `backend.py` does, also of each, and of the other words it takes for
+one. The tables below are from before "up" and "down" became commands, for
+Snake, and count only "left" and "right", which they still recognize as
+before, see `docs/backend-api.md`. For the 3,750 hour model after its
 first three epochs, of which the third also trained on Speech Commands'
 training clips, at the threshold of -1.5:
 

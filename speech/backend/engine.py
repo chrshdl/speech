@@ -73,7 +73,7 @@ class Settings:
     # A pause after speech this long ends a TAP_TO_TALK capture.
     end_of_speech: float = 1.0
     # A TAP_TO_TALK capture that hears no speech for this long ends.
-    no_speech_timeout: float = 8.0
+    no_speech_timeout: float = 5.0
     # The longest TAP_TO_TALK or HOLD_TO_TALK capture.
     max_capture: float = 60.0
     # A pause after speech this long ends a command, in a COMMANDS
@@ -292,7 +292,8 @@ class Recognizer:
                 card again as what plays changes. A handler whose
                 stops_playing is true stops what plays.
             commands (optional): Recognizes the commands of a COMMANDS
-                capture, as intents does the intents.
+                capture, as intents does the intents, as they are said:
+                its stream() matches each, see IntentRecognizer.stream.
             voice (optional): Speaks the answers whose handler has a
                 speech(card) that returns what to say, such as a
                 voice.Voice. Its sample_rate is the audio's, and its
@@ -734,8 +735,10 @@ class Recognizer:
         settings = self.settings
         transcriber = capture.transcriber
         heard = 0.0
-        # The audio of the transcript, which starts anew with each command.
+        # The audio of the transcript, which starts anew with each command,
+        # and its match so far, which aligns each frame once.
         said = 0.0
+        matcher = self.commands.stream()
         recognized = False
         while True:
             try:
@@ -760,13 +763,15 @@ class Recognizer:
                             await asyncio.to_thread(
                                 transcriber.push, np.zeros(0, np.int16), True
                             )
-                        recognized = await self._command(capture, final=ended)
+                        recognized = await self._command(capture, matcher, final=ended)
                     if ended:
                         transcriber.clear()
                         said, recognized = 0.0, False
+                        matcher = self.commands.stream()
                 elif said >= _DROP_SILENCE and transcriber.pause_seconds >= _DROP_PAUSE:
                     transcriber.clear()
                     said = 0.0
+                    matcher = self.commands.stream()
             if stop is _CANCEL:
                 return CaptureEndReason.CANCELLED
             if stop:
@@ -774,13 +779,14 @@ class Recognizer:
             if heard >= settings.max_commands_capture:
                 return CaptureEndReason.MAX_DURATION
 
-    async def _command(self, capture, final):
+    async def _command(self, capture, matcher, final):
         """
         Publishes the command the capture's transcript says, if it says
-        one, and returns whether it does.
+        one, and returns whether it does. The matcher, of the commands'
+        stream, has matched the transcript so far.
         """
         transcriber = capture.transcriber
-        match = await asyncio.to_thread(self.commands.closest_heard, transcriber)
+        match = await asyncio.to_thread(matcher.closest_heard, transcriber)
         if match is None or match.score < self.commands.threshold:
             return False
         text = transcriber.text(final).strip()

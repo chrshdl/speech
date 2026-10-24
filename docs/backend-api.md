@@ -8,7 +8,8 @@ something the service can answer, such as "what's the weather?", it
 recognizes the intent and shows the answer, see [Intents](#intents). The
 client renders what the service tells it, and the service decides what to
 show and for how long. Asked to "play superball", it starts a game, which
-the user steers by saying "left" and "right", see [Commands](#commands).
+the user steers by saying "left" and "right", and asked to "play snake",
+one steered also with "up" and "down", see [Commands](#commands).
 
 The service also serves a client at `/`: a landing page with a
 microphone button, see [The browser client](#the-browser-client).
@@ -46,7 +47,7 @@ time.
 
 A `HOLD_TO_TALK` or `TAP_TO_TALK` capture ends after 60 seconds, a
 `COMMANDS` capture after 30 minutes, and any when no audio arrives for 5
-seconds. A `TAP_TO_TALK` capture that recognizes no speech in 8 seconds
+seconds. A `TAP_TO_TALK` capture that recognizes no speech in 5 seconds
 ends too.
 `backend.py -h` lists the options that change these limits.
 
@@ -159,6 +160,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `TranscriptCard` | `title`, `text`, `isFinal` | The transcript, growing while `isFinal` is false. Show words that can still change as such. |
 | `NoticeCard` | `title`, `text` | A notice, such as "Sorry, I didn't catch that" when no speech was recognized |
 | `GameCard` | `title`, `level` | Play Superball at the `level`, from 1, the easiest, to 5, the fastest, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
+| `SnakeCard` | `title`, `level` | Play Snake from the `level`, from 1, an open garden, to 5, with the most walls: the snake crawls to the apples, growing with each it eats, until it bites itself or bumps into a wall, steered as Superball, see [Commands](#commands). It stays until the client dismisses it when the game ends, or another card replaces it. |
 | `BrightnessCard` | `title`, `percent` | A popup: the brightness of the screen, just set, in percent |
 | `VolumeCard` | `title`, `percent` | A popup: the volume of the speaker, just turned, in percent. The client plays a short tone, at the new volume |
 | `RadioCard` | `title`, `url`, `sampleRate`, `channels`, `encoding` (`LINEAR16`), `logo`, `song`, `artist`, `cover` | Play the web radio station `title`, whose audio streams from `url`, `GET /v1/radio/stream`, and show what plays: the `song` and its `artist`, empty when the station does not say, and the song's `cover`, an image, or else the station's `logo`, both from `GET /v1/radio/images/{key}`. The service updates it, with the same id, as each song starts. It plays on beneath the cards shown over it, see below, until the user closes it or asks to stop it, when the service clears it, or another card that stays until dismissed, such as a `SongCard`, replaces it. |
@@ -178,7 +180,8 @@ The lifecycle of a capture's card:
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
    for an answer, which takes longer to read, but never for a `GameCard`,
-   a `SongCard`, a `KeyboardCard`, a `DrumsCard` or a `RadioCard`. A new
+   a `SnakeCard`, a `SongCard`, a `KeyboardCard`, a `DrumsCard` or a
+   `RadioCard`. A new
    capture replaces the card sooner, except a `COMMANDS` capture, which
    shows no cards. An answer that is a popup, such as a `VolumeCard`,
    clears the capture's card at once instead, see [Popups](#popups).
@@ -252,6 +255,7 @@ does not match.
 | Intent | Answer |
 |---|---|
 | `PlayGame` | A `GameCard` at the level asked for, such as "play superball level three", or else 1 |
+| `PlaySnake` | A `SnakeCard` at the level asked for, such as "play snake" or "play snake level three", or else 1 |
 | `SetBrightness` | A `BrightnessCard`, having set the screen's brightness to the percent asked for in tens, such as "set the brightness to fifty percent", or to "full" or "minimum" brightness, never below 10%, at which the screen still shows. With `--backlight`, see below |
 | `VolumeUp`, `VolumeDown` | A `VolumeCard`, having turned the speaker up or down a step, such as "volume up", "turn it down", "louder" or "quieter", never to silence, so an answer can still be heard. With `--volume-control`, see below. Its `percent` is of the device's levels: a Jabra SPEAK 510 has 12, which its dots show, so 1 dot is 8%. Its control's 12 values reach only 8 of them (1, 2, 3, 4, 6, 7, 10 and 12 dots), so asking turns to the next of those. When the speakerphone's own + and - turn it a level, the service shows that too, in a `VolumeCard` for the intent `ShowVolume`, except while it listens, and keeps it: they turn the volume themselves without telling ALSA's driver, so the service counts the presses, see `speech/backend/volume.py`. That needs the service's user in the group `input` |
 | `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
@@ -308,9 +312,11 @@ model's characters, and the values of its slots, and pass a handler whose
 ## Commands
 
 A `COMMANDS` capture recognizes short commands as they are said, to steer
-a game, without a tap for each. Superball's are `LEFT`, from "left", "go
-left", "move left" or "turn left", and `RIGHT` likewise, also as "wight",
-since young children often say an r as a w.
+a game, without a tap for each: `LEFT`, from "left", "go left", "move
+left" or "turn left", and `RIGHT` likewise, also as "wight", since young
+children often say an r as a w, which steer Superball, and for Snake also
+`UP`, from "up", "go up" or "move up", and `DOWN` likewise. Superball
+ignores `UP` and `DOWN`.
 
 A pause of 0.3 seconds after speech ends each command, and the next
 starts a new transcript, while the model keeps streaming. Pauses within a
@@ -355,6 +361,13 @@ recognizes 678 rather than 701 of the 808 commands. Of the kid's
 clips, decoded whole by `examples/speech_commands/evaluate.py`, both
 recognized 20 of the 24 commands, as the model after two epochs recognized
 21 at -1.5, and took none of the other words for one.
+
+With `UP` and `DOWN` for Snake, "up" and "down" became commands rather
+than words that compete with them, so "left" and "right" are recognized
+as before, 678 of 808 at -1.25. Of the test set's clips, it recognizes
+285 of 425 of "up" and 295 of 406 of "down", never in the wrong
+direction, and takes 45 of the 9,366 clips of other words for one of the
+four commands, those for `UP` and `DOWN` moving nothing in Superball.
 
 ## Wake word
 
@@ -647,6 +660,25 @@ farther from the one before than the unicorn can move in time, so each
 can be caught. Tapping the microphone button
 ends it sooner. While playing, the page listens with a `COMMANDS`
 capture, see `web/assistant/game.js`.
+
+Asked to "play snake", it shows a garden of 13 by 9 cells, or 9 by 12 on
+a tall screen, as the unicorn trots away. After a countdown, the snake, of
+rainbow beads like the unicorn's mane, crawls a cell every 0.6 seconds,
+and saying "up", "down", "left" or "right" turns it, as do the arrow keys
+and the round buttons in the lower right corner, or below the garden on a
+tall screen, which light up when a command is heard, and shake for a turn
+back into itself, which the snake cannot take. Each apple it eats makes
+it a bead longer, and every 3 apples the next level, up to 5, adds walls,
+as the mazes of Snake II on Nokia's phones: corners, rails, a box with a
+gate in the middle of each side, and narrower gates. The snake waits while
+they come up, with a banner, so the player can turn it in time, and a wall
+due where the snake lies, or just ahead of it, shows faintly and comes up
+once it passed. It crawls out of one side of the garden and back in at the
+other, so only biting itself or bumping into a wall ends the game, which
+then shows the apples eaten. "Play snake level three" starts with the
+walls of the first three levels. Tapping the microphone button ends it sooner, and the X
+beside the score at once. While playing, the page listens with a
+`COMMANDS` capture, see `web/assistant/snake.js`.
 
 Asked to "play toggo radio", it plays TOGGO Radio and shows the song
 playing, its artist and cover, which change as each song starts. The radio

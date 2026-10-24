@@ -141,3 +141,33 @@ def test_others():
 def test_slot_needs_values():
     with pytest.raises(ValueError, match="slot"):
         IntentRecognizer([Intent("Go", ("a {x}",))], CHAR_TO_INT, BLANK, 0.04)
+
+
+def test_stream_matches_as_closest():
+    # Pushed in chunks of any size, the frames match as they do whole.
+    recognizer = IntentRecognizer(
+        [Intent("A", ("ab", "a")), Intent("B", ("b", "ba b"))],
+        CHAR_TO_INT,
+        BLANK,
+        0.04,
+        spaced=True,
+        others=("bb",),
+    )
+    rng = np.random.default_rng(0)
+    for n in range(1, 30):
+        probs = rng.dirichlet(np.ones(BLANK + 1) * 0.3, size=n)
+        stream = recognizer.stream()
+        start = 0
+        while start < n:
+            stop = start + int(rng.integers(1, 5))
+            stream.push(probs[start:stop])
+            start = stop
+            assert stream.closest() == recognizer.closest(probs[:start])
+
+
+def test_stream_needs_samples_without_slots():
+    recognizer = IntentRecognizer(
+        [Intent("A", ("a {x}",), {"x": ("b",)})], CHAR_TO_INT, BLANK, 0.04
+    )
+    with pytest.raises(ValueError):
+        recognizer.stream()
