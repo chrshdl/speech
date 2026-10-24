@@ -21,6 +21,13 @@ const TURNS = { UP: [0, -1], DOWN: [0, 1], LEFT: [-1, 0], RIGHT: [1, 0] };
 // The turns said ahead, which the snake takes one a cell, so two said
 // quickly, such as "up" and "left", both turn it.
 const AHEAD = 2;
+// A turn heard in the first part of the crawl to the next cell turns the
+// snake at once, at the cell it is leaving, as if it had come in time, and
+// its head swerves to the new way over SWERVE_MS. A command is heard about
+// 0.4 seconds after it was said, and the snake would otherwise wait for the
+// next cell, up to a crawl longer. Heard later, it turns at the next cell.
+const TURN_AT_ONCE = 0.5;
+const SWERVE_MS = 120;
 // The beads' colors, from behind the head, the unicorn mane's.
 const BEADS = ["#ffa94d", "#ffd93d", "#6bd88f", "#5cc0ff", "#a98bff", "#ff7ab8"];
 // The radius of the beads, from behind the head to the tail, in the
@@ -130,6 +137,12 @@ class Snake {
     this.levelUp = false;
     // The apple's cell, none between levels.
     this.apple = null;
+    // The cells the snake crawled from to the next, while it can still turn
+    // there at once, see TURN_AT_ONCE.
+    this.retake = null;
+    // How far the head was drawn from where it is, as it turned at once, and
+    // when, see SWERVE_MS.
+    this.swerve = null;
     this.frame = null;
     this.timers = new Set();
     this.resizing = new ResizeObserver(() => this.layOut());
@@ -198,13 +211,35 @@ class Snake {
       this.press(name, "refused");
       return;
     }
-    if (turn[0] !== dx || turn[1] !== dy) {
+    if ((turn[0] !== dx || turn[1] !== dy) && !this.turnAtOnce(turn)) {
       if (this.turns.length === AHEAD) {
         this.turns.shift();
       }
       this.turns.push(turn);
     }
     this.press(name, "pressed");
+  }
+
+  // Turns the snake at the cell it is leaving, when the turn comes early in
+  // its crawl, see TURN_AT_ONCE, and returns whether it did. Not after it
+  // turned or ate there, nor where the turn would bump into a wall or into
+  // itself, which waits for the next cell.
+  turnAtOnce(turn) {
+    const cells = this.retake;
+    if (this.phase !== "playing" || !cells || this.turns.length || this.crawled >= TURN_AT_ONCE) {
+      return false;
+    }
+    const move = this.ahead(cells, turn);
+    if (move.bumps) {
+      return false;
+    }
+    const [x, y] = this.beadAt(0);
+    this.retake = null;
+    this.heading = turn;
+    this.move(cells, move);
+    const [toX, toY] = this.beadAt(0);
+    this.swerve = { x: x - toX, y: y - toY, start: performance.now() };
+    return true;
   }
 
   // Ends the game, such as when the player stops listening, showing the
@@ -284,22 +319,43 @@ class Snake {
       this.nextLevel();
       return;
     }
-    if (this.turns.length) {
+    const straight = !this.turns.length;
+    if (!straight) {
       this.heading = this.turns.shift();
     }
-    const [head] = this.cells;
-    const next = this.wrap({ x: head.x + this.heading[0], y: head.y + this.heading[1] });
-    const eats = this.apple !== null && next.x === this.apple.x && next.y === this.apple.y;
-    // The tail leaves its cell as the head comes, unless the snake grows.
-    const body = eats ? this.cells : this.cells.slice(0, -1);
-    if (this.isWall(next) || body.some((cell) => cell.x === next.x && cell.y === next.y)) {
+    const cells = this.cells;
+    const move = this.ahead(cells, this.heading);
+    this.retake = null;
+    if (move.bumps) {
       this.crawled = 0;
-      this.from = this.cells.map((cell) => ({ ...cell }));
+      this.from = cells.map((cell) => ({ ...cell }));
       this.draw();
       this.gameOver();
       return;
     }
-    this.from = this.cells.map((cell) => ({ ...cell }));
+    this.move(cells, move);
+    // A straight crawl can still turn at once, unless it ate.
+    if (straight && !move.eats) {
+      this.retake = cells;
+    }
+  }
+
+  // Where the snake crawls from its cells, heading [dx, dy]: the head's next
+  // cell, whether it eats the apple there, the beads that follow it, and
+  // whether it bumps into a wall or into itself.
+  ahead(cells, [dx, dy]) {
+    const [head] = cells;
+    const next = this.wrap({ x: head.x + dx, y: head.y + dy });
+    const eats = this.apple !== null && next.x === this.apple.x && next.y === this.apple.y;
+    // The tail leaves its cell as the head comes, unless the snake grows.
+    const body = eats ? cells : cells.slice(0, -1);
+    const bumps = this.isWall(next) || body.some((cell) => cell.x === next.x && cell.y === next.y);
+    return { next, eats, body, bumps };
+  }
+
+  // The snake crawls from its cells as ahead found.
+  move(cells, { next, eats, body }) {
+    this.from = cells.map((cell) => ({ ...cell }));
     this.cells = [next, ...body];
     if (eats) {
       // The new bead is the old tail, which stays where it was.
@@ -467,17 +523,20 @@ class Snake {
   // last, over the beads. A bead crawling out of one side of the garden is
   // drawn there and coming in at the other.
   draw() {
-    const t = this.crawled;
     const beads = [];
     const n = this.cells.length;
     for (let i = n - 1; i >= 0; i--) {
-      const to = this.cells[i];
-      const from = this.from[i];
-      // The way it crawls, the short way round.
-      const dx = Math.abs(to.x - from.x) > 1 ? -Math.sign(to.x - from.x) : to.x - from.x;
-      const dy = Math.abs(to.y - from.y) > 1 ? -Math.sign(to.y - from.y) : to.y - from.y;
-      const x = from.x + dx * t;
-      const y = from.y + dy * t;
+      let [x, y] = this.beadAt(i);
+      if (i === 0 && this.swerve) {
+        // Eased out, from where the head was drawn before it turned.
+        const left = 1 - (performance.now() - this.swerve.start) / SWERVE_MS;
+        if (left > 0) {
+          x += this.swerve.x * left * left;
+          y += this.swerve.y * left * left;
+        } else {
+          this.swerve = null;
+        }
+      }
       const k = n > 2 ? (i - 1) / (n - 2) : 0;
       const radius = BEAD_RADIUS.neck + (BEAD_RADIUS.tail - BEAD_RADIUS.neck) * k * k;
       for (const [cx, cy] of this.copies(x, y)) {
@@ -517,6 +576,16 @@ class Snake {
         head.setAttribute("visibility", "hidden");
       }
     });
+  }
+
+  // The cell, x and y, where bead i is on its way from its last cell to its
+  // cell, the short way round, past a side of the garden.
+  beadAt(i) {
+    const to = this.cells[i];
+    const from = this.from[i];
+    const dx = Math.abs(to.x - from.x) > 1 ? -Math.sign(to.x - from.x) : to.x - from.x;
+    const dy = Math.abs(to.y - from.y) > 1 ? -Math.sign(to.y - from.y) : to.y - from.y;
+    return [from.x + dx * this.crawled, from.y + dy * this.crawled];
   }
 
   // Where to draw a bead at the cell x, y: there, and also at the other

@@ -861,6 +861,9 @@ class WordCommands:
 
     threshold = -1.0
 
+    def stream(self):
+        return self
+
     def closest_heard(self, transcriber):
         for intent in game.COMMANDS:
             if intent.samples[0] in transcriber.text():
