@@ -2,6 +2,7 @@
 Superball, a game steered by voice: asked to "play superball", the service
 shows a GameCard, whose client lets flowers fall for the unicorn to catch
 and steers it with the commands of a COMMANDS capture, "left" and "right".
+The commands also steer the snake, with "up" and "down", see snake.py.
 """
 
 from speech.backend.messages import GameCard
@@ -28,15 +29,18 @@ INTENT = Intent(
     {"level": LEVELS},
 )
 
-# The commands that steer the unicorn, by the names CommandRecognized
-# reports. Young children often say an r as a w, so "right" also as
-# "wight": the kid's "right" was heard as "whit", "wegt" or "what".
+# The commands that steer the games, by the names CommandRecognized
+# reports: the unicorn LEFT and RIGHT, and the snake also UP and DOWN.
+# Young children often say an r as a w, so "right" also as "wight": the
+# kid's "right" was heard as "whit", "wegt" or "what".
 COMMANDS = [
     Intent("LEFT", ("left", "go left", "move left", "turn left")),
     Intent(
         "RIGHT",
         ("right", "go right", "move right", "turn right", "wight", "go wight"),
     ),
+    Intent("UP", ("up", "go up", "move up")),
+    Intent("DOWN", ("down", "go down", "move down")),
 ]
 # Everyday words said while playing, which compete with the commands, so
 # that an utterance more like one of them moves nothing, such as a
@@ -45,10 +49,10 @@ COMMANDS = [
 # "wight", are left out.
 OTHERS = (
     "yes", "no", "yeah", "yay", "wow", "oh", "oh no", "okay", "hello", "hi",
-    "bye", "he", "it", "is", "look", "stop", "go", "up", "down", "again",
-    "play", "game", "fun", "mom", "dad", "oops", "nice", "one", "two",
-    "three", "four", "five", "good", "cool", "the", "you", "me", "my", "on",
-    "off", "in", "out", "unicorn",
+    "bye", "he", "it", "is", "look", "stop", "go", "again", "play", "game",
+    "fun", "mom", "dad", "oops", "nice", "one", "two", "three", "four",
+    "five", "good", "cool", "the", "you", "me", "my", "on", "off", "in",
+    "out", "unicorn", "snake", "apple",
 )  # fmt: skip
 # The lowest score of a command, see speech/intents.py. Higher takes fewer
 # other words and recognizes fewer commands. With the 3,750 hour model

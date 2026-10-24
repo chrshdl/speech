@@ -20,6 +20,9 @@ const ui = {
   game: $("game"),
   steerLeft: $("steer-left"),
   steerRight: $("steer-right"),
+  snake: $("snake"),
+  snakeTitle: $("snake-title"),
+  snakeClose: $("snake-close"),
   keys: $("keys"),
   keysTitle: $("keys-title"),
   keysBoard: $("keys-board"),
@@ -46,7 +49,7 @@ let popup = null; // The popup shown over it, such as the volume's: its data.
 let audio = null; // The microphone stream of the browser, while capturing.
 let starting = false;
 let heard = null; // The final transcript of the last capture, by its id.
-let game = null; // The Superball being played, and the id of its card.
+let game = null; // The game being played, Superball or Snake, and the id of its card.
 let keyboard = null; // The synthesizer's keyboard shown, and the id of its card.
 let drums = null; // The drums shown, and the id of their card.
 let commands = null; // The id of the capture that hears the game's commands.
@@ -160,11 +163,7 @@ function connectEvents() {
       heard = { id: dialogRequestId, text };
     }
   });
-  on("Recognition.CommandRecognized", ({ command }) => {
-    if (game) {
-      game.superball.command(command);
-    }
-  });
+  on("Recognition.CommandRecognized", ({ command }) => steer(command));
   on("Display.ShowCard", ({ card: data }) => showCard(data));
   on("Display.ShowPopup", ({ card: data }) => showPopup(data));
   on("Display.ClearCard", ({ cardId }) => {
@@ -325,7 +324,7 @@ function weekday(isoDate) {
 }
 
 function showCard(data) {
-  if (data.type === "GameCard") {
+  if (GAMES.has(data.type)) {
     startGame(data);
     return;
   }
@@ -432,7 +431,7 @@ function hideCard() {
   }
   const { data, element } = card;
   card = null;
-  if (data.type === "GameCard") {
+  if (GAMES.has(data.type)) {
     endGame();
     return;
   }
@@ -987,8 +986,11 @@ function isCommands(id) {
   return startingCommands || (id !== null && id === lastCommands);
 }
 
-// Superball, see game.js. The game's card starts it, and while it is played
-// a COMMANDS capture listens for "left" and "right".
+// The games, Superball, see game.js, and Snake, see snake.js. The game's card
+// starts it, and while it is played a COMMANDS capture listens for "left" and
+// "right", and for the snake also "up" and "down".
+
+const GAMES = new Set(["GameCard", "SnakeCard"]);
 
 function startGame(data) {
   if (game && game.id === data.id) {
@@ -996,11 +998,7 @@ function startGame(data) {
   }
   hideCard();
   card = { data, element: null };
-  const superball = new Superball({
-    view: ui.meadow,
-    unicorn: ui.unicorn,
-    layer: ui.gameLayer,
-    overlay: ui.game,
+  const callbacks = {
     onOver: () => {
       if (commands) {
         stopCapture();
@@ -1008,10 +1006,23 @@ function startGame(data) {
     },
     // Once the score was shown, the game's card goes.
     onEnd: () => dismissCard(),
-  });
-  game = { id: data.id, superball };
+  };
+  let play;
+  if (data.type === "SnakeCard") {
+    ui.snakeTitle.textContent = data.title;
+    play = new Snake({ root: ui.snake, ...callbacks });
+  } else {
+    play = new Superball({
+      view: ui.meadow,
+      unicorn: ui.unicorn,
+      layer: ui.gameLayer,
+      overlay: ui.game,
+      ...callbacks,
+    });
+  }
+  game = { id: data.id, play };
   restarts = [];
-  superball.start(data.level);
+  play.start(data.level);
   listenForCommands();
 }
 
@@ -1019,7 +1030,7 @@ function endGame() {
   if (!game) {
     return;
   }
-  game.superball.destroy();
+  game.play.destroy();
   game = null;
   if (commands) {
     stopCapture();
@@ -1029,14 +1040,14 @@ function endGame() {
 // Listens for the game's commands while it needs them, also again when the
 // capture ended by itself, unless that keeps happening.
 async function listenForCommands() {
-  if (!game || !game.superball.listening || commands || dialogState !== "IDLE" || starting) {
+  if (!game || !game.play.listening || commands || dialogState !== "IDLE" || starting) {
     return;
   }
   const now = Date.now();
   restarts = restarts.filter((time) => now - time < 10000);
   if (restarts.length >= 3) {
     setStatus("I can't hear you. Is the microphone on?");
-    game.superball.quit();
+    game.play.quit();
     return;
   }
   restarts.push(now);
@@ -1045,7 +1056,7 @@ async function listenForCommands() {
 
 function steer(command) {
   if (game) {
-    game.superball.command(command);
+    game.play.command(command);
   }
 }
 
@@ -1292,9 +1303,9 @@ async function toggleCapture() {
   }
   if (game) {
     // The button stops the game, which then shows the score.
-    const { superball } = game;
-    if (superball.listening) {
-      superball.quit();
+    const { play } = game;
+    if (play.listening) {
+      play.quit();
       return;
     }
     dismissCard();
@@ -1347,7 +1358,7 @@ async function startCapture(initiator) {
       commands = dialogRequestId;
       lastCommands = dialogRequestId;
       // The game can end while listening starts.
-      if (!game || !game.superball.listening) {
+      if (!game || !game.play.listening) {
         stopCapture();
       }
     }
@@ -1459,6 +1470,9 @@ async function openMicrophone(rate) {
 
 // Start.
 
+// The commands of the arrow keys, which steer the games.
+const ARROWS = { ArrowLeft: "LEFT", ArrowRight: "RIGHT", ArrowUp: "UP", ArrowDown: "DOWN" };
+
 async function start() {
   prepareSound();
   updateClock();
@@ -1476,6 +1490,17 @@ async function start() {
   ui.keysClose.addEventListener("click", () => dismissCard());
   ui.drumsClose.addEventListener("pointerup", () => dismissCard());
   ui.drumsClose.addEventListener("click", () => dismissCard());
+  ui.snakeClose.addEventListener("pointerup", () => dismissCard());
+  ui.snakeClose.addEventListener("click", () => dismissCard());
+  // The snake turns on touching, at once, as a voice command would.
+  for (const button of ui.snake.querySelectorAll(".snake-turn")) {
+    button.addEventListener("pointerdown", () => steer(button.dataset.turn));
+    button.addEventListener("click", (event) => {
+      if (event.detail === 0) {
+        steer(button.dataset.turn);
+      }
+    });
+  }
   // The octave buttons shift on touching, at once, which is also why no
   // click is needed, and on a click from the keyboard, without a pointer.
   for (const [button, octaves] of [
@@ -1501,9 +1526,9 @@ async function start() {
       toggleCapture();
     } else if (event.code === "Escape") {
       dismissCard();
-    } else if (game && (event.code === "ArrowLeft" || event.code === "ArrowRight")) {
+    } else if (game && ARROWS[event.code]) {
       event.preventDefault();
-      steer(event.code === "ArrowLeft" ? "LEFT" : "RIGHT");
+      steer(ARROWS[event.code]);
     }
   });
   try {

@@ -1,8 +1,9 @@
 """
 Measures how a streaming CTC model recognizes the words of Speech
 Commands' test set, each said alone: which of the 35 words each clip is
-closest to, whether its transcript is the word, and how the game's
-commands, "left" and "right", are recognized among the other words.
+closest to, whether its transcript is the word, and how the games'
+commands, "left", "right", "up" and "down", are recognized among the
+other words.
 """
 
 import argparse
@@ -17,6 +18,8 @@ from speech.features import log_specgram
 from speech.intents import Intent, IntentRecognizer
 from speech.utils import wave
 
+# The words of the games' commands, see speech/backend/game.py.
+COMMANDS = tuple(intent.name.lower() for intent in game.COMMANDS)
 # Silence around each clip, in seconds. Within a stream, as in the game, a
 # word comes after other audio, which the model needs to settle.
 PADDING = 0.5
@@ -65,18 +68,20 @@ def evaluate(model, data):
 
 def command_counts(heard, threshold):
     """
-    The "left" and "right" clips, how many of them the commands recognize
-    at the threshold, and in the wrong direction, and the other words taken
-    for a command.
+    The clips of the commands, how many of them the commands recognize at
+    the threshold, also of each command, and in the wrong direction, and
+    the other words taken for a command.
     """
     counts = collections.Counter()
     for word, command, score in heard:
         if command is not None and score < threshold:
             command = None
-        if word in ("left", "right"):
+        if word in COMMANDS:
             counts["commands"] += 1
+            counts[f"{word} clips"] += 1
             if command == word:
                 counts["recognized"] += 1
+                counts[f"{word} recognized"] += 1
             elif command is not None:
                 counts["wrong"] += 1
         else:
@@ -114,4 +119,11 @@ if __name__ == "__main__":
             f"Threshold {threshold}: commands recognized {c['recognized']} of "
             f"{c['commands']}, in the wrong direction {c['wrong']}, other words "
             f"taken for a command {c['others taken']} of {c['others']}"
+        )
+        print(
+            "  "
+            + ", ".join(
+                f"{word} {c[f'{word} recognized']} of {c[f'{word} clips']}"
+                for word in COMMANDS
+            )
         )

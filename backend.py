@@ -19,6 +19,7 @@ from speech.backend import (
     game,
     keyboard,
     radio,
+    snake,
     songs,
     voice,
     volume,
@@ -34,7 +35,7 @@ from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
 log = logging.getLogger(__name__)
 
 # What the service answers.
-INTENTS = [weather.INTENT, game.INTENT, keyboard.INTENT, drums.INTENT]
+INTENTS = [weather.INTENT, game.INTENT, snake.INTENT, keyboard.INTENT, drums.INTENT]
 
 
 def main(args):
@@ -90,6 +91,7 @@ def main(args):
         handlers={
             weather.INTENT.name: weather.Weather(args.weather_location),
             game.INTENT.name: game.Game(),
+            snake.INTENT.name: snake.Snake(),
             keyboard.INTENT.name: keyboard.Keyboard(),
             drums.INTENT.name: drums.Drums(),
             **(station.handlers if station is not None else {}),
@@ -133,7 +135,7 @@ def load(args, jukebox, screen, speaker_volume=None, station=None):
     intents, with asking for one of the songs, a songs.Songs, and with a
     screen, a brightness.Brightness, for its brightness, and with a
     speaker_volume, a volume.Volume, for turning it up and down, and with a
-    station, a radio.Radio, for playing and stopping it, and of the game's
+    station, a radio.Radio, for playing and stopping it, and of the games'
     commands, which match the model's output, and the engine.WakeWord, if
     there is a wake word model, and the voice activity detector, if there
     is one. The models are all loaded now, so a capture starts at once when

@@ -293,6 +293,7 @@ body.has-card :is(.keys-open, .drums-open),
 body.keyboard :is(.keys-open, .drums-open),
 body.drums :is(.keys-open, .drums-open),
 body.playing :is(.keys-open, .drums-open),
+body.snake :is(.keys-open, .drums-open),
 body:not([data-state="IDLE"]) :is(.keys-open, .drums-open) {
   visibility: hidden;
   opacity: 0;
@@ -653,6 +654,11 @@ body.has-card .bubble {
 body.has-card .step-aside,
 body.drums .step-aside {
   translate: calc(300 * var(--u)) 0;
+}
+
+/* Out of the way of the snake's garden and buttons. */
+body.snake .step-aside {
+  translate: calc(800 * var(--u)) 0;
 }
 
 /* 10 of the unicorn's own units, which it draws at 1.2 times the grid's. */
@@ -1275,7 +1281,8 @@ body.keyboard .bubble {
 }
 
 .keys-hud,
-.drums-hud {
+.drums-hud,
+.snake-hud {
   position: absolute;
   top: 34px;
   left: 50%;
@@ -1307,7 +1314,8 @@ body.keyboard .bubble {
 }
 
 .keys-hud .card-close,
-.drums-hud .card-close {
+.drums-hud .card-close,
+.snake-hud .card-close {
   margin: 0;
 }
 
@@ -1845,6 +1853,325 @@ body.playing .bubble {
   to {
     opacity: 0;
     translate: 0 -70px;
+  }
+}
+
+/* Snake: its name and the apples eaten above, the garden as large as fits
+   beside the buttons that turn the snake, in a cross in the lower right
+   corner, or below the garden on a tall screen. */
+
+body.snake .greeting-text,
+body.snake .bubble {
+  opacity: 0;
+}
+
+.snake {
+  --turn: 84px;
+  --pad: calc(3 * var(--turn) + 2 * 6px);
+  --lawn: #c6f1cc;
+  --lawn-check: #b3e9bb;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+:root[data-theme="night"] .snake {
+  --lawn: #4f8f75;
+  --lawn-check: #47846b;
+}
+
+.snake[hidden] {
+  display: none;
+}
+
+.snake-hud-icon {
+  width: 30px;
+  height: 30px;
+}
+
+.snake-title {
+  color: var(--purple);
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.snake-level {
+  margin-left: 6px;
+  color: var(--pink);
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.snake-score {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.snake-score svg {
+  width: 30px;
+  height: 30px;
+}
+
+.snake-field {
+  position: absolute;
+  top: 110px;
+  right: calc(var(--pad) + 44px);
+  bottom: 20px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Its frame, around the lawn, which snake.js sizes to whole cells. */
+.snake-garden {
+  flex: none;
+  overflow: hidden;
+  border: 6px solid #ffffff;
+  border-radius: 28px;
+  background: var(--lawn);
+  box-shadow: 0 12px 32px rgba(139, 92, 246, 0.25);
+  transition: background-color var(--theme-fade);
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.snake-lawn {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.snake-check {
+  fill: var(--lawn-check);
+  transition: fill var(--theme-fade);
+}
+
+.snake-tongue {
+  fill: none;
+  stroke: #ff5fa2;
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transform-origin: 46px 0;
+  animation: tongue 2.4s ease-in-out infinite;
+}
+
+/* The tongue flicks out now and then. */
+@keyframes tongue {
+  0%,
+  70%,
+  100% {
+    scale: 0 1;
+  }
+  78%,
+  92% {
+    scale: 1 1;
+  }
+}
+
+/* A wall's stone shows faintly where the snake is, and comes up, as the
+   apple grows, once it is gone. */
+.snake-wall.pending {
+  opacity: 0.3;
+}
+
+.snake-wall.up {
+  animation: apple-grow 450ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* Each apple grows on its cell. */
+.snake-apple.grown .snake-apple-grow {
+  animation: apple-grow 450ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes apple-grow {
+  from {
+    scale: 0;
+  }
+}
+
+/* The snake blinks when it bites itself. */
+.snake-garden.bitten :is(.snake-body, .snake-heads) {
+  animation: bitten 400ms ease-in-out 3;
+}
+
+@keyframes bitten {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+.snake-point {
+  fill: var(--pink);
+  stroke: #ffffff;
+  stroke-width: 10px;
+  paint-order: stroke fill;
+  font-size: 64px;
+  font-weight: 600;
+  animation: rise 900ms ease-out forwards;
+}
+
+.snake-field .game-banner {
+  top: 50%;
+  max-width: calc(100% - 32px);
+}
+
+.snake-pad {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  display: grid;
+  grid-template:
+    ". up ." var(--turn)
+    "left . right" var(--turn)
+    ". down ." var(--turn) / var(--turn) var(--turn) var(--turn);
+  gap: 6px;
+  pointer-events: auto;
+}
+
+/* Round buttons with the word to say under the arrow, which light up when
+   it is heard, or shake for a turn the snake cannot take. */
+.snake-turn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  padding: 0 0 6px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  color: var(--purple);
+  font: inherit;
+  cursor: pointer;
+  box-shadow:
+    0 8px 20px rgba(139, 92, 246, 0.3),
+    inset 0 -4px 0 rgba(139, 92, 246, 0.12);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.snake-turn.up {
+  grid-area: up;
+}
+
+.snake-turn.left {
+  grid-area: left;
+}
+
+.snake-turn.right {
+  grid-area: right;
+}
+
+.snake-turn.down {
+  grid-area: down;
+}
+
+.snake-turn svg {
+  width: 40%;
+  height: 40%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.snake-turn-word {
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.snake-turn:focus-visible {
+  outline: 4px solid var(--pink);
+  outline-offset: 4px;
+}
+
+.snake-turn.pressed {
+  animation: turn 380ms ease;
+}
+
+.snake-turn.refused {
+  animation: refused 380ms ease;
+}
+
+@keyframes turn {
+  30% {
+    background: var(--pink);
+    color: #ffffff;
+    scale: 1.12;
+  }
+}
+
+.snake-turn.pressed .snake-turn-word {
+  animation: turn-word 380ms ease;
+}
+
+@keyframes turn-word {
+  30% {
+    color: #ffffff;
+  }
+}
+
+@keyframes refused {
+  20%,
+  60% {
+    translate: -6px 0;
+  }
+  40%,
+  80% {
+    translate: 6px 0;
+  }
+}
+
+/* On a tall screen, such as a phone's, the buttons below the garden. */
+@media (orientation: portrait) {
+  .snake {
+    --turn: 72px;
+  }
+
+  .snake-field {
+    right: 16px;
+    bottom: calc(var(--pad) + 36px);
+    left: 16px;
+  }
+
+  .snake-pad {
+    right: 50%;
+    translate: 50% 0;
+  }
+}
+
+@media (max-width: 640px) {
+  .snake-field {
+    top: 184px;
+  }
+}
+
+@media (max-height: 600px) {
+  .snake {
+    --turn: 72px;
+  }
+
+  .snake-field {
+    top: 100px;
+    bottom: 14px;
+  }
+
+  .snake-pad {
+    right: 16px;
+    bottom: 14px;
+  }
+
+  .snake-turn-word {
+    font-size: 16px;
   }
 }
 
@@ -2548,7 +2875,8 @@ body.playing .bubble {
 @media (max-width: 640px) {
   .game-hud,
   .keys-hud,
-  .drums-hud {
+  .drums-hud,
+  .snake-hud {
     top: 112px;
   }
 

@@ -155,6 +155,23 @@ class GameCard(CamelModel):
     level: int
 
 
+class SnakeCard(CamelModel):
+    """
+    Play a game, Snake, from the level: the client lets the snake crawl to
+    the apples, growing with each it eats, until it bites itself or bumps
+    into a wall, and the user steers it with the commands of a COMMANDS
+    capture. The card stays until the client dismisses it when the game
+    ends, or another card replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["SnakeCard"] = "SnakeCard"
+    id: str
+    title: str
+    # From 1, an open garden, to 5, with the most walls.
+    level: int = 1
+
+
 class SongCard(CamelModel):
     """
     Play a song: the client plays the notes at the url, and dismisses the
@@ -296,6 +313,7 @@ Card = Annotated[
     | NoticeCard
     | WeatherCard
     | GameCard
+    | SnakeCard
     | SongCard
     | KeyboardCard
     | DrumsCard
