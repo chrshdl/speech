@@ -9,6 +9,8 @@ import contextlib
 import dataclasses
 import datetime
 import logging
+import threading
+import time
 import uuid
 
 import numpy as np
@@ -27,6 +29,7 @@ from speech.backend.messages import (
     Initiator,
     IntentRecognized,
     Message,
+    MicrophoneChanged,
     NoticeCard,
     ShowCard,
     ShowPopup,
@@ -41,9 +44,11 @@ from speech.backend.messages import (
 log = logging.getLogger(__name__)
 
 # Ends a capture's audio, see Recognizer.stop_capture, or the capture at
-# once, without an answer, see Recognizer.card_dismissed.
+# once, without an answer, see Recognizer.card_dismissed, or because the
+# microphone went, see Recognizer.microphone_changed.
 _STOP = object()
 _CANCEL = object()
+_GONE = object()
 # A COMMANDS capture drops the audio of a transcript without speech once it
 # is this long and this quiet, keeping the stream going.
 _DROP_SILENCE = 2.0
@@ -109,6 +114,10 @@ class Busy(Exception):
 
 class Unsupported(Exception):
     """The service cannot do what was requested."""
+
+
+class NoMicrophone(Exception):
+    """The service's microphone is not connected, so it cannot listen."""
 
 
 class EventBus:
@@ -349,6 +358,9 @@ class Recognizer:
         # audio.
         self.wake_reset = False
         self.wake_task = None
+        # Whether the microphone is connected, with audio input from it, as
+        # its Microphone reports, see microphone_changed.
+        self.microphone_connected = True
 
     @property
     def sample_rate(self):
@@ -357,6 +369,8 @@ class Recognizer:
     def snapshot(self):
         """The events that bring a new subscriber up to date."""
         events = [self._state_event()]
+        if self.audio_input == AudioInputKind.MICROPHONE:
+            events.append(MicrophoneChanged(connected=self.microphone_connected))
         # What plays first, so a client plays it beneath the card shown.
         if self.playing is not None and (
             self.card is None or self.card.id != self.playing.id
@@ -375,9 +389,11 @@ class Recognizer:
 
     def start_capture(self, initiator):
         """
-        Starts a capture and returns it. Raises Busy unless IDLE, and
+        Starts a capture and returns it. Raises Busy unless IDLE,
         Unsupported for a COMMANDS capture without commands to recognize,
-        and for a WAKE_WORD capture, which only the wake word starts.
+        and for a WAKE_WORD capture, which only the wake word starts, and
+        NoMicrophone while the microphone it would listen to is not
+        connected.
         """
         if self.state != DialogState.IDLE or self.capture is not None:
             raise Busy(f"Cannot start a capture while {self.state}.")
@@ -385,6 +401,11 @@ class Recognizer:
             raise Unsupported("This service recognizes no commands.")
         if initiator == Initiator.WAKE_WORD:
             raise Unsupported("A WAKE_WORD capture starts when the wake word is heard.")
+        if (
+            self.audio_input == AudioInputKind.MICROPHONE
+            and not self.microphone_connected
+        ):
+            raise NoMicrophone("No microphone is connected.")
         return self._start_capture(initiator)
 
     def _start_capture(self, initiator, lookback=None):
@@ -447,6 +468,28 @@ class Recognizer:
         if capture is None or capture.ended.is_set() or capture.stream_id != stream_id:
             return
         capture.audio.put_nowait(audio)
+
+    def microphone_changed(self, connected):
+        """
+        The microphone was plugged in, or went, such as when it was
+        unplugged, which ends the capture listening to it at once.
+        """
+        if connected == self.microphone_connected:
+            return
+        self.microphone_connected = connected
+        self.bus.publish(MicrophoneChanged(connected=connected))
+        if connected:
+            # The audio before it went is no lookback for the wake word.
+            self.lookback = wake_word_module.RingBuffer(len(self.lookback.buffer))
+            self.wake_reset = True
+            return
+        capture = self.capture
+        if (
+            capture is not None
+            and capture.stream_id is None
+            and not capture.ended.is_set()
+        ):
+            capture.audio.put_nowait(_GONE)
 
     def end_stream(self, stream_id):
         """
@@ -638,7 +681,8 @@ class Recognizer:
     async def _next_chunks(self, capture):
         """
         Waits for the capture's audio and returns all the chunks queued,
-        and what ended the capture after them, _STOP or _CANCEL, or None.
+        and what ended the capture after them, _STOP, _CANCEL or _GONE, or
+        None.
         Raises TimeoutError when none arrives in time.
         """
         chunks = [
@@ -649,7 +693,9 @@ class Recognizer:
             chunks.append(capture.audio.get_nowait())
         # Compared by identity, since the chunks are arrays.
         ends = [
-            i for i, chunk in enumerate(chunks) if chunk is _STOP or chunk is _CANCEL
+            i
+            for i, chunk in enumerate(chunks)
+            if chunk is _STOP or chunk is _CANCEL or chunk is _GONE
         ]
         if ends:
             return chunks[: ends[0]], chunks[ends[0]]
@@ -684,6 +730,8 @@ class Recognizer:
                 return CaptureEndReason.AUDIO_TIMEOUT
             if stop is _CANCEL:
                 return CaptureEndReason.CANCELLED
+            if stop is _GONE:
+                return CaptureEndReason.NO_MICROPHONE
             if chunks:
                 audio = np.concatenate(chunks)
                 await asyncio.to_thread(push, audio)
@@ -774,6 +822,8 @@ class Recognizer:
                     matcher = self.commands.stream()
             if stop is _CANCEL:
                 return CaptureEndReason.CANCELLED
+            if stop is _GONE:
+                return CaptureEndReason.NO_MICROPHONE
             if stop:
                 return CaptureEndReason.STOP_CAPTURE
             if heard >= settings.max_commands_capture:
@@ -833,7 +883,11 @@ class Recognizer:
         )
         text = capture.transcriber.text(final=True).strip()
         log.info("Capture %s finished with %s: %r", capture.id, reason, text)
-        if capture.initiator == Initiator.WAKE_WORD and not (text and capture.said):
+        if (
+            capture.initiator == Initiator.WAKE_WORD
+            and not (text and capture.said)
+            and reason != CaptureEndReason.NO_MICROPHONE
+        ):
             # Nothing was said after the wake word, so the capture ends
             # quietly, without a notice.
             self._end_quietly(capture, reason, text)
@@ -992,6 +1046,10 @@ class Recognizer:
         return TranscriptCard(id=capture.id, title=title, text=text, is_final=final)
 
     def _final_card(self, capture, text, reason):
+        if reason == CaptureEndReason.NO_MICROPHONE:
+            # Also with a transcript, which it cut short.
+            title, body = "No microphone", "Connect a microphone, then try again."
+            return NoticeCard(id=capture.id, title=title, text=body)
         if text:
             return self._transcript_card(capture, text, final=True)
         if reason == CaptureEndReason.AUDIO_TIMEOUT:
@@ -1146,10 +1204,19 @@ class Recognizer:
 
 
 class Microphone:
+    # Without audio for this long, the stream is reopened: PortAudio's stream
+    # stays active when its device goes, such as a USB speakerphone
+    # unplugged, but its callback stops. Its chunks come every 100 ms.
+    STALL_SECONDS = 1.0
+    # How often it looks for a microphone while none is connected.
+    RETRY_SECONDS = 1.0
+
     def __init__(self, recognizer, device=None, chunk_ms=100):
         """
         Delivers the audio of a microphone to the recognizer, while
-        started.
+        started, and tells it when the microphone goes, such as when it is
+        unplugged, and when it is plugged in again, which it notices by
+        itself.
 
         Arguments:
             device: The microphone's name or index, by default the
@@ -1159,29 +1226,103 @@ class Microphone:
         self.device = device
         self.chunk_ms = chunk_ms
         self.stream = None
+        self.stopped = threading.Event()
+        self.thread = None
+        # When the callback last delivered audio, by time.monotonic().
+        self.heard = 0.0
+        # Why the microphone could not be opened, the last time it could not.
+        self.error = None
 
     def start(self, loop):
-        """Opens the microphone. Its audio is delivered on the loop."""
+        """
+        Opens the microphone, or else tells the recognizer it is not
+        connected, and keeps it open. Its audio is delivered on the loop.
+        """
+        self.loop = loop
+        # At once, so the recognizer knows whether it has a microphone
+        # before it serves a client.
+        if not self._open(rescan=False):
+            self.recognizer.microphone_changed(False)
+        self.thread = threading.Thread(
+            target=self._keep_open, name="microphone", daemon=True
+        )
+        self.thread.start()
+
+    def stop(self):
+        self.stopped.set()
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
+        self._close()
+
+    def _open(self, rescan=True):
+        """Opens the microphone and returns whether it could."""
         recognizer = self.recognizer
+        loop = self.loop
 
         def callback(indata, frames, time_info, status):
+            self.heard = time.monotonic()
             if status:
                 log.warning("Microphone: %s", status)
             loop.call_soon_threadsafe(recognizer.deliver, indata[:, 0].copy())
 
-        self.stream = sounddevice.InputStream(
-            samplerate=recognizer.sample_rate,
-            channels=1,
-            dtype="int16",
-            blocksize=int(recognizer.sample_rate * self.chunk_ms / 1e3),
-            device=self.device,
-            callback=callback,
-        )
-        self.stream.start()
-        name = sounddevice.query_devices(self.stream.device)["name"]
+        try:
+            if rescan:
+                # PortAudio lists the devices when it starts, so it finds
+                # one plugged in since only when started again.
+                sounddevice._terminate()
+                sounddevice._initialize()
+            self.heard = time.monotonic()
+            self.stream = sounddevice.InputStream(
+                samplerate=recognizer.sample_rate,
+                channels=1,
+                dtype="int16",
+                blocksize=int(recognizer.sample_rate * self.chunk_ms / 1e3),
+                device=self.device,
+                callback=callback,
+            )
+            self.stream.start()
+            name = sounddevice.query_devices(self.stream.device)["name"]
+        except (sounddevice.PortAudioError, ValueError) as error:
+            self._close()
+            self.error = error
+            return False
         log.info("Listening on %s", name)
+        return True
 
-    def stop(self):
+    def _close(self):
         if self.stream is not None:
             self.stream.close()
             self.stream = None
+
+    def _keep_open(self):
+        """Reopens the microphone when it stops, until stopped."""
+        connected = self.stream is not None
+        if not connected:
+            log.warning("No microphone (%s), waiting for one", self.error)
+        while not self.stopped.is_set():
+            if self.stream is None:
+                if self._open():
+                    if not connected:
+                        connected = True
+                        self.loop.call_soon_threadsafe(
+                            self.recognizer.microphone_changed, True
+                        )
+                    continue
+                if connected:
+                    connected = False
+                    log.warning("The microphone went (%s), waiting for it", self.error)
+                    self.loop.call_soon_threadsafe(
+                        self.recognizer.microphone_changed, False
+                    )
+                self.stopped.wait(self.RETRY_SECONDS)
+                continue
+            self.stopped.wait(self.STALL_SECONDS / 4)
+            silent = time.monotonic() - self.heard
+            if silent >= self.STALL_SECONDS:
+                # Reopened at once: if the microphone is still there, such
+                # as when the callback was only late, it only misses this.
+                log.info(
+                    "The microphone sent no audio for %.1f s, reopening it", silent
+                )
+                self._close()

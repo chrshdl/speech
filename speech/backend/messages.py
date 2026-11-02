@@ -69,6 +69,9 @@ class CaptureEndReason(enum.StrEnum):
     # The client dismissed the capture's card while it listened, so it
     # ended at once, without an answer.
     CANCELLED = "CANCELLED"
+    # The service's microphone went while it listened, such as when it was
+    # unplugged.
+    NO_MICROPHONE = "NO_MICROPHONE"
     # The service failed, see its log.
     ERROR = "ERROR"
 
@@ -424,6 +427,19 @@ class ClearCard(Payload):
     card_id: str
 
 
+class MicrophoneChanged(Payload):
+    """
+    The service's microphone was plugged in, or went, such as when it was
+    unplugged. Without it the service hears nothing: start-capture answers
+    503 and the wake word is not heard, until it is plugged in again, which
+    the service notices by itself. Only with audio input from the
+    microphone, where the event stream also starts with it.
+    """
+
+    TOPIC = "Audio"
+    connected: bool
+
+
 class StartAudioStream(Payload):
     """
     Stream the capture's audio to the WebSocket at url, as binary
@@ -488,6 +504,7 @@ EVENTS = (
     ShowCard,
     ShowPopup,
     ClearCard,
+    MicrophoneChanged,
     StartAudioStream,
     StopAudioStream,
     Speak,
@@ -542,6 +559,9 @@ class State(CamelModel):
     playing: Card | None = None
     # The popup over the card shown, such as a VolumeCard, if any.
     popup: Card | None = None
+    # Whether the service's microphone is connected, see MicrophoneChanged.
+    # Always true with audio input from the client.
+    microphone: bool = True
 
 
 class Info(CamelModel):
