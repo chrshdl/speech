@@ -99,14 +99,19 @@ async def running(recognizer, microphone=None, radio=None):
 
 
 class Events:
-    def __init__(self, address):
-        """Collects the service's events, after its first, the state."""
+    def __init__(self, address, microphone=False):
+        """
+        Collects the service's events, after its first, the state, and with
+        a microphone, its second, whether it is connected.
+        """
         self.url = f"http://{address}/v1/events"
         self.queue = asyncio.Queue()
+        self.has_microphone = microphone
 
     async def __aenter__(self):
         self.task = asyncio.create_task(self._read())
         self.first = await self.next()
+        self.microphone = await self.next() if self.has_microphone else None
         return self
 
     async def __aexit__(self, *args):
@@ -181,7 +186,7 @@ async def service(recognizer, microphone=None, radio=None):
     """Serves the recognizer, subscribed to its events."""
     async with (
         running(recognizer, microphone, radio) as address,
-        Events(address) as events,
+        Events(address, recognizer.audio_input == AudioInputKind.MICROPHONE) as events,
         httpx.AsyncClient(base_url=f"http://{address}") as client,
     ):
         yield Service(address, events, client)
@@ -203,6 +208,7 @@ def test_info_and_state(model_path):
                 "card": None,
                 "playing": None,
                 "popup": None,
+                "microphone": True,
             }
             assert svc.events.first["payload"] == {
                 "state": "IDLE",
@@ -270,6 +276,7 @@ def test_hold_to_talk(model_path):
         "card": None,
         "playing": None,
         "popup": None,
+        "microphone": True,
     }
     ids = [e["id"] for e in events]
     assert ids == sorted(ids)
@@ -460,6 +467,121 @@ def test_microphone(model_path, monkeypatch):
     assert "StartAudioStream" not in actions(events)
     assert events[-1]["payload"]["reason"] == "STOP_CAPTURE"
     assert events[-1]["payload"]["text"]
+    assert microphone.stream is None
+
+
+class Speakerphone:
+    """
+    A USB microphone that can be unplugged and plugged in again: streams
+    open on it only while it is plugged in, and their callbacks stop when
+    it is unplugged, as PortAudio's do.
+    """
+
+    def __init__(self, plugged=True):
+        self.plugged = plugged
+        self.opened = 0
+        # While set, the callbacks are late, as under load.
+        self.late = threading.Event()
+
+    def stream(self, *args, **kwargs):
+        if not self.plugged:
+            raise engine.sounddevice.PortAudioError("Error querying device -1")
+        stream = FakeInputStream(*args, **kwargs)
+        callback = stream.callback
+
+        def deliver(*args):
+            if self.plugged and not self.late.is_set():
+                callback(*args)
+
+        stream.callback = deliver
+        self.opened += 1
+        return stream
+
+
+@pytest.fixture
+def speakerphone(monkeypatch):
+    phone = Speakerphone()
+    monkeypatch.setattr(engine.sounddevice, "InputStream", phone.stream)
+    monkeypatch.setattr(engine.sounddevice, "query_devices", lambda d: {"name": "fake"})
+    monkeypatch.setattr(engine.sounddevice, "_terminate", lambda: None)
+    monkeypatch.setattr(engine.sounddevice, "_initialize", lambda: None)
+    monkeypatch.setattr(Microphone, "STALL_SECONDS", 0.2)
+    monkeypatch.setattr(Microphone, "RETRY_SECONDS", 0.05)
+    return phone
+
+
+def test_without_a_microphone(model_path, speakerphone):
+    speakerphone.plugged = False
+    recognizer = make_recognizer(model_path, AudioInputKind.MICROPHONE)
+
+    async def run():
+        async with service(recognizer, Microphone(recognizer)) as svc:
+            # The service starts all the same, and says it has no microphone.
+            missing = svc.events.microphone
+            state = await svc.get("/v1/state")
+            start = await svc.post(
+                "/v1/recognition/start-capture", {"initiator": "TAP_TO_TALK"}
+            )
+            # It notices the microphone plugged in, and then listens.
+            speakerphone.plugged = True
+            plugged = await svc.events.next()
+            await svc.start("HOLD_TO_TALK")
+            await svc.events.until("TranscriptUpdated")
+            await svc.post("/v1/recognition/stop-capture")
+            await svc.events.until("CaptureFinished")
+            return missing, state, start, plugged
+
+    missing, state, start, plugged = asyncio.run(run())
+    assert missing["action"] == "MicrophoneChanged"
+    assert missing["payload"] == {"connected": False}
+    assert state["microphone"] is False
+    assert start.status_code == 503
+    assert start.json() == {"detail": "No microphone is connected."}
+    assert plugged["action"] == "MicrophoneChanged"
+    assert plugged["payload"] == {"connected": True}
+
+
+def test_microphone_unplugged_while_listening(model_path, speakerphone):
+    recognizer = make_recognizer(model_path, AudioInputKind.MICROPHONE)
+
+    async def run():
+        async with service(recognizer, Microphone(recognizer)) as svc:
+            connected = svc.events.microphone
+            await svc.start("TAP_TO_TALK")
+            await svc.events.until("TranscriptUpdated")
+            speakerphone.plugged = False
+            events = await svc.events.until("ShowCard", timeout=5)
+            while events[-1]["payload"]["card"]["type"] != "NoticeCard":
+                events += await svc.events.until("ShowCard")
+            return connected, events, await svc.get("/v1/state")
+
+    connected, events, state = asyncio.run(run())
+    assert connected["payload"] == {"connected": True}
+    assert "MicrophoneChanged" in actions(events)
+    finished = [e for e in events if e["action"] == "CaptureFinished"]
+    assert finished[0]["payload"]["reason"] == "NO_MICROPHONE"
+    # Also with what it heard before, which it cut short.
+    assert events[-1]["payload"]["card"]["title"] == "No microphone"
+    assert state["microphone"] is False
+
+
+def test_late_microphone_is_reopened_quietly(model_path, speakerphone):
+    recognizer = make_recognizer(model_path, AudioInputKind.MICROPHONE)
+    microphone = Microphone(recognizer)
+
+    async def run():
+        async with service(recognizer, microphone) as svc:
+            speakerphone.late.set()
+            while speakerphone.opened < 2:
+                await asyncio.sleep(0.05)
+            speakerphone.late.clear()
+            # Still connected, so no event says otherwise.
+            with pytest.raises(TimeoutError):
+                await svc.events.next(timeout=0.5)
+            return await svc.get("/v1/state")
+
+    state = asyncio.run(run())
+    assert state["microphone"] is True
     assert microphone.stream is None
 
 
@@ -935,6 +1057,7 @@ def test_commands():
         "card": None,
         "playing": None,
         "popup": None,
+        "microphone": True,
     }
     # Each command had a transcript of its own: 0.4 seconds of it, the
     # pause after it that ended it, and before it, what was left of the

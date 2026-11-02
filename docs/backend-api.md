@@ -59,7 +59,11 @@ with a language model. Show a listening indicator from the state.
 starts, see `/v1/info`:
 
 - `MICROPHONE`: the microphone of the device the service runs on. The
-  client only starts and stops captures.
+  client only starts and stops captures. The service starts also without
+  one, and notices when one is plugged in, and when it goes, such as a USB
+  speakerphone unplugged, see `Audio.MicrophoneChanged`. Without it,
+  start-capture answers `503`, the wake word is not heard, and a capture
+  listening when it goes ends with `NO_MICROPHONE`.
 - `CLIENT`: the client streams each capture's audio over a WebSocket, as
   16 bit little-endian mono samples at the model's sample rate, see
   [Audio streaming](#audio-streaming).
@@ -71,9 +75,9 @@ All bodies are JSON with camelCase names.
 | Request | Response |
 |---|---|
 | `GET /v1/info` | The model, its sample rate, the audio input and the language model |
-| `GET /v1/state` | The dialog state, the capture, the card shown, the card that plays on beneath it, `playing`, such as a `RadioCard`, or null, and the `popup` over them, such as a `VolumeCard`, or null |
+| `GET /v1/state` | The dialog state, the capture, the card shown, the card that plays on beneath it, `playing`, such as a `RadioCard`, or null, the `popup` over them, such as a `VolumeCard`, or null, and whether the `microphone` is connected, always true with audio input from the client |
 | `GET /v1/events` | The event stream, see [Events](#events) |
-| `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts |
+| `POST /v1/recognition/start-capture` `{"initiator": "TAP_TO_TALK"}` | `202` `{"dialogRequestId": "…", "audioStream": {…} or null}`, `409` unless `IDLE`, `422` for `COMMANDS` if the service recognizes none, and for `WAKE_WORD`, which only the wake word starts, `503` while the service's microphone is not connected |
 | `POST /v1/recognition/stop-capture` `{"dialogRequestId": "…"}`, the body optional | `202` `{"dialogRequestId": "…"}`, `409` unless `LISTENING` to that capture |
 | `POST /v1/display/card-dismissed` `{"cardId": "…"}` | `204`, `409` if that card is neither shown nor plays beneath the card shown. The card of the capture listening ends it, see [Display cards](#display-cards) |
 | `POST /v1/intents/{intent}` | The card that answers the intent, such as `PlayKeyboard`, as if it was heard, without slots, also shown in a `ShowCard` event, or null for an intent that shows none, such as `StopRadio`; `404` for an intent the service does not answer, `409` unless `IDLE`. For a button, such as the client's that opens the keyboard |
@@ -103,8 +107,9 @@ data: {"id": 42, "topic": "Recognition", "action": "CaptureFinished", "timestamp
 ```
 
 The `id` grows by one with each message. The stream starts with the
-dialog state, the card that plays on beneath the card shown, if any, and
-the card shown, if any, so a client that connects or reconnects can draw
+dialog state, with audio input from the microphone whether it is
+connected, the card that plays on beneath the card shown, if any, and the
+card shown, if any, so a client that connects or reconnects can draw
 the screen from them. A client that reconnects should also drop a card it
 showed, and stop what it played, that `GET /v1/state` no longer has, as
 after the service restarted. It sends a keep-alive comment
@@ -123,6 +128,7 @@ when there are no events for a while.
 | `Display.ClearCard` | `cardId` | Dismiss the card, or the popup, with the id |
 | `Audio.StartAudioStream` | `streamId`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Stream the capture's audio, with audio input from the client |
 | `Audio.StopAudioStream` | `streamId` | Stop streaming |
+| `Audio.MicrophoneChanged` | `connected` | The service's microphone was plugged in, or went, such as when it was unplugged. With audio input from the microphone only. |
 | `Speech.Speak` | `speechId`, `cardId`, `text`, `url`, `sampleRate`, `encoding` (`LINEAR16`), `channels` (1) | Speak the answer on the card, see [Speech](#speech) |
 | `Speech.StopSpeaking` | `speechId` | Stop playing the speech |
 
@@ -135,6 +141,7 @@ when there are no events for a while.
 | `NO_SPEECH` | A `TAP_TO_TALK` capture recognized no speech in time |
 | `NO_WAKE_WORD` | The speech model did not confirm the wake word of a `WAKE_WORD` capture, which was heard by mistake. It ends without a card. |
 | `CANCELLED` | The client dismissed the capture's card while it listened. It ends at once, without an answer. |
+| `NO_MICROPHONE` | The service's microphone went while it listened, such as when it was unplugged. It ends at once, with a `NoticeCard` that says so. |
 | `MAX_DURATION` | It reached the longest duration |
 | `AUDIO_TIMEOUT` | No audio arrived in time |
 | `ERROR` | The service failed, see its log |
@@ -629,7 +636,10 @@ service's microphone, but not while a game listens for its commands. The
 model ignores the chime that the microphone picks up. The button shows the dialog state,
 glowing with the loudness while listening and its rainbow ring spinning
 while listening and thinking, and the page shows the cards the service
-sends, for which the unicorn steps aside. A round button with keys in the
+sends, for which the unicorn steps aside. While the service's microphone
+is not connected, its icon is faint with a pink badge, the status beside
+it says "Connect a microphone", and a tap only shakes the status. A round
+button with keys in the
 lower right corner, as big as the microphone button, opens the
 synthesizer's keyboard, with `POST /v1/intents/PlayKeyboard`, for a child
 who would rather press than ask, and a round drum in the lower left

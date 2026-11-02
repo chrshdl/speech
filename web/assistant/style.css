@@ -262,6 +262,45 @@ body[data-connection="offline"] .mic {
   cursor: not-allowed;
 }
 
+/* Without the service's microphone, such as a USB speakerphone unplugged,
+   the icon is faint with a badge, as the Wi-Fi button's when offline, and
+   the status beside it says to connect one, shaking at a tap. */
+.mic-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  border: 3px solid #ffffff;
+  border-radius: 50%;
+  background: var(--pink);
+  scale: 0;
+  transition: scale 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.mic-badge::after {
+  content: "!";
+  position: absolute;
+  inset: -2px 0 0;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 21px;
+  text-align: center;
+}
+
+body[data-microphone="missing"] .mic-icon {
+  color: #ddd0f2;
+}
+
+body[data-microphone="missing"] .mic-badge {
+  scale: 1;
+}
+
+.status.refused {
+  animation: refused 400ms ease;
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);

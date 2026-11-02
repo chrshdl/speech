@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic.json_schema import models_json_schema
 
 from speech.backend import d50
-from speech.backend.engine import Busy, Unsupported
+from speech.backend.engine import Busy, NoMicrophone, Unsupported
 from speech.backend.messages import (
     EVENTS,
     Card,
@@ -106,8 +106,8 @@ def create_app(
     @app.get("/v1/state")
     async def state() -> State:
         """
-        The dialog state, the card shown, the card that plays on, and the
-        popup over them.
+        The dialog state, the card shown, the card that plays on, the
+        popup over them, and whether the microphone is connected.
         """
         capture = recognizer.capture
         return State(
@@ -116,6 +116,7 @@ def create_app(
             card=recognizer.card,
             playing=recognizer.playing,
             popup=recognizer.popup,
+            microphone=recognizer.microphone_connected,
         )
 
     @app.get("/v1/events", response_class=EventSourceResponse)
@@ -123,7 +124,8 @@ def create_app(
         """
         Server-sent events, one per message, named topic.action, with a
         Message as data. The payload schema is named after the action. The
-        stream starts with the dialog state and the card shown, if any.
+        stream starts with the dialog state, whether the microphone is
+        connected, with audio input from it, and the card shown, if any.
         """
         with recognizer.bus.subscribe(recognizer.snapshot()) as queue:
             while (message := await queue.get()) is not None:
@@ -141,6 +143,7 @@ def create_app(
                 "description": "COMMANDS, and the service recognizes none, or "
                 "WAKE_WORD, which only the wake word starts"
             },
+            503: {"description": "The microphone is not connected"},
         },
     )
     async def start_capture(request: StartCaptureRequest) -> StartCaptureResponse:
@@ -158,6 +161,10 @@ def create_app(
         except Unsupported as error:
             raise HTTPException(
                 status.HTTP_422_UNPROCESSABLE_CONTENT, str(error)
+            ) from None
+        except NoMicrophone as error:
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, str(error)
             ) from None
         audio_stream = None
         if capture.stream_id is not None:

@@ -61,6 +61,9 @@ let listening = null; // The id of the capture listening, if any.
 let mistaken = null;
 let restarts = []; // When listening for commands restarted by itself.
 let wifi = null; // Joining a Wi-Fi network, where the service can, see wifi.js.
+// Whether the service's microphone is connected, with audio input from it.
+let microphone = true;
+const CONNECT_MICROPHONE = "Connect a microphone";
 
 // The landing page.
 
@@ -179,6 +182,7 @@ function connectEvents() {
     }
   });
   on("Audio.StopAudioStream", () => stopAudio());
+  on("Audio.MicrophoneChanged", ({ connected }) => setMicrophone(connected));
   on("Speech.Speak", (speech) => speak(speech));
   on("Speech.StopSpeaking", ({ speechId }) => stopSpeaking(speechId));
 }
@@ -1040,7 +1044,14 @@ function endGame() {
 // Listens for the game's commands while it needs them, also again when the
 // capture ended by itself, unless that keeps happening.
 async function listenForCommands() {
-  if (!game || !game.play.listening || commands || dialogState !== "IDLE" || starting) {
+  if (
+    !game ||
+    !game.play.listening ||
+    commands ||
+    dialogState !== "IDLE" ||
+    starting ||
+    !microphone
+  ) {
     return;
   }
   const now = Date.now();
@@ -1296,6 +1307,28 @@ function endDrums() {
 
 // Capturing.
 
+// The service's microphone, such as a USB speakerphone, which can be
+// unplugged and plugged in again. Without it, the button and the status say
+// so, and taps start no capture.
+function setMicrophone(connected) {
+  microphone = connected;
+  document.body.dataset.microphone = connected ? "connected" : "missing";
+  if (!connected) {
+    setStatus(CONNECT_MICROPHONE);
+  } else if (ui.status.textContent === CONNECT_MICROPHONE) {
+    setStatus("");
+  }
+  listenForCommands();
+}
+
+// A tap that cannot start a capture shakes the status, which says why.
+function refuseCapture() {
+  ui.status.classList.remove("refused");
+  // Starts the animation again, also on the next tap while it runs.
+  void ui.status.offsetWidth;
+  ui.status.classList.add("refused");
+}
+
 async function toggleCapture() {
   unlockTones();
   if (document.body.dataset.connection !== "online" || starting) {
@@ -1317,6 +1350,10 @@ async function toggleCapture() {
   if (dialogState === "LISTENING") {
     stopCapture();
   } else if (dialogState === "IDLE") {
+    if (!microphone) {
+      refuseCapture();
+      return;
+    }
     await startCapture("TAP_TO_TALK");
   }
 }
@@ -1345,7 +1382,8 @@ async function startCapture(initiator) {
     if (!response.ok) {
       chimed = false;
       stopAudio();
-      if (response.status !== 409) {
+      // 409: busy; 503: no microphone, which the status already says.
+      if (response.status !== 409 && response.status !== 503) {
         setStatus("Could not start listening.");
       }
       return;
