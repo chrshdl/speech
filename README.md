@@ -800,7 +800,8 @@ radio". With `--voice` and a
 weather, see [Speech](docs/backend-api.md#speech).
 At http://127.0.0.1:8080 it serves a client with a landing page and a
 microphone button. See [docs/backend-api.md](docs/backend-api.md) for the
-API, and `deploy/speech-backend.service` to start it with the Pi. With
+API, and `deploy/speech-backend.service` to start it with the Pi, and
+[Architecture](#architecture) for how its parts work together. With
 `--wifi-interface wlan0` the client can also join a Wi-Fi network from the
 screen, see [Wi-Fi](docs/backend-api.md#wi-fi). With `--volume-control
 usbaudio:PCM` it turns the speaker up and down when asked, as in "volume
@@ -817,8 +818,237 @@ See [examples/olivia](examples/olivia/README.md) for the model, a DS-CNN
 of [Hello Edge], and [Wake word](docs/backend-api.md#wake-word) for the
 API.
 
+### Using the app in the browser
+
+The app has two parts: the backend, `backend.py`, which runs the
+recognizer and the HTTP API, and the frontend, the page in
+`web/assistant`. The backend serves the page itself, so there is no
+separate frontend server and no build step. To try it on the machine you
+work on:
+
+1. Export a streaming CTC model to ONNX, if you have not yet, see
+   [Raspberry Pi](#raspberry-pi):
+   ```
+   uv run export.py examples/commonvoice/models/ctc_streaming_3750h_stride3_epoch2 --last
+   ```
+   It exports the model saved in that folder, chosen by the flag, and
+   writes it next to it, as it prints:
+   - No flag: the best on the dev set, `best_model`, to `best_model-int8.onnx`
+   - `--last`: the last saved, `model`, to `model-int8.onnx`
+   - `--epoch N`: the one after epoch N, `model_epoch_N`, to `model_epoch_N-int8.onnx`
+2. Start the backend with the exported model, and an LM if you have one,
+   taking the audio from the browser's microphone:
+   ```
+   uv run backend.py examples/commonvoice/models/ctc_streaming_3750h_stride3_epoch2/model-int8.onnx \
+       --lm lm.npz --audio-input client
+   ```
+   It is ready when it prints `Uvicorn running on http://127.0.0.1:8080`.
+3. Open http://127.0.0.1:8080 and allow the page to use the microphone.
+4. Tap the microphone button in the upper right corner, or press Space,
+   and speak. The transcript shows as you speak, and the capture ends at
+   a pause. Try:
+   - "what's the weather in hamburg?", which shows a card with the
+     forecast from [Open-Meteo](https://open-meteo.com), so the backend
+     needs internet for it. To also hear it, start the backend with
+     `--voice voices/en_US-kristin-medium.onnx`, a voice downloaded with
+     `uv run python -m piper.download_voices --download-dir voices
+     en_US-kristin-medium`.
+   - "play superball", and then "left" and "right" to steer the unicorn,
+     or the arrow keys. Tap the microphone button to end the game.
+   - "play snake", and then "up", "down", "left" and "right" to lead the
+     snake to the apples, or the arrow keys. Every 3 apples the next level
+     adds walls.
+5. Stop the backend with Ctrl+C.
+
+Tips:
+
+- **Microphone.** Without `--audio-input client` the backend listens to
+  the microphone of the machine it runs on, and the page only starts and
+  stops captures, as on a Pi with its own microphone and screen.
+  Browsers only allow the microphone on `localhost`, `127.0.0.1` or over
+  HTTPS, so a page opened from another device, with `--host 0.0.0.0`,
+  works only with the backend's microphone.
+- **Intents.** The default `--intent-threshold` suits the 3,750 hour
+  model. For the 100 hour model, whose output is less confident, use
+  `--intent-threshold -2`.
+- **Port.** If another program listens on port 8080, such as a Docker
+  container on `localhost`, open `127.0.0.1` rather than `localhost`, or
+  pick another port with `--port`.
+- **API.** The interactive API reference is at
+  http://127.0.0.1:8080/docs, and the page itself is described in
+  [The browser client](docs/backend-api.md#the-browser-client).
+
 [ONNX Runtime]: https://onnxruntime.ai
 [Hello Edge]: https://arxiv.org/abs/1711.07128
+
+## Architecture
+
+The system has two halves. A machine with a GPU, or a Mac, trains the
+models and exports them. A Raspberry Pi with a microphone, a speaker and
+a screen runs them as the voice assistant, with ONNX Runtime and NumPy.
+
+```mermaid
+flowchart LR
+    subgraph training ["GPU training machine"]
+        train["train.py"] --> export["export.py"] --> asr["best_model-int8.onnx"]
+        word_lm["speech.models.word_lm"] --> lm["lm.npz, tuned with tune_lm.py"]
+        olivia["examples/olivia/train.py"] --> kws["wake word .onnx"]
+        silero["Silero VAD, downloaded"] --> vad["silero_vad.onnx"]
+    end
+    subgraph pi ["Raspberry Pi"]
+        mic(["Microphone"]) --> backend["backend.py, the service"]
+        backend <-->|"HTTP, events, audio"| client["web/assistant, the client"]
+        client --> out(["Screen and speaker"])
+    end
+    asr --> backend
+    lm --> backend
+    kws --> backend
+    vad --> backend
+```
+
+### The life of a request: From the wake word to the answer
+
+The microphone's audio takes three paths through `Recognizer.deliver`:
+always to the lookback ring buffer of the last 2 seconds, while `IDLE`
+to the wake word detector, and while `LISTENING` to the capture. Asked
+"olivia, what's the weather in hamburg?":
+
+```mermaid
+sequenceDiagram
+    participant Mic as Microphone
+    participant Rec as Recognizer
+    participant Ring as Lookback ring buffer
+    participant Det as Wake word detector
+    participant Cap as Capture, transcriber and VAD
+    participant Ans as Intents and handler
+    participant Cli as Client
+
+    loop every 100 ms while IDLE
+        Mic->>Rec: deliver(chunk)
+        Rec->>Ring: write(chunk)
+        Rec->>Det: push(chunk)
+    end
+    Det-->>Rec: heard "olivia", often before it ends
+    Rec->>Ring: read() the last 2 s
+    Rec->>Cap: start a WAKE_WORD capture with them
+    Rec-->>Cli: LISTENING and the "Listening…" card
+    Cap->>Cap: transcribe the 2 s, faster than real time
+    loop every 100 ms while LISTENING
+        Mic->>Rec: deliver(chunk)
+        Rec->>Ring: write(chunk)
+        Rec->>Cap: the chunk
+    end
+    Cap->>Cap: after 1 s more, align the wake word to the output
+    alt score below -2, heard by mistake
+        Cap-->>Cli: CaptureFinished NO_WAKE_WORD, the card cleared
+    else it says the wake word
+        Cap->>Cap: drop the frames up to the end of the wake word
+        Cap-->>Cli: TranscriptUpdated "what's the weather in hamburg"
+        Cap->>Rec: a pause of 1 s, the end of speech
+        Rec-->>Cli: THINKING
+        Rec->>Cap: flush the lookahead, the LM scores the end
+        Rec->>Ans: match the final output
+        Ans-->>Rec: weather, city hamburg, and its WeatherCard
+        Rec-->>Cli: CaptureFinished, IntentRecognized, the card, Speak
+        Rec-->>Cli: IDLE
+    end
+```
+
+1. **Spotting.** While `IDLE`, a task feeds the audio to the wake word
+   detector. With `--vad` it is a `GatedDetector`, which runs the DS-CNN
+   only while the VAD hears speech, so other sounds do not set it off and
+   silence costs no compute. The VAD hears speech start only after a few
+   frames, so the gate keeps its own 1 second ring buffer, and the new
+   DS-CNN starts with it, the start of "olivia" included.
+2. **Starting the capture.** When the detector hears the wake word, the
+   recognizer starts a `WAKE_WORD` capture with the 2 seconds of the
+   lookback ring buffer, and goes `LISTENING`, so the client chimes and
+   shows "Listening…" at once. The transcriber takes the ring buffer
+   first and then the live audio as it arrives, which queues meanwhile,
+   and catches up as it runs faster than real time.
+3. **Confirming.** Once 1 second of audio after the detection has
+   arrived, which holds the end of the wake word and the frames the
+   model's lookahead holds back, the speech model's output is aligned to
+   the wake word's characters. Below a score of -2 the detector heard it
+   by mistake: the capture ends with `NO_WAKE_WORD`, quietly, without a
+   notice. Otherwise the transcriber drops the frames up to the end of
+   the wake word, so the transcript and the intent start after it.
+4. **Listening.** The transcript goes out with each change, as
+   `TranscriptUpdated` events and the transcript card. A pause of 1
+   second after speech, heard by the VAD or else by the transcript's
+   pauses, ends the capture. If nothing is said after the wake word, it
+   ends with `NO_SPEECH`, quietly.
+5. **Answering.** In `THINKING` the transcriber flushes the frames held
+   back for the lookahead and lets the LM score the end of the sentence.
+   The intent recognizer matches the final output, the intent's handler
+   returns its card, the recognizer shows it, the voice speaks it, and the
+   recognizer goes `IDLE`. Without an intent the card shows the transcript.
+
+#### Audio ring buffer
+
+The wake word detector looks at one second of audio at a time and
+fires once it has seen most of the word. By then the wake word has already
+begun and the user may already be saying the request, as in "olivia
+what's the weather". A capture that started only at that moment would
+miss both: the wake word, which the speech model needs to confirm the
+detection and the first words of the request.
+
+So the recognizer always keeps the last 2 seconds of the microphone's
+audio in a ring buffer, set with `--wake-word-lookback`. When the
+detector fires, the new capture starts with what the buffer holds, so no
+audio is lost between hearing the wake word and transcribing.
+
+During a capture the detector gets no audio. Afterwards it starts over,
+and waits until its one second window holds only new audio before it
+decides again.
+
+#### While the radio plays
+
+A speakerphone's echo canceller, such as a Jabra SPEAK 510's, removes the
+radio from the microphone's audio, but distorts a voice over it, which
+the DS-CNN then hardly hears as the wake word. While a card plays on,
+and with `--vad`, the recognizer swaps in a second `GatedDetector` that
+runs the speech model itself: a `SpeechModelDetector` aligns the wake
+word to the model's output of the last 1.5 seconds every 0.2 seconds.
+It costs as much compute as transcribing, which the gate limits to when
+someone speaks. See [examples/olivia](examples/olivia/README.md).
+
+### Components
+
+| Component | Where | What it does |
+|---|---|---|
+| Speech model | `speech/streaming.py` | The streaming CTC model, exported to int8 ONNX. A `Transcriber` takes audio chunk by chunk, keeps the model's output probabilities and decodes them greedily or with the beam search and the word LM. |
+| Wake word model | `speech/wake_word.py` | A DS-CNN of [Hello Edge] on MFCCs. Its `Detector` classifies the last second of audio every 100 ms as silence, other speech or "olivia", and hears the wake word when the average of the last 3 decisions reaches 0.8. |
+| Voice activity detector | `speech/vad.py` | Silero VAD, which gives the probability of speech of each 32 ms frame. Speech starts when 7 of the last 10 frames are speech and ends when at most 3 are. |
+| Intent recognizer | `speech/intents.py` | Aligns the speech model's output to the sample sentences of each intent, with slots such as the city, rather than comparing the transcript, so a misspelled transcript still matches. Its streaming form matches a game's commands as they are said. |
+| Recognizer | `speech/backend/engine.py` | The engine. It owns the dialog state, `IDLE`, `LISTENING` or `THINKING`, runs one capture at a time, spots the wake word, and publishes events and cards on its `EventBus`. |
+| Microphone | `speech/backend/engine.py` | Reads the Pi's microphone with PortAudio in 100 ms chunks of 16 bit samples and hands each to the recognizer on the event loop. It reopens the stream when no audio came for a second, such as a USB speakerphone unplugged, and looks for a microphone every second while there is none, so the service also starts and runs without one; clients learn of it from `Audio.MicrophoneChanged`. |
+| Handlers | `speech/backend/*.py` | Answer one intent each with a display card: `weather.py`, the games in `game.py` and `snake.py`, `keyboard.py`, `drums.py`, `radio.py`, `songs.py`, `brightness.py` and `volume.py`. A card that plays on, such as the radio's, keeps updating beneath the cards shown over it. |
+| Voice | `speech/backend/voice.py` | Speaks answers, such as the weather, with Piper, sentence by sentence as each is synthesized. |
+| HTTP API | `speech/backend/app.py` | FastAPI: REST to start and stop captures, server-sent events on `/v1/events`, a WebSocket per capture for the client's audio, and the files of the client. See [docs/backend-api.md](docs/backend-api.md). |
+| Client | `web/assistant` | Plain JavaScript without a build step, served by the backend. It shows the cards from the events, chimes as captures start and end, runs the games, and plays speech and the radio with Web Audio. On the Pi a WPE WebKit kiosk shows it. |
+
+All the state lives on one asyncio event loop: the recognizer, the
+endpoints and the handlers. The models' compute runs in worker threads
+with `asyncio.to_thread`, so the loop keeps taking audio and serving
+requests while they run. Each step takes all the audio queued since the
+last one, so a slow step never builds a delay.
+
+### Other captures
+
+- **Tap to talk.** The client's microphone button, or Space, starts a
+  `TAP_TO_TALK` capture, which ends at a pause. Without a wake word it
+  takes the same path from step 4. The API also has `HOLD_TO_TALK`, for
+  a client whose button is held while speaking, which ends at
+  stop-capture.
+- **Commands.** A game's card has the client start a `COMMANDS` capture,
+  which matches each word, such as "left", as it is said, and publishes
+  it in a `CommandRecognized` event at once, rather than after a pause.
+  It runs until the client stops it, and answers no intent. See
+  [Commands](docs/backend-api.md#commands).
+- **Audio from the client.** With `--audio-input client`, the client
+  streams each capture's audio over a WebSocket instead, such as from a
+  laptop's browser. The wake word needs the device's own microphone.
 
 ## Examples
 
