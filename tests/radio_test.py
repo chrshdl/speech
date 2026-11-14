@@ -18,6 +18,8 @@ BLANK = len(LABELS)
 ARTWORK = "https://is1-ssl.mzstatic.com/image/thumb/Music/a.jpg/100x100bb.jpg"
 COVER = "https://is1-ssl.mzstatic.com/image/thumb/Music/a.jpg/600x600bb.jpg"
 IMAGE = {"content-type": "image/jpeg"}
+# The channel the station's stream plays, as it says.
+CHANNEL = "srtl_irmzapntyh_nlx5"
 
 
 def image(player, path):
@@ -31,9 +33,11 @@ def now(artist, song, kind="now"):
     return json.dumps({"type": kind, "artist": artist, "song": song, "cover": ""})
 
 
-def client(requests, playing=("Anton", "Halb so schlimm"), found=None):
+def client(requests, playing=("Anton", "Halb so schlimm"), found=None, tuned=CHANNEL):
     """
-    An httpx client that answers like streamABC, with what plays, and like
+    An httpx client that answers like the station, whose address redirects
+    to the stream of the channel tuned, which says its key, or fails with
+    the status tuned if an int, like streamABC, with what plays, and like
     iTunes, with the songs found, recording the requests.
     """
     if found is None:
@@ -47,6 +51,14 @@ def client(requests, playing=("Anton", "Halb so schlimm"), found=None):
 
     def handle(request):
         requests.append(request)
+        if request.url.host == "radio.toggo.de":
+            if isinstance(tuned, int):
+                return httpx.Response(tuned)
+            location = "https://superrtl.streamabc.net/srtl-weihnachten-mp3-192"
+            return httpx.Response(302, headers={"location": location})
+        if request.url.host == "superrtl.streamabc.net":
+            headers = {radio.CHANNEL_HEADER: tuned} if tuned else {}
+            return httpx.Response(200, content=b"\xff\xfb" * 1000, headers=headers)
         if request.url.path.endswith((".jpg", ".png")):
             return httpx.Response(
                 200, content=b"image " + str(request.url).encode(), headers=IMAGE
@@ -115,10 +127,40 @@ def test_card():
     # The client fetches the images through the service.
     assert image(player, card.logo) == radio.TOGGO.logo
     assert image(player, card.cover) == COVER
-    assert str(requests[0].url) == (
-        "https://api.streamabc.net/metadata/channel/srtl_skr4dfdxk6_xndd.json"
+    # What plays on the channel the station's stream says it plays.
+    assert [str(r.url) for r in requests[:3]] == [
+        "https://radio.toggo.de/",
+        "https://superrtl.streamabc.net/srtl-weihnachten-mp3-192",
+        f"https://api.streamabc.net/metadata/channel/{CHANNEL}.json",
+    ]
+    assert requests[3].url.params["term"] == "Anton Halb so schlimm"
+    assert player.channel == CHANNEL
+
+
+@pytest.mark.parametrize("tuned", [503, None])
+def test_card_when_the_channel_is_unknown(tuned):
+    """
+    When the stream fails, or does not say what it plays, the card shows no
+    song, and the radio still plays.
+    """
+    requests = []
+
+    async def run():
+        player = radio.Radio(client=client(requests, tuned=tuned))
+        card = await player.card("abc", {})
+        await player.close()
+        return player, card
+
+    player, card = asyncio.run(run())
+    assert (card.title, card.song, card.artist, card.cover) == (
+        "TOGGO Radio",
+        "",
+        "",
+        None,
     )
-    assert requests[1].url.params["term"] == "Anton Halb so schlimm"
+    assert card.url == "/v1/radio/stream"
+    assert player.channel is None
+    assert "api.streamabc.net" not in [r.url.host for r in requests]
 
 
 @pytest.mark.parametrize(
@@ -250,12 +292,44 @@ def test_updates(monkeypatch):
         return cards
 
     hey, between = asyncio.run(run())
-    assert (
-        socket.urls
-        == ["wss://api.streamabc.net/metadata/channel/srtl_skr4dfdxk6_xndd"] * 3
-    )
+    assert socket.urls == [f"wss://api.streamabc.net/metadata/channel/{CHANNEL}"] * 3
     assert (hey.id, hey.artist, hey.song) == ("abc", "Bea", "Hey")
     assert (between.id, between.song, between.cover) == ("abc", "", None)
+
+
+def test_updates_find_the_channel(monkeypatch):
+    """
+    When the card could not find the channel playing, the updates find it,
+    trying again while they cannot.
+    """
+    monkeypatch.setattr(radio, "RETRY_SECONDS", 0.01)
+    socket = FakeWebSocket([now("Anton", "Halb so schlimm")])
+    tries = []
+
+    async def run():
+        player = radio.Radio(client=client([], tuned=503), websocket=socket)
+        card = await player.card("abc", {})
+        failing = player.tune
+
+        async def tune():
+            tries.append(None)
+            if len(tries) < 3:
+                return await failing()
+            await player.client.aclose()
+            player.client = client([])
+            return await failing()
+
+        player.tune = tune
+        updates = player.updates(card)
+        update = await asyncio.wait_for(anext(updates), 5)
+        await updates.aclose()
+        await player.close()
+        return update
+
+    update = asyncio.run(run())
+    assert len(tries) == 3
+    assert socket.urls == [f"wss://api.streamabc.net/metadata/channel/{CHANNEL}"]
+    assert (update.artist, update.song) == ("Anton", "Halb so schlimm")
 
 
 @pytest.mark.parametrize(
@@ -331,7 +405,7 @@ def wave_file(path, seconds=1.0, rate=22050):
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs ffmpeg")
 def test_stream_decodes_with_ffmpeg(tmp_path):
     """The station's audio, decoded to 16 bit stereo at 44.1 kHz."""
-    station = radio.Station("Test", wave_file(tmp_path / "station.wav"), "key", "logo")
+    station = radio.Station("Test", wave_file(tmp_path / "station.wav"), "logo")
 
     async def run():
         player = radio.Radio(station, client=client([]))
