@@ -14,9 +14,13 @@ rest, and no codecs: on the Pi, WPE WebKit cannot fetch HTTPS, and its
 media elements play to an ALSA device of their own, which Web Audio holds
 already. It fetches the logo and the covers through the service, too.
 
-The station's stream, channel key and logo are those of the channel list
-of toggo.de's own player,
-https://ccstatic.toggo.de/cc-static-files/Webchannels/Webchannel_streams3.json.
+The station's stream is the one radio.toggo.de's own page plays, to which
+its address redirects: the channel TOGGO features, such as its Christmas
+channel in the season. The main channel of the list of toggo.de's player,
+https://ccstatic.toggo.de/cc-static-files/Webchannels/Webchannel_streams3.json,
+went silent in November 2026, sending digital silence, while the page
+played on. The stream says which channel it plays, and so what to follow
+at streamABC.
 """
 
 import asyncio
@@ -75,17 +79,14 @@ INTENTS = (PLAY, STOP)
 @dataclasses.dataclass(frozen=True)
 class Station:
     name: str
-    # The MP3 stream.
+    # The MP3 stream, which may redirect to the channel playing.
     url: str
-    # The station's key at streamABC, for what plays.
-    channel: str
     logo: str
 
 
 TOGGO = Station(
     name="TOGGO Radio",
-    url="https://radio.toggo.de/live/mp3-192/radio.toggo.de/",
-    channel="srtl_skr4dfdxk6_xndd",
+    url="https://radio.toggo.de/",
     logo="https://staging-api.toggo.de/cc-static-files/Webchannels/"
     "webchannels%20-%20radio@3x1.png",
 )
@@ -112,6 +113,8 @@ MAX_IMAGES = 16
 
 # What plays on a streamABC channel: the song now, as JSON at the URL with
 # .json, and pushed to the WebSocket at it with wss: as each song starts.
+# The stream names its channel's key in the header.
+CHANNEL_HEADER = "X-Audalaxy-Channelkey"
 METADATA_URL = "https://api.streamabc.net/metadata/channel/{channel}"
 ITUNES_URL = "https://itunes.apple.com/search"
 # The size of the covers, in pixels, which iTunes scales its artwork to.
@@ -151,6 +154,8 @@ class Radio:
         self.client = client or httpx.AsyncClient(timeout=5)
         self.websocket = websocket
         self.ffmpeg = ffmpeg
+        # The key at streamABC of the channel the stream plays, once known.
+        self.channel = None
         # The cover of each song looked up, or None, by artist and song.
         self.covers = {}
         # The URL of each image the cards show, by its key, and the last
@@ -165,29 +170,55 @@ class Radio:
         The card that plays the station, with the song playing, or without
         one when the station does not say.
         """
-        try:
-            response = await self.client.get(
-                METADATA_URL.format(channel=self.station.channel) + ".json"
-            )
-            response.raise_for_status()
-            now = response.json()
-        except (httpx.HTTPError, ValueError) as error:
-            log.warning("Could not get what %s plays: %s", self.station.name, error)
-            now = {}
+        now = {}
+        if await self.tune() is not None:
+            try:
+                response = await self.client.get(
+                    METADATA_URL.format(channel=self.channel) + ".json"
+                )
+                response.raise_for_status()
+                now = response.json()
+            except (httpx.HTTPError, ValueError) as error:
+                log.warning("Could not get what %s plays: %s", self.station.name, error)
         return await self._card(card_id, now)
+
+    async def tune(self):
+        """
+        The key at streamABC of the channel the station's stream plays, as
+        the stream says, which it connects to for that only, or None if it
+        cannot.
+        """
+        try:
+            async with self.client.stream(
+                "GET", self.station.url, follow_redirects=True
+            ) as response:
+                response.raise_for_status()
+                channel = response.headers.get(CHANNEL_HEADER)
+        except httpx.HTTPError as error:
+            log.warning("Could not tune in to %s: %s", self.station.name, error)
+            return None
+        if not channel:
+            log.warning("%s does not say what it plays.", self.station.name)
+            return None
+        self.channel = channel
+        return channel
 
     async def updates(self, card):
         """
         Yields the card again, with the same id, each time another song
         plays, until closed, connecting to the WebSocket again after it
-        failed.
+        failed, and finding the channel playing first, if the card could
+        not.
         """
-        url = METADATA_URL.format(channel=self.station.channel).replace(
-            "https:", "wss:"
-        )
         playing = (card.artist, card.song)
         retry = RETRY_SECONDS
         while True:
+            channel = self.channel or await self.tune()
+            if channel is None:
+                await asyncio.sleep(retry)
+                retry = min(2 * retry, MAX_RETRY_SECONDS)
+                continue
+            url = METADATA_URL.format(channel=channel).replace("https:", "wss:")
             try:
                 async with self.websocket(url) as messages:
                     async for message in messages:
