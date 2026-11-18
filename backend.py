@@ -21,6 +21,7 @@ from speech.backend import (
     radio,
     snake,
     songs,
+    tic_tac_toe,
     voice,
     volume,
     weather,
@@ -35,7 +36,14 @@ from speech.models.word_lm import LM_WEIGHT, UNK_PENALTY, WORD_BONUS
 log = logging.getLogger(__name__)
 
 # What the service answers.
-INTENTS = [weather.INTENT, game.INTENT, snake.INTENT, keyboard.INTENT, drums.INTENT]
+INTENTS = [
+    weather.INTENT,
+    game.INTENT,
+    snake.INTENT,
+    tic_tac_toe.INTENT,
+    keyboard.INTENT,
+    drums.INTENT,
+]
 
 
 def main(args):
@@ -92,6 +100,7 @@ def main(args):
             weather.INTENT.name: weather.Weather(args.weather_location),
             game.INTENT.name: game.Game(),
             snake.INTENT.name: snake.Snake(),
+            tic_tac_toe.INTENT.name: tic_tac_toe.TicTacToe(),
             keyboard.INTENT.name: keyboard.Keyboard(),
             drums.INTENT.name: drums.Drums(),
             **(station.handlers if station is not None else {}),

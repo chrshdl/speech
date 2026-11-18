@@ -83,6 +83,20 @@
       </svg>
     </button>
 
+    <!-- Opens Tic Tac Toe, as asking for it does, between the drums and the
+         keyboard. Only on the landing page. -->
+    <button class="ttt-open" id="ttt-open" type="button" aria-label="Tic Tac Toe" title="Tic Tac Toe">
+      <span class="ttt-open-ring" aria-hidden="true"></span>
+      <!-- A board filling the button, with an O and two X in a row. -->
+      <svg class="ttt-open-face" viewBox="0 0 100 100" aria-hidden="true">
+        <rect width="100" height="100" fill="#ffffff" />
+        <path class="ttt-open-grid" d="M37 4V96M63 4V96M4 37H96M4 63H96" />
+        <path class="ttt-open-x" d="M42 42L58 58M58 42L42 58M16 16L30 30M30 16L16 30" />
+        <circle class="ttt-open-o" cx="76" cy="50" r="8.5" />
+        <circle class="ttt-open-o" cx="50" cy="76" r="8.5" />
+      </svg>
+    </button>
+
     <main>
       <!-- The landing page: a meadow with a rainbow and a unicorn, drawn on a
            1600 by 900 grid that fills the screen, by day or by night. What
@@ -567,6 +581,52 @@
           </g>
         </svg>
       </section>
+      <!-- Tic Tac Toe, played by tic_tac_toe.js: its name and the rounds each
+           player won, the one whose turn it is lit, with the button that
+           closes it, and the board, on a 900 by 900 grid of cells of 300,
+           with the marks, the rainbow that strikes three in a row, and the
+           ink being drawn. -->
+      <section class="ttt" id="ttt" hidden>
+        <div class="ttt-hud">
+          <svg class="ttt-hud-icon" viewBox="0 0 32 32" aria-hidden="true">
+            <path d="M12 3V29M20 3V29M3 12H29M3 20H29" />
+          </svg>
+          <span class="ttt-title" id="ttt-title"></span>
+          <span class="ttt-player x" data-mark="X" aria-label="Rounds X won">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 8L24 24M24 8L8 24" /></svg>
+            <span class="ttt-player-score">0</span>
+          </span>
+          <span class="ttt-player o" data-mark="O" aria-label="Rounds O won">
+            <svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="9" /></svg>
+            <span class="ttt-player-score">0</span>
+          </span>
+          <button class="card-close" id="ttt-close" type="button" aria-label="Close">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+          </button>
+        </div>
+        <div class="ttt-field">
+          <svg class="ttt-board" viewBox="0 0 900 900" role="group" aria-label="Board">
+            <defs>
+              <linearGradient id="ttt-rainbow" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#ff6b6b" />
+                <stop offset="0.2" stop-color="#ffa94d" />
+                <stop offset="0.4" stop-color="#ffd93d" />
+                <stop offset="0.6" stop-color="#6bd88f" />
+                <stop offset="0.8" stop-color="#5cc0ff" />
+                <stop offset="1" stop-color="#b18cff" />
+              </linearGradient>
+            </defs>
+            <path class="ttt-grid" d="M300 40V860M600 40V860M40 300H860M40 600H860" />
+            <g class="ttt-marks"></g>
+            <line class="ttt-strike" pathLength="1" />
+            <g class="ttt-ink-layer"></g>
+          </svg>
+          <div class="game-banner" aria-live="polite" hidden>
+            <p class="game-banner-title"></p>
+            <p class="game-banner-text"></p>
+          </div>
+        </div>
+      </section>
     </main>
 
     <!-- Joining a Wi-Fi network: pick one, type its password on the
@@ -669,6 +729,7 @@
     <script src="snake.js"></script>
     <script src="keyboard.js"></script>
     <script src="drums.js"></script>
+    <script src="tic_tac_toe.js"></script>
     <script src="wifi.js"></script>
     <script src="app.js"></script>
   </body>

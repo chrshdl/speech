@@ -167,7 +167,8 @@ body {
 
 .mic,
 .keys-open,
-.drums-open {
+.drums-open,
+.ttt-open {
   position: relative;
   display: grid;
   place-items: center;
@@ -193,19 +194,22 @@ body {
 
 .mic:hover,
 .keys-open:hover,
-.drums-open:hover {
+.drums-open:hover,
+.ttt-open:hover {
   transform: scale(1.05);
 }
 
 .mic:active,
 .keys-open:active,
-.drums-open:active {
+.drums-open:active,
+.ttt-open:active {
   transform: scale(0.94);
 }
 
 .mic:focus-visible,
 .keys-open:focus-visible,
-.drums-open:focus-visible {
+.drums-open:focus-visible,
+.ttt-open:focus-visible {
   outline: 4px solid var(--pink);
   outline-offset: 6px;
 }
@@ -229,7 +233,8 @@ body {
 /* A rainbow ring around the button, which spins while listening. */
 .mic-ring,
 .keys-open-ring,
-.drums-open-ring {
+.drums-open-ring,
+.ttt-open-ring {
   position: absolute;
   inset: -7px;
   border-radius: 50%;
@@ -308,11 +313,12 @@ body[data-microphone="missing"] .mic-badge {
 }
 
 /* The buttons that open the synthesizer's keyboard, in the lower right
-   corner, and the drums, in the lower left, as round as the microphone
-   button, on the landing page only: not over a card, the keyboard, the
-   drums, a game, or while the service listens. */
+   corner, the drums, in the lower left, and Tic Tac Toe, between them, as
+   round as the microphone button, on the landing page only: not over a
+   card, the keyboard, the drums, a game, or while the service listens. */
 .keys-open,
-.drums-open {
+.drums-open,
+.ttt-open {
   position: fixed;
   right: 20px;
   bottom: 20px;
@@ -328,27 +334,34 @@ body[data-microphone="missing"] .mic-badge {
   left: 20px;
 }
 
-body.has-card :is(.keys-open, .drums-open),
-body.keyboard :is(.keys-open, .drums-open),
-body.drums :is(.keys-open, .drums-open),
-body.playing :is(.keys-open, .drums-open),
-body.snake :is(.keys-open, .drums-open),
-body:not([data-state="IDLE"]) :is(.keys-open, .drums-open) {
+.ttt-open {
+  right: auto;
+  left: calc(50% - var(--mic) / 2);
+}
+
+body.has-card :is(.keys-open, .drums-open, .ttt-open),
+body.keyboard :is(.keys-open, .drums-open, .ttt-open),
+body.drums :is(.keys-open, .drums-open, .ttt-open),
+body.playing :is(.keys-open, .drums-open, .ttt-open),
+body.snake :is(.keys-open, .drums-open, .ttt-open),
+body.tictactoe :is(.keys-open, .drums-open, .ttt-open),
+body:not([data-state="IDLE"]) :is(.keys-open, .drums-open, .ttt-open) {
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
 }
 
-body[data-connection="connecting"] :is(.keys-open, .drums-open),
-body[data-connection="offline"] :is(.keys-open, .drums-open) {
+body[data-connection="connecting"] :is(.keys-open, .drums-open, .ttt-open),
+body[data-connection="offline"] :is(.keys-open, .drums-open, .ttt-open) {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
-/* The keys, or the drum, fill the button, cut round, under the lip the
-   microphone button has. */
+/* The keys, the drum, or the board fill the button, cut round, under the
+   lip the microphone button has. */
 .keys-open::after,
-.drums-open::after {
+.drums-open::after,
+.ttt-open::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -358,7 +371,8 @@ body[data-connection="offline"] :is(.keys-open, .drums-open) {
 }
 
 .keys-open-face,
-.drums-open-face {
+.drums-open-face,
+.ttt-open-face {
   position: relative;
   width: 100%;
   height: 100%;
@@ -378,6 +392,25 @@ body[data-connection="offline"] :is(.keys-open, .drums-open) {
   stroke: #d9a066;
   stroke-width: 7;
   stroke-linecap: round;
+}
+
+.ttt-open-grid {
+  stroke: var(--faint);
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.ttt-open-x {
+  fill: none;
+  stroke: #ff5fa2;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.ttt-open-o {
+  fill: none;
+  stroke: #4dabf7;
+  stroke-width: 6;
 }
 
 /* The landing page. */
@@ -691,7 +724,8 @@ body.has-card .bubble {
 }
 
 body.has-card .step-aside,
-body.drums .step-aside {
+body.drums .step-aside,
+body.tictactoe .step-aside {
   translate: calc(300 * var(--u)) 0;
 }
 
@@ -1321,7 +1355,8 @@ body.keyboard .bubble {
 
 .keys-hud,
 .drums-hud,
-.snake-hud {
+.snake-hud,
+.ttt-hud {
   position: absolute;
   top: 34px;
   left: 50%;
@@ -1346,7 +1381,8 @@ body.keyboard .bubble {
 }
 
 .keys-title,
-.drums-title {
+.drums-title,
+.ttt-title {
   color: var(--purple);
   font-size: 24px;
   font-weight: 600;
@@ -1354,7 +1390,8 @@ body.keyboard .bubble {
 
 .keys-hud .card-close,
 .drums-hud .card-close,
-.snake-hud .card-close {
+.snake-hud .card-close,
+.ttt-hud .card-close {
   margin: 0;
 }
 
@@ -2214,6 +2251,240 @@ body.snake .bubble {
   }
 }
 
+/* Tic Tac Toe: its name and the rounds each player won above, the one
+   whose turn it is lit, and the board below, as large as fits, ringed in
+   the color of whose turn it is. */
+
+body.tictactoe .greeting-text,
+body.tictactoe .bubble {
+  opacity: 0;
+}
+
+.ttt {
+  --x: #ff5fa2;
+  --x-light: #ffd6e8;
+  --o: #339af0;
+  --o-light: #d0ebff;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.ttt[hidden] {
+  display: none;
+}
+
+.ttt-hud-icon {
+  width: 28px;
+  height: 28px;
+  fill: none;
+  stroke: var(--pink);
+  stroke-width: 3.5;
+  stroke-linecap: round;
+}
+
+.ttt-player {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 14px 4px 8px;
+  border-radius: 999px;
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  transition:
+    background-color 200ms ease,
+    box-shadow 200ms ease,
+    scale 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ttt-player svg {
+  width: 30px;
+  height: 30px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 4.5;
+  stroke-linecap: round;
+}
+
+.ttt-player.x svg {
+  color: var(--x);
+}
+
+.ttt-player.o svg {
+  color: var(--o);
+}
+
+.ttt-player.x.turn {
+  background: var(--x-light);
+  box-shadow: inset 0 0 0 3px var(--x);
+  scale: 1.08;
+}
+
+.ttt-player.o.turn {
+  background: var(--o-light);
+  box-shadow: inset 0 0 0 3px var(--o);
+  scale: 1.08;
+}
+
+.ttt-player.won {
+  animation: ttt-won 500ms ease 2;
+}
+
+/* The board's square as large as fits its field. */
+.ttt-field {
+  position: absolute;
+  top: 110px;
+  right: 24px;
+  bottom: 20px;
+  left: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  container-type: size;
+}
+
+/* Ringed rather than bordered, so the board's box is its drawing's, which
+   tic_tac_toe.js maps the pointer to. */
+.ttt-board {
+  flex: none;
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  border-radius: 36px;
+  background: var(--card);
+  box-shadow:
+    0 0 0 6px var(--card-border),
+    0 14px 36px rgba(139, 92, 246, 0.25);
+  pointer-events: auto;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: box-shadow 250ms ease;
+  animation: card-in 380ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.ttt-board[data-turn="X"] {
+  box-shadow:
+    0 0 0 6px var(--x-light),
+    0 14px 36px rgba(255, 95, 162, 0.25);
+}
+
+.ttt-board[data-turn="O"] {
+  box-shadow:
+    0 0 0 6px var(--o-light),
+    0 14px 36px rgba(51, 154, 240, 0.25);
+}
+
+.ttt-grid {
+  fill: none;
+  stroke: var(--faint);
+  stroke-width: 14;
+  stroke-linecap: round;
+}
+
+.ttt-board .x {
+  color: var(--x);
+}
+
+.ttt-board .o {
+  color: var(--o);
+}
+
+.ttt-ink {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--ink, 26px);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* A stroke that draws nothing fades, and one on a taken cell shakes as it
+   does. */
+.ttt-stroke.fading {
+  animation: ttt-fade 400ms ease forwards;
+}
+
+.ttt-stroke.refused {
+  animation:
+    refused 400ms ease,
+    ttt-fade 400ms ease forwards;
+}
+
+@keyframes ttt-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+/* The marks of three in a row bounce, around their cells. */
+.ttt-mark.won {
+  animation: ttt-won 500ms ease 3;
+}
+
+@keyframes ttt-won {
+  50% {
+    scale: 1.15;
+  }
+}
+
+/* The rainbow draws itself through three in a row. */
+.ttt-strike {
+  stroke: url(#ttt-rainbow);
+  stroke-width: 36;
+  stroke-linecap: round;
+  stroke-dasharray: 1 2;
+  stroke-dashoffset: 1;
+  visibility: hidden;
+}
+
+.ttt-strike.struck {
+  visibility: visible;
+  animation: ttt-strike 500ms ease-out forwards;
+}
+
+@keyframes ttt-strike {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* The result over the board, which a tap passes through to start the next
+   round. */
+.ttt-field .game-banner {
+  top: 50%;
+  max-width: calc(100% - 32px);
+  pointer-events: none;
+}
+
+.ttt-field .game-banner.x .game-banner-title {
+  color: var(--x);
+}
+
+.ttt-field .game-banner.o .game-banner-title {
+  color: var(--o);
+}
+
+.ttt-field .game-banner.tie .game-banner-title {
+  color: var(--purple);
+}
+
+@media (max-height: 600px) {
+  .ttt-field {
+    top: 100px;
+    bottom: 14px;
+  }
+}
+
+/* On a phone the name would not fit beside the score, so only its icon
+   shows. */
+@media (max-width: 480px) {
+  .ttt-title {
+    display: none;
+  }
+}
+
 /* The Wi-Fi button: full arcs when a network is joined, pulsing while one
    is joined, and faint with a badge when offline. */
 .wifi-button {
@@ -2915,8 +3186,13 @@ body.snake .bubble {
   .game-hud,
   .keys-hud,
   .drums-hud,
-  .snake-hud {
+  .snake-hud,
+  .ttt-hud {
     top: 112px;
+  }
+
+  .ttt-field {
+    top: 184px;
   }
 
   .popup {

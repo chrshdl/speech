@@ -36,6 +36,10 @@ const ui = {
   drumsKit: $("drums-kit"),
   drumsClose: $("drums-close"),
   drumsOpen: $("drums-open"),
+  ttt: $("ttt"),
+  tttTitle: $("ttt-title"),
+  tttClose: $("ttt-close"),
+  tttOpen: $("ttt-open"),
   popup: $("popup"),
 };
 
@@ -52,6 +56,7 @@ let heard = null; // The final transcript of the last capture, by its id.
 let game = null; // The game being played, Superball or Snake, and the id of its card.
 let keyboard = null; // The synthesizer's keyboard shown, and the id of its card.
 let drums = null; // The drums shown, and the id of their card.
+let ticTacToe = null; // The Tic Tac Toe being played, and the id of its card.
 let commands = null; // The id of the capture that hears the game's commands.
 let lastCommands = null; // The last such id, also once that capture finished.
 let startingCommands = false; // Whether such a capture is being started.
@@ -340,15 +345,20 @@ function showCard(data) {
     startDrums(data);
     return;
   }
+  if (data.type === "TicTacToeCard") {
+    startTicTacToe(data);
+    return;
+  }
   const render = RENDERERS[data.type];
   if (!render) {
     return; // A card type this client does not know.
   }
   // Another card, such as the answer to a question, ends the game, or
-  // closes the keyboard or the drums.
+  // closes the keyboard, the drums or Tic Tac Toe.
   endGame();
   endKeyboard();
   endDrums();
+  endTicTacToe();
   // A card with the id of the card shown updates it in place.
   const fresh = !card || card.data.id !== data.id || card.data.type !== data.type;
   if (fresh) {
@@ -445,6 +455,10 @@ function hideCard() {
   }
   if (data.type === "DrumsCard") {
     endDrums();
+    return;
+  }
+  if (data.type === "TicTacToeCard") {
+    endTicTacToe();
     return;
   }
   if (data.type === "SongCard") {
@@ -1305,6 +1319,52 @@ function endDrums() {
   idleTones();
 }
 
+// Tic Tac Toe, see tic_tac_toe.js: its card shows the board, on which the
+// players draw their marks, round after round, until it is closed. A mark
+// done chimes in the player's note, and the end of a round with a fanfare,
+// or for a tie a falling pair.
+
+const MARK_TONES = {
+  X: { notes: [783.99], volume: 0.22 }, // G5.
+  O: { notes: [659.25], volume: 0.22 }, // E5.
+};
+const WIN_TONE = { notes: [523.25, 659.25, 783.99, 1046.5], volume: 0.26 }; // C5 E5 G5 C6.
+const TIE_TONE = { notes: [659.25, 523.25], volume: 0.22 }; // E5, then C5.
+
+function startTicTacToe(data) {
+  if (ticTacToe && ticTacToe.id === data.id) {
+    return;
+  }
+  hideCard();
+  card = { data, element: null };
+  ui.tttTitle.textContent = data.title;
+  const play = new TicTacToe({
+    root: ui.ttt,
+    onMark: (mark) => playTone(MARK_TONES[mark]),
+    onEnd: (result) => playTone(result.tie ? TIE_TONE : WIN_TONE),
+  });
+  ticTacToe = { id: data.id, play };
+  play.start();
+}
+
+// The board's button asks the service for Tic Tac Toe, as asking for it by
+// voice does, and its tap allows sound, so the first mark chimes.
+function openTicTacToe() {
+  unlockTones();
+  if (document.body.dataset.connection !== "online") {
+    return;
+  }
+  post("/v1/intents/PlayTicTacToe").catch(() => {});
+}
+
+function endTicTacToe() {
+  if (!ticTacToe) {
+    return;
+  }
+  ticTacToe.play.destroy();
+  ticTacToe = null;
+}
+
 // Capturing.
 
 // The service's microphone, such as a USB speakerphone, which can be
@@ -1343,8 +1403,9 @@ async function toggleCapture() {
     }
     dismissCard();
   }
-  if (keyboard || drums) {
-    // The button closes the keyboard or the drums, to ask something else.
+  if (keyboard || drums || ticTacToe) {
+    // The button closes the keyboard, the drums or Tic Tac Toe, to ask
+    // something else.
     dismissCard();
   }
   if (dialogState === "LISTENING") {
@@ -1520,6 +1581,7 @@ async function start() {
   ui.mic.addEventListener("click", toggleCapture);
   ui.keysOpen.addEventListener("click", openKeyboard);
   ui.drumsOpen.addEventListener("click", openDrums);
+  ui.tttOpen.addEventListener("click", openTicTacToe);
   ui.steerLeft.addEventListener("click", () => steer("LEFT"));
   ui.steerRight.addEventListener("click", () => steer("RIGHT"));
   // Also on lifting, as a click may not come: WPE WebKit makes none while
@@ -1528,6 +1590,8 @@ async function start() {
   ui.keysClose.addEventListener("click", () => dismissCard());
   ui.drumsClose.addEventListener("pointerup", () => dismissCard());
   ui.drumsClose.addEventListener("click", () => dismissCard());
+  ui.tttClose.addEventListener("pointerup", () => dismissCard());
+  ui.tttClose.addEventListener("click", () => dismissCard());
   ui.snakeClose.addEventListener("pointerup", () => dismissCard());
   ui.snakeClose.addEventListener("click", () => dismissCard());
   // The snake turns on touching, at once, as a voice command would.

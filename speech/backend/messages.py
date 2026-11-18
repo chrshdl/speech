@@ -223,6 +223,20 @@ class DrumsCard(CamelModel):
     title: str
 
 
+class TicTacToeCard(CamelModel):
+    """
+    Play Tic Tac Toe: the client shows a board of 3 by 3, on which two
+    players take turns to draw their X or O with a finger, and counts the
+    rounds each won. The card stays until the user closes it, or another
+    card replaces it.
+    """
+
+    UNTIL_DISMISSED: ClassVar[bool] = True
+    type: Literal["TicTacToeCard"] = "TicTacToeCard"
+    id: str
+    title: str
+
+
 class RadioCard(CamelModel):
     """
     Play a web radio station: the client streams its audio from url, 16 bit
@@ -320,6 +334,7 @@ Card = Annotated[
     | SongCard
     | KeyboardCard
     | DrumsCard
+    | TicTacToeCard
     | RadioCard
     | BrightnessCard
     | VolumeCard,
