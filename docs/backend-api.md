@@ -9,7 +9,9 @@ recognizes the intent and shows the answer, see [Intents](#intents). The
 client renders what the service tells it, and the service decides what to
 show and for how long. Asked to "play superball", it starts a game, which
 the user steers by saying "left" and "right", and asked to "play snake",
-one steered also with "up" and "down", see [Commands](#commands).
+one steered also with "up" and "down", see [Commands](#commands), and
+asked to "play tic tac toe", a board on which two players draw their X or
+O with a finger.
 
 The service also serves a client at `/`: a landing page with a
 microphone button, see [The browser client](#the-browser-client).
@@ -173,6 +175,7 @@ card has a `type` and an `id`, the capture's `dialogRequestId`:
 | `RadioCard` | `title`, `url`, `sampleRate`, `channels`, `encoding` (`LINEAR16`), `logo`, `song`, `artist`, `cover` | Play the web radio station `title`, whose audio streams from `url`, `GET /v1/radio/stream`, and show what plays: the `song` and its `artist`, empty when the station does not say, and the song's `cover`, an image, or else the station's `logo`, both from `GET /v1/radio/images/{key}`. The service updates it, with the same id, as each song starts. It plays on beneath the cards shown over it, see below, until the user closes it or asks to stop it, when the service clears it, or another card that stays until dismissed, such as a `SongCard`, replaces it. |
 | `KeyboardCard` | `title`, `patch`, `url` | Show a keyboard that plays the Roland D-50 patch at `url`, titled with its name. It stays until the user closes it, or another card replaces it. |
 | `DrumsCard` | `title` | Show a drum kit to tap, which plays recordings of its own. It stays until the user closes it, or another card replaces it. |
+| `TicTacToeCard` | `title` | Play Tic Tac Toe: show a board of 3 by 3, on which two players take turns to draw their X or O with a finger, round after round, counting the rounds each won. It stays until the user closes it, or another card replaces it. |
 | `SongCard` | `title`, `url`, `seconds`, `loop` | Play the song whose notes are at `url`, which lasts `seconds`, over and over with `loop`. It stays until the client dismisses it when the song has played, or for a loop when the user closes it, or another card replaces it. |
 | `WeatherCard` | `location`, `condition`, `description`, `isDay`, `temperature`, `feelsLike`, `humidity`, `windSpeed`, `days`, `temperatureUnit`, `windSpeedUnit` | The current weather and the forecast. `condition` is one of `CLEAR`, `PARTLY_CLOUDY`, `CLOUDY`, `FOG`, `DRIZZLE`, `RAIN`, `SNOW` and `THUNDERSTORM`, and `days` lists the `date`, `condition`, `high` and `low` of today and the next three days. A day's condition is how its daylight hours look: rainy or snowy if 0.5 mm or more falls in two or more of them, light rain below 1 mm, and otherwise clear, partly cloudy or cloudy by its sunshine. |
 
@@ -187,8 +190,8 @@ The lifecycle of a capture's card:
    was recognized or no audio arrived.
 4. 8 seconds later the service sends `ClearCard`, or 30 seconds later
    for an answer, which takes longer to read, but never for a `GameCard`,
-   a `SnakeCard`, a `SongCard`, a `KeyboardCard`, a `DrumsCard` or a
-   `RadioCard`. A new
+   a `SnakeCard`, a `SongCard`, a `KeyboardCard`, a `DrumsCard`, a
+   `TicTacToeCard` or a `RadioCard`. A new
    capture replaces the card sooner, except a `COMMANDS` capture, which
    shows no cards. An answer that is a popup, such as a `VolumeCard`,
    clears the capture's card at once instead, see [Popups](#popups).
@@ -267,6 +270,7 @@ does not match.
 | `VolumeUp`, `VolumeDown` | A `VolumeCard`, having turned the speaker up or down a step, such as "volume up", "turn it down", "louder" or "quieter", never to silence, so an answer can still be heard. With `--volume-control`, see below. Its `percent` is of the device's levels: a Jabra SPEAK 510 has 12, which its dots show, so 1 dot is 8%. Its control's 12 values reach only 8 of them (1, 2, 3, 4, 6, 7, 10 and 12 dots), so asking turns to the next of those. When the speakerphone's own + and - turn it a level, the service shows that too, in a `VolumeCard` for the intent `ShowVolume`, except while it listens, and keeps it: they turn the volume themselves without telling ALSA's driver, so the service counts the presses, see `speech/backend/volume.py`. That needs the service's user in the group `input` |
 | `PlayKeyboard` | A `KeyboardCard` of the synthesizer's keyboard, playing Fantasia, such as "play the synthesizer" or "keyboard" |
 | `PlayDrums` | A `DrumsCard` of the drums, such as "play the drums" or "drum kit" |
+| `PlayTicTacToe` | A `TicTacToeCard`, such as "play tic tac toe" or "noughts and crosses" |
 | `PlayRadio` | A `RadioCard` of TOGGO Radio, the children's station of Super RTL, such as "play toggo radio", "play webradio" or "turn on the radio". The song playing is pushed by the station's host, streamABC, and its cover is looked up with the iTunes Search API, preferring a release without a Parental Advisory label, see `speech/backend/radio.py`. Needs ffmpeg, without which the service does not recognize it, and internet, without which the station plays without its song. |
 | `StopRadio` | No card: stops the radio, clearing its card and the capture's, for the landing page, such as "stop the radio", "turn off the radio" or "stop" |
 | `PlaySong` | A `SongCard` of the song asked for by one of its names, such as "play twinkle twinkle", of the songs in `--songs`, see below |
@@ -643,8 +647,10 @@ button with keys in the
 lower right corner, as big as the microphone button, opens the
 synthesizer's keyboard, with `POST /v1/intents/PlayKeyboard`, for a child
 who would rather press than ask, and a round drum in the lower left
-corner opens the drums, with `POST /v1/intents/PlayDrums`; they show only
-on the landing page, with no card, game or capture. The drums are a kit
+corner opens the drums, with `POST /v1/intents/PlayDrums`, and a round
+board between them opens Tic Tac Toe, with `POST
+/v1/intents/PlayTicTacToe`; they show only on the landing page, with no
+card, game or capture. The drums are a kit
 of eight, a bass drum, a snare, three toms, a hi-hat, a crash and a ride,
 which a tap plays, also with several fingers at once. Their sounds are
 recordings, in `web/assistant/drums`, decoded once when the page loads,
@@ -689,6 +695,22 @@ then shows the apples eaten. "Play snake level three" starts with the
 walls of the first three levels. Tapping the microphone button ends it sooner, and the X
 beside the score at once. While playing, the page listens with a
 `COMMANDS` capture, see `web/assistant/snake.js`.
+
+Asked to "play tic tac toe", or from its button, it shows a board of 3 by
+3, as large as fits, on which two players take turns to draw their mark
+with a finger, X first and then who did not start the round before. The
+ink stays as drawn, pink for X and blue for O, in the cell under the
+middle of the stroke, and once the mark is done it is moved and scaled to
+fit its cell: an X with its second stroke, an O with its first, or a mark
+of one stroke fewer after a pause of 2 seconds. A stroke shorter than a
+fifth of a cell, such as a tap, draws nothing, one on a taken cell shakes
+and fades, and one finger draws at a time. The score above lights whose
+turn it is, as does the board's ring. A mark done chimes in the player's
+note. Three in a row win the round, which a rainbow strikes through, with
+a fanfare, and when every cell is taken it is a tie; the board clears for
+the next round 5 seconds later, or at a tap. The rounds each player won
+count until the X beside the score closes it, or the microphone button,
+see `web/assistant/tic_tac_toe.js`.
 
 Asked to "play toggo radio", it plays TOGGO Radio and shows the song
 playing, its artist and cover, which change as each song starts. The radio

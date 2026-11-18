@@ -793,7 +793,8 @@ audio the client streams. It recognizes intents in what is said, such as
 "what's the weather in hamburg?", and shows the answer, a card with the
 weather, and asked to "play superball", it starts a game steered by
 saying "left" and "right", and asked to "play snake", one steered also
-with "up" and "down". Asked to "play toggo radio", it plays TOGGO
+with "up" and "down", and asked to "play tic tac toe", a board for two
+players to draw their X or O on with a finger. Asked to "play toggo radio", it plays TOGGO
 Radio with the song playing and its cover, until asked to "stop the
 radio". With `--voice` and a
 [Piper](https://github.com/OHF-Voice/piper1-gpl) voice it also says the
@@ -858,6 +859,9 @@ work on:
    - "play snake", and then "up", "down", "left" and "right" to lead the
      snake to the apples, or the arrow keys. Every 3 apples the next level
      adds walls.
+   - "play tic tac toe", or tap the board at the bottom of the landing
+     page, and take turns to draw an X or an O in a cell with a finger,
+     or the mouse.
 5. Stop the backend with Ctrl+C.
 
 Tips:
@@ -1023,7 +1027,7 @@ someone speaks. See [examples/olivia](examples/olivia/README.md).
 | Intent recognizer | `speech/intents.py` | Aligns the speech model's output to the sample sentences of each intent, with slots such as the city, rather than comparing the transcript, so a misspelled transcript still matches. Its streaming form matches a game's commands as they are said. |
 | Recognizer | `speech/backend/engine.py` | The engine. It owns the dialog state, `IDLE`, `LISTENING` or `THINKING`, runs one capture at a time, spots the wake word, and publishes events and cards on its `EventBus`. |
 | Microphone | `speech/backend/engine.py` | Reads the Pi's microphone with PortAudio in 100 ms chunks of 16 bit samples and hands each to the recognizer on the event loop. It reopens the stream when no audio came for a second, such as a USB speakerphone unplugged, and looks for a microphone every second while there is none, so the service also starts and runs without one; clients learn of it from `Audio.MicrophoneChanged`. |
-| Handlers | `speech/backend/*.py` | Answer one intent each with a display card: `weather.py`, the games in `game.py` and `snake.py`, `keyboard.py`, `drums.py`, `radio.py`, `songs.py`, `brightness.py` and `volume.py`. A card that plays on, such as the radio's, keeps updating beneath the cards shown over it. |
+| Handlers | `speech/backend/*.py` | Answer one intent each with a display card: `weather.py`, the games in `game.py`, `snake.py` and `tic_tac_toe.py`, `keyboard.py`, `drums.py`, `radio.py`, `songs.py`, `brightness.py` and `volume.py`. A card that plays on, such as the radio's, keeps updating beneath the cards shown over it. |
 | Voice | `speech/backend/voice.py` | Speaks answers, such as the weather, with Piper, sentence by sentence as each is synthesized. |
 | HTTP API | `speech/backend/app.py` | FastAPI: REST to start and stop captures, server-sent events on `/v1/events`, a WebSocket per capture for the client's audio, and the files of the client. See [docs/backend-api.md](docs/backend-api.md). |
 | Client | `web/assistant` | Plain JavaScript without a build step, served by the backend. It shows the cards from the events, chimes as captures start and end, runs the games, and plays speech and the radio with Web Audio. On the Pi a WPE WebKit kiosk shows it. |
